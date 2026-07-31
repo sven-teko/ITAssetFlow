@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Environment
+.env
+
+# Virtual Environment
+.venv/
+venv/
+
+# Build / EXE
+build/
+dist/
+*.spec
