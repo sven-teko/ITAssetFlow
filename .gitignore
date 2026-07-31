@@ -1,15 +1,15 @@
+# Environment
+.env
+
 # Python
 __pycache__/
 *.pyc
 
-# Environment
-.env
-
-# Virtual Environment
+# Virtual environment
 .venv/
 venv/
 
-# Build / EXE
+# Builds
 build/
 dist/
 *.spec

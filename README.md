@@ -1,27 +1,27 @@
 # AssetFlow IT
 
-AssetFlow IT ist eine Desktop-Anwendung zur Verwaltung und Nachverfolgung von IT-Inventar.
+AssetFlow IT is a desktop application for managing and tracking IT inventory.
 
-Die Anwendung soll verschiedene IT-Materialien wie beispielsweise Computer, Kassen, Kameras, Netzwerkgeräte, Monitore und Zubehör übersichtlich verwalten.
+The application is intended to manage various types of IT equipment such as computers, POS systems, cameras, network devices, monitors, accessories, and spare parts.
 
-## Ziel
+## Goal
 
-Ziel ist eine einfache, zentrale und mehrbenutzerfähige Lösung für die Verwaltung von IT-Inventar und Materialbewegungen.
+The goal is to provide a simple, centralized, and multi-user solution for managing IT inventory and material movements.
 
-## Technologien
+## Technologies
 
 - Python
 - PySide6
 - Supabase
 - PostgreSQL
 
-## Aktueller Stand
+## Current Status
 
-Das Projekt befindet sich in der frühen Entwicklungsphase.
+The project is currently in an early development stage.
 
-Aktuell wird die grundlegende Projektstruktur sowie die grafische Benutzeroberfläche aufgebaut.
+The basic project structure and graphical user interface are being developed.
 
-## Start
+## Run
 
 ```bash
 python src/main.py
