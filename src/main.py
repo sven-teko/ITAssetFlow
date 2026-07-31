@@ -17,7 +17,9 @@ def main() -> None:
     logger.info("Starting AssetFlow IT...")
 
     app = QApplication(sys.argv)
+
     app.setApplicationName("AssetFlow IT")
+    app.setOrganizationName("DLC-Informatik GmbH")
 
     if test_connection():
         logger.info("Supabase is available.")
