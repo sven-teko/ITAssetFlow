@@ -8,8 +8,10 @@ from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
+    QCheckBox,
     QDockWidget,
+    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -37,6 +40,76 @@ class MainWindow(QMainWindow):
 
     ASSET_TABLE_NAME = "assets"
 
+    # Übergangslösung für die Gruppierung. Langfristig sollte diese
+    # Information als Feld in product_categories gespeichert werden.
+    DEVICE_CATEGORY_CODES = {
+        "barcode_scanner",
+        "desktop_pc",
+        "laptop",
+        "lcd_display",
+        "network_switch",
+        "phone",
+        "pos_terminal",
+        "printer",
+        "restaurant_pager",
+        "router",
+        "server",
+        "stereo_system",
+        "surveillance_camera",
+        "tablet",
+        "wifi_extender",
+    }
+
+    PERIPHERAL_CATEGORY_CODES = {
+        "cable",
+        "headset",
+        "keyboard",
+        "lamp",
+        "monitor",
+        "mouse",
+        "power_adapter",
+    }
+
+    COMPONENT_CATEGORY_CODES = {
+        "cpu",
+        "memory",
+        "ram",
+        "motherboard",
+        "power_supply",
+        "storage_drive",
+    }
+
+    CATEGORY_LABELS = {
+        "barcode_scanner": "Barcodescanner",
+        "cable": "Kabel",
+        "cpu": "Prozessoren",
+        "desktop_pc": "Computer",
+        "headset": "Headsets",
+        "keyboard": "Tastaturen",
+        "lamp": "Lampen",
+        "laptop": "Notebooks",
+        "lcd_display": "LCD-Anzeigen",
+        "memory": "Arbeitsspeicher",
+        "ram": "Arbeitsspeicher",
+        "monitor": "Monitore",
+        "motherboard": "Mainboards",
+        "mouse": "Mäuse",
+        "network_switch": "Switches",
+        "phone": "Telefone",
+        "pos_terminal": "Kassen",
+        "power_adapter": "Stromadapter",
+        "power_supply": "Netzteile",
+        "printer": "Drucker",
+        "restaurant_pager": "Restaurant-Pager",
+        "router": "Router",
+        "server": "Server",
+        "stereo_system": "Stereoanlagen",
+        "storage_drive": "Datenträger",
+        "surveillance_camera": "Überwachungskameras",
+        "tablet": "Tablets",
+        "wifi_extender": "WLAN-Extender",
+    }
+
     PREFERRED_COLUMN_ORDER = [
         "id",
         "asset_tag",
@@ -46,6 +119,11 @@ class MainWindow(QMainWindow):
         "serial_number",
         "product_model_name",
         "product_model_model_name",
+        "product_category_name",
+        "product_category_code",
+        "inventory_usage",
+        "installed_in",
+        "product_model_tracking_mode",
         "product_model_id",
         "status",
         "condition",
@@ -64,6 +142,9 @@ class MainWindow(QMainWindow):
         "serial_number",
         "product_model_name",
         "product_model_model_name",
+        "product_category_name",
+        "inventory_usage",
+        "installed_in",
         "status",
     }
 
@@ -80,6 +161,14 @@ class MainWindow(QMainWindow):
         "product_model_description": "Modellbeschreibung",
         "product_model_manufacturer_id": "Hersteller-ID",
         "product_model_category_id": "Kategorie-ID",
+        "product_category_id": "Kategorie-ID",
+        "product_category_name": "Produktkategorie",
+        "product_category_code": "Kategoriecode",
+        "product_category_inventory_group": "Inventartyp",
+        "product_model_tracking_mode": "Bestandsführung",
+        "inventory_usage": "Verwendung",
+        "installed_in": "Eingebaut in",
+        "installed_in_asset_id": "Eltern-Asset-ID",
         "status": "Status",
         "condition": "Zustand",
         "purchase_date": "Kaufdatum",
@@ -114,6 +203,7 @@ class MainWindow(QMainWindow):
 
         self.visible_columns: set[str] = set()
         self.column_visibility_initialized = False
+        self.category_checkboxes: dict[str, QCheckBox] = {}
         self.is_loading = False
 
         self.setWindowTitle("ITAssetFlow")
@@ -262,11 +352,24 @@ class MainWindow(QMainWindow):
             QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.asset_table.setSelectionMode(
-            QAbstractItemView.SelectionMode.SingleSelection
+            QAbstractItemView.SelectionMode.ExtendedSelection
         )
         self.asset_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
+        # Die horizontale Scrollleiste bleibt sichtbar. Sobald die
+        # Summe der Spaltenbreiten grösser als der Tabellenbereich ist,
+        # kann damit nach rechts gescrollt werden.
+        self.asset_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.asset_table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.asset_table.setHorizontalScrollMode(
+            QAbstractItemView.ScrollMode.ScrollPerPixel
+        )
+        self.asset_table.horizontalScrollBar().setSingleStep(30)
 
         self.asset_table.verticalHeader().setVisible(
             False
@@ -274,8 +377,9 @@ class MainWindow(QMainWindow):
 
         table_header = self.asset_table.horizontalHeader()
 
+        table_header.setObjectName("assetTableHeader")
         table_header.setHighlightSections(False)
-        table_header.setStretchLastSection(True)
+        table_header.setStretchLastSection(False)
         table_header.setMinimumSectionSize(80)
         table_header.setSectionResizeMode(
             QHeaderView.ResizeMode.Interactive
@@ -299,139 +403,125 @@ class MainWindow(QMainWindow):
         self.sidebar.setObjectName(
             "navigationSidebar"
         )
-
-        # Die Leiste darf nur links angedockt werden.
         self.sidebar.setAllowedAreas(
             Qt.DockWidgetArea.LeftDockWidgetArea
         )
-
-        # Kein DockWidgetClosable: kein Schließen-Kreuz.
         self.sidebar.setFeatures(
             QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
-
-        self.sidebar.setMinimumWidth(240)
+        self.sidebar.setMinimumWidth(260)
 
         sidebar_widget = QWidget()
-        sidebar_layout = QVBoxLayout(
-            sidebar_widget
-        )
-
-        sidebar_layout.setContentsMargins(
-            14,
-            14,
-            14,
-            14,
-        )
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_layout.setContentsMargins(14, 14, 14, 14)
         sidebar_layout.setSpacing(10)
 
-        search_title = QLabel(
-            "Inventar filtern"
-        )
-        search_title.setObjectName(
-            "sidebarTitle"
-        )
-
-        self.filter_field_combo = QComboBox()
-        self.filter_field_combo.addItem(
-            "Alle sichtbaren Spalten",
-            "all",
-        )
-        self.filter_field_combo.addItem(
-            "Name exakt",
-            "name",
-        )
+        search_title = QLabel("Inventar durchsuchen")
+        search_title.setObjectName("sidebarTitle")
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
-            "Suchbegriff eingeben ..."
+            "Alle sichtbaren Spalten durchsuchen ..."
         )
         self.search_input.setClearButtonEnabled(True)
 
+        type_group = QGroupBox("Inventartyp")
+        type_layout = QVBoxLayout(type_group)
+        type_layout.setContentsMargins(10, 10, 10, 10)
+        type_layout.setSpacing(5)
+
+        self.device_checkbox = QCheckBox("Geräte")
+        self.peripheral_checkbox = QCheckBox("Peripherie")
+        self.component_checkbox = QCheckBox("Komponenten / Ersatzteile")
+        self.other_checkbox = QCheckBox("Sonstiges")
+
+        for checkbox in (
+            self.device_checkbox,
+            self.peripheral_checkbox,
+            self.component_checkbox,
+            self.other_checkbox,
+        ):
+            checkbox.setChecked(True)
+            type_layout.addWidget(checkbox)
+
+        category_group = QGroupBox("Produktkategorien")
+        category_group_layout = QVBoxLayout(category_group)
+        category_group_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.category_container = QWidget()
+        self.category_container.setObjectName("categoryContainer")
+        self.category_container.setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
+        self.category_layout = QVBoxLayout(self.category_container)
+        self.category_layout.setContentsMargins(2, 2, 2, 2)
+        self.category_layout.setSpacing(4)
+
+        self.category_placeholder = QLabel(
+            "Kategorien werden aus Supabase geladen ..."
+        )
+        self.category_placeholder.setWordWrap(True)
+        self.category_layout.addWidget(self.category_placeholder)
+        self.category_layout.addStretch()
+
+        self.category_scroll = QScrollArea()
+        self.category_scroll.setObjectName("categoryScrollArea")
+        self.category_scroll.setWidgetResizable(True)
+        self.category_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.category_scroll.setMinimumHeight(120)
+        self.category_scroll.setMaximumHeight(220)
+        self.category_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.category_scroll.viewport().setObjectName(
+            "categoryScrollViewport"
+        )
+        self.category_scroll.viewport().setAttribute(
+            Qt.WidgetAttribute.WA_StyledBackground,
+            True,
+        )
+        self.category_scroll.setWidget(self.category_container)
+        category_group_layout.addWidget(self.category_scroll)
+
         action_title = QLabel("Inventar")
-        action_title.setObjectName(
-            "sidebarTitle"
-        )
+        action_title.setObjectName("sidebarTitle")
 
-        self.refresh_button = QPushButton(
-            "Daten aktualisieren"
-        )
-        self.refresh_button.setObjectName(
-            "primaryButton"
-        )
-
-        self.create_button = QPushButton(
-            "Neues Asset"
-        )
-
-        self.edit_button = QPushButton(
-            "Asset bearbeiten"
-        )
+        self.refresh_button = QPushButton("Daten aktualisieren")
+        self.refresh_button.setObjectName("primaryButton")
+        self.create_button = QPushButton("Neues Asset")
+        self.edit_button = QPushButton("Asset bearbeiten")
         self.edit_button.setEnabled(False)
-
-        self.delete_button = QPushButton(
-            "Asset löschen"
-        )
+        self.delete_button = QPushButton("Assets löschen")
         self.delete_button.setEnabled(False)
 
         selection_title = QLabel("Auswahl")
-        selection_title.setObjectName(
-            "sidebarTitle"
-        )
+        selection_title.setObjectName("sidebarTitle")
 
-        self.selection_label = QLabel(
-            "Kein Asset ausgewählt"
-        )
-        self.selection_label.setObjectName(
-            "selectionLabel"
-        )
+        self.selection_label = QLabel("Kein Asset ausgewählt")
+        self.selection_label.setObjectName("selectionLabel")
         self.selection_label.setWordWrap(True)
 
-        self.sidebar_count_label = QLabel(
-            "0 Datensätze"
-        )
-        self.sidebar_count_label.setObjectName(
-            "sidebarCountLabel"
-        )
+        self.sidebar_count_label = QLabel("0 Datensätze")
+        self.sidebar_count_label.setObjectName("sidebarCountLabel")
 
         sidebar_layout.addWidget(search_title)
-        sidebar_layout.addWidget(
-            self.filter_field_combo
-        )
-        sidebar_layout.addWidget(
-            self.search_input
-        )
-
-        sidebar_layout.addSpacing(10)
+        sidebar_layout.addWidget(self.search_input)
+        sidebar_layout.addWidget(type_group)
+        sidebar_layout.addWidget(category_group)
+        sidebar_layout.addSpacing(6)
         sidebar_layout.addWidget(action_title)
-        sidebar_layout.addWidget(
-            self.refresh_button
-        )
-        sidebar_layout.addWidget(
-            self.create_button
-        )
-        sidebar_layout.addWidget(
-            self.edit_button
-        )
-        sidebar_layout.addWidget(
-            self.delete_button
-        )
-
+        sidebar_layout.addWidget(self.refresh_button)
+        sidebar_layout.addWidget(self.create_button)
+        sidebar_layout.addWidget(self.edit_button)
+        sidebar_layout.addWidget(self.delete_button)
         sidebar_layout.addStretch()
-
-        sidebar_layout.addWidget(
-            selection_title
-        )
-        sidebar_layout.addWidget(
-            self.selection_label
-        )
-        sidebar_layout.addWidget(
-            self.sidebar_count_label
-        )
+        sidebar_layout.addWidget(selection_title)
+        sidebar_layout.addWidget(self.selection_label)
+        sidebar_layout.addWidget(self.sidebar_count_label)
 
         self.sidebar.setWidget(sidebar_widget)
-
         self.addDockWidget(
             Qt.DockWidgetArea.LeftDockWidgetArea,
             self.sidebar,
@@ -468,9 +558,13 @@ class MainWindow(QMainWindow):
             self.apply_filter
         )
 
-        self.filter_field_combo.currentIndexChanged.connect(
-            self.handle_filter_type_changed
-        )
+        for checkbox in (
+            self.device_checkbox,
+            self.peripheral_checkbox,
+            self.component_checkbox,
+            self.other_checkbox,
+        ):
+            checkbox.toggled.connect(self.apply_filter)
 
         self.refresh_button.clicked.connect(
             self.load_assets
@@ -563,6 +657,12 @@ class MainWindow(QMainWindow):
                 if isinstance(row, dict)
             ]
 
+            self.enrich_component_state(self.assets)
+            category_rows = self.load_product_categories()
+            self.rebuild_category_filter(
+                self.assets,
+                category_rows,
+            )
             self.populate_table(self.assets)
 
             self.statusBar().showMessage(
@@ -603,10 +703,11 @@ class MainWindow(QMainWindow):
 
     def load_assets_with_product_model(self) -> Any:
         """
-        Versucht zuerst, das zugehörige Produktmodell mitzuladen.
+        Lädt Assets mit Produktmodell und Produktkategorie.
 
-        Falls die eingebettete Relation nicht verfügbar ist,
-        werden nur die Assets geladen.
+        Die verschachtelte Kategorie ist für die dynamischen
+        Filter in der Seitenleiste erforderlich. Falls die Relation
+        noch nicht verfügbar ist, wird stufenweise zurückgefallen.
         """
 
         try:
@@ -614,8 +715,27 @@ class MainWindow(QMainWindow):
                 self.supabase_client
                 .table(self.ASSET_TABLE_NAME)
                 .select(
-                    "*, product_model:product_models(*)"
+                    "*, "
+                    "product_model:product_models("
+                    "*, category:product_categories(*)"
+                    ")"
                 )
+                .order("id")
+                .execute()
+            )
+
+        except Exception:
+            logger.warning(
+                "Product category relation could not be loaded. "
+                "Falling back to product models only.",
+                exc_info=True,
+            )
+
+        try:
+            return (
+                self.supabase_client
+                .table(self.ASSET_TABLE_NAME)
+                .select("*, product_model:product_models(*)")
                 .order("id")
                 .execute()
             )
@@ -662,12 +782,295 @@ class MainWindow(QMainWindow):
         )
 
         if isinstance(product_model, dict):
+            category = product_model.get("category")
+
             for key, value in product_model.items():
-                flattened[
-                    f"product_model_{key}"
-                ] = value
+                if key == "category":
+                    continue
+
+                flattened[f"product_model_{key}"] = value
+
+            if isinstance(category, dict):
+                for key, value in category.items():
+                    flattened[f"product_category_{key}"] = value
 
         return flattened
+
+    def load_product_categories(self) -> list[dict[str, Any]]:
+        """Lädt alle Produktkategorien, auch solche ohne aktuelle Assets."""
+
+        try:
+            response = (
+                self.supabase_client
+                .table("product_categories")
+                .select("*")
+                .order("name")
+                .execute()
+            )
+
+            return [
+                row
+                for row in (response.data or [])
+                if isinstance(row, dict)
+            ]
+
+        except Exception:
+            logger.warning(
+                "Product categories could not be loaded separately.",
+                exc_info=True,
+            )
+            return []
+
+    def enrich_component_state(
+        self,
+        assets: list[dict[str, Any]],
+    ) -> None:
+        """
+        Kennzeichnet serialisierte Komponenten als eingebaut oder frei.
+
+        Die Abfrage ist optional. Falls die entsprechende Tabelle in
+        Supabase noch nicht existiert, bleibt die Anwendung funktionsfähig.
+        """
+
+        if not assets:
+            return
+
+        try:
+            response = (
+                self.supabase_client
+                .table("asset_component_assignments")
+                .select(
+                    "parent_asset_id, child_asset_id, "
+                    "installed_at, removed_at"
+                )
+                .execute()
+            )
+        except Exception:
+            logger.warning(
+                "Component assignments could not be loaded.",
+                exc_info=True,
+            )
+            return
+
+        assets_by_id = {
+            asset.get("id"): asset
+            for asset in assets
+            if asset.get("id") is not None
+        }
+
+        for asset in assets:
+            if self.get_inventory_group(asset) == "component":
+                asset["inventory_usage"] = "Nicht eingebaut"
+                asset["installed_in"] = ""
+
+        for assignment in response.data or []:
+            if not isinstance(assignment, dict):
+                continue
+            if assignment.get("removed_at") is not None:
+                continue
+
+            child_asset = assets_by_id.get(
+                assignment.get("child_asset_id")
+            )
+            parent_asset = assets_by_id.get(
+                assignment.get("parent_asset_id")
+            )
+
+            if child_asset is None:
+                continue
+
+            child_asset["inventory_usage"] = "Eingebaut"
+            child_asset["installed_in_asset_id"] = (
+                assignment.get("parent_asset_id")
+            )
+            child_asset["installed_in"] = (
+                self.get_asset_identifier(parent_asset)
+                if parent_asset is not None
+                else str(assignment.get("parent_asset_id") or "")
+            )
+
+    def rebuild_category_filter(
+        self,
+        assets: list[dict[str, Any]],
+        category_rows: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Erstellt die Kategorie-Checkboxen aus Supabase-Stammdaten."""
+
+        previously_known = set(self.category_checkboxes)
+        previously_checked = {
+            key
+            for key, checkbox in self.category_checkboxes.items()
+            if checkbox.isChecked()
+        }
+        had_existing_filter = bool(self.category_checkboxes)
+
+        while self.category_layout.count():
+            item = self.category_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        self.category_checkboxes.clear()
+
+        categories: dict[str, str] = {}
+
+        for category in category_rows or []:
+            normalized_category = {
+                f"product_category_{key}": value
+                for key, value in category.items()
+            }
+            category_key = self.get_category_key(normalized_category)
+            if category_key is None:
+                continue
+
+            categories[category_key] = self.get_category_label(
+                normalized_category
+            )
+
+        # Fallback: Kategorien aus den geladenen Assets ableiten.
+        if not categories:
+            for asset in assets:
+                category_key = self.get_category_key(asset)
+                if category_key is None:
+                    continue
+
+                label = self.get_category_label(asset)
+                categories[category_key] = label
+
+        if not categories:
+            placeholder = QLabel(
+                "Keine Produktkategorien verfügbar. "
+                "Prüfe die Relation product_models → product_categories."
+            )
+            placeholder.setWordWrap(True)
+            self.category_layout.addWidget(placeholder)
+            self.category_layout.addStretch()
+            return
+
+        for category_key, label in sorted(
+            categories.items(),
+            key=lambda item: item[1].casefold(),
+        ):
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(
+                True
+                if not had_existing_filter
+                or category_key not in previously_known
+                else category_key in previously_checked
+            )
+            checkbox.toggled.connect(self.apply_filter)
+            self.category_layout.addWidget(checkbox)
+            self.category_checkboxes[category_key] = checkbox
+
+        self.category_layout.addStretch()
+
+    @staticmethod
+    def get_category_key(
+        asset: dict[str, Any],
+    ) -> str | None:
+        for field_name in (
+            "product_category_code",
+            "product_category_id",
+            "product_model_category_id",
+            "product_category_name",
+        ):
+            value = asset.get(field_name)
+            if value is not None and str(value).strip():
+                return str(value).strip().casefold()
+
+        return None
+
+    @classmethod
+    def get_category_label(
+        cls,
+        asset: dict[str, Any],
+    ) -> str:
+        category_code = str(
+            asset.get("product_category_code") or ""
+        ).strip().casefold()
+
+        if category_code in cls.CATEGORY_LABELS:
+            return cls.CATEGORY_LABELS[category_code]
+
+        for field_name in (
+            "product_category_name",
+            "product_category_code",
+            "product_category_id",
+            "product_model_category_id",
+        ):
+            value = asset.get(field_name)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+
+        return "Unbekannte Kategorie"
+
+    def get_inventory_group(
+        self,
+        asset: dict[str, Any],
+    ) -> str:
+        database_group = asset.get(
+            "product_category_inventory_group"
+        )
+
+        if database_group is not None:
+            normalized_group = str(database_group).strip().casefold()
+            aliases = {
+                "device": "device",
+                "geraet": "device",
+                "gerät": "device",
+                "peripheral": "peripheral",
+                "peripherie": "peripheral",
+                "component": "component",
+                "komponente": "component",
+                "spare_part": "component",
+                "ersatzteil": "component",
+            }
+            if normalized_group in aliases:
+                return aliases[normalized_group]
+
+        category_code = str(
+            asset.get("product_category_code") or ""
+        ).strip().casefold()
+
+        if category_code in self.DEVICE_CATEGORY_CODES:
+            return "device"
+        if category_code in self.PERIPHERAL_CATEGORY_CODES:
+            return "peripheral"
+        if category_code in self.COMPONENT_CATEGORY_CODES:
+            return "component"
+
+        return "other"
+
+    def asset_matches_category_filter(
+        self,
+        asset: dict[str, Any] | None,
+    ) -> bool:
+        if asset is None or not self.category_checkboxes:
+            return True
+
+        category_key = self.get_category_key(asset)
+        if category_key is None:
+            return True
+
+        checkbox = self.category_checkboxes.get(category_key)
+        return checkbox is None or checkbox.isChecked()
+
+    def asset_matches_group_filter(
+        self,
+        asset: dict[str, Any] | None,
+    ) -> bool:
+        if asset is None:
+            return True
+
+        group = self.get_inventory_group(asset)
+        group_checkboxes = {
+            "device": self.device_checkbox,
+            "peripheral": self.peripheral_checkbox,
+            "component": self.component_checkbox,
+            "other": self.other_checkbox,
+        }
+
+        return group_checkboxes[group].isChecked()
 
     # ==========================================================
     # Tabelle
@@ -937,6 +1340,10 @@ class MainWindow(QMainWindow):
     def resize_visible_columns(self) -> None:
         self.asset_table.resizeColumnsToContents()
 
+        # Die Spalten werden nicht auf die Fensterbreite gestreckt.
+        # Dadurch bleibt ihre Gesamtbreite erhalten und Qt kann bei
+        # vielen sichtbaren Spalten horizontal scrollen.
+        minimum_width = 115
         maximum_width = 320
 
         for column_index, column_name in enumerate(
@@ -948,15 +1355,21 @@ class MainWindow(QMainWindow):
             ):
                 continue
 
-            width = self.asset_table.columnWidth(
+            current_width = self.asset_table.columnWidth(
                 column_index
             )
+            target_width = max(
+                minimum_width,
+                min(current_width, maximum_width),
+            )
 
-            if width > maximum_width:
-                self.asset_table.setColumnWidth(
-                    column_index,
-                    maximum_width,
-                )
+            self.asset_table.setColumnWidth(
+                column_index,
+                target_width,
+            )
+
+        self.asset_table.updateGeometry()
+        self.asset_table.viewport().update()
 
     def clear_table(self) -> None:
         self.asset_table.setSortingEnabled(False)
@@ -966,6 +1379,7 @@ class MainWindow(QMainWindow):
         self.asset_table.setSortingEnabled(True)
 
         self.current_columns = []
+        self.rebuild_category_filter([], [])
         self.columns_menu.clear()
         self.column_actions.clear()
 
@@ -1025,23 +1439,6 @@ class MainWindow(QMainWindow):
     # ==========================================================
 
     @Slot()
-    def handle_filter_type_changed(self) -> None:
-        filter_type = (
-            self.filter_field_combo.currentData()
-        )
-
-        if filter_type == "name":
-            self.search_input.setPlaceholderText(
-                "Exakten Namen eingeben ..."
-            )
-        else:
-            self.search_input.setPlaceholderText(
-                "Suchbegriff eingeben ..."
-            )
-
-        self.apply_filter()
-
-    @Slot()
     def apply_filter(self) -> None:
         search_text = (
             self.search_input
@@ -1050,34 +1447,31 @@ class MainWindow(QMainWindow):
             .casefold()
         )
 
-        filter_type = (
-            self.filter_field_combo.currentData()
-        )
-
         total_count = self.asset_table.rowCount()
         visible_count = 0
 
         for row_index in range(total_count):
-            if not search_text:
-                row_matches = True
+            asset = self.get_asset_from_row(row_index)
 
-            elif filter_type == "name":
-                asset = self.get_asset_from_row(
-                    row_index
-                )
-
-                row_matches = self.asset_matches_name(
-                    asset,
+            search_matches = (
+                not search_text
+                or self.row_matches_visible_columns(
+                    row_index,
                     search_text,
                 )
+            )
+            category_matches = (
+                self.asset_matches_category_filter(asset)
+            )
+            group_matches = (
+                self.asset_matches_group_filter(asset)
+            )
 
-            else:
-                row_matches = (
-                    self.row_matches_visible_columns(
-                        row_index,
-                        search_text,
-                    )
-                )
+            row_matches = (
+                search_matches
+                and category_matches
+                and group_matches
+            )
 
             self.asset_table.setRowHidden(
                 row_index,
@@ -1159,21 +1553,25 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def handle_table_selection(self) -> None:
-        asset = self.get_selected_asset()
+        assets = self.get_selected_assets()
 
-        if asset is None:
+        if not assets:
             self.clear_selected_asset()
             return
 
-        identifier = self.get_asset_identifier(
-            asset
-        )
+        if len(assets) == 1:
+            identifier = self.get_asset_identifier(assets[0])
+            self.selection_label.setText(
+                f"Ausgewähltes Asset:\n{identifier}"
+            )
+            self.edit_button.setEnabled(True)
+        else:
+            self.selection_label.setText(
+                f"{len(assets)} Assets ausgewählt"
+            )
+            # Mehrfachbearbeitung ist noch nicht implementiert.
+            self.edit_button.setEnabled(False)
 
-        self.selection_label.setText(
-            f"Ausgewähltes Asset:\n{identifier}"
-        )
-
-        self.edit_button.setEnabled(True)
         self.delete_button.setEnabled(True)
 
     def get_asset_from_row(
@@ -1183,46 +1581,40 @@ class MainWindow(QMainWindow):
         if self.asset_table.columnCount() == 0:
             return None
 
-        first_item = self.asset_table.item(
-            row_index,
-            0,
-        )
-
+        first_item = self.asset_table.item(row_index, 0)
         if first_item is None:
             return None
 
-        asset = first_item.data(
-            Qt.ItemDataRole.UserRole
-        )
-
+        asset = first_item.data(Qt.ItemDataRole.UserRole)
         return asset if isinstance(asset, dict) else None
+
+    def get_selected_assets(self) -> list[dict[str, Any]]:
+        selection_model = self.asset_table.selectionModel()
+        if selection_model is None:
+            return []
+
+        assets: list[dict[str, Any]] = []
+
+        for index in sorted(
+            selection_model.selectedRows(),
+            key=lambda selected_index: selected_index.row(),
+        ):
+            asset = self.get_asset_from_row(index.row())
+            if asset is not None:
+                assets.append(asset)
+
+        return assets
 
     def get_selected_asset(
         self,
     ) -> dict[str, Any] | None:
-        selection_model = (
-            self.asset_table.selectionModel()
-        )
-
-        if selection_model is None:
-            return None
-
-        selected_rows = (
-            selection_model.selectedRows()
-        )
-
-        if not selected_rows:
-            return None
-
-        return self.get_asset_from_row(
-            selected_rows[0].row()
-        )
+        assets = self.get_selected_assets()
+        return assets[0] if len(assets) == 1 else None
 
     def clear_selected_asset(self) -> None:
         self.selection_label.setText(
             "Kein Asset ausgewählt"
         )
-
         self.edit_button.setEnabled(False)
         self.delete_button.setEnabled(False)
 
@@ -1306,23 +1698,37 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def show_delete_asset_placeholder(self) -> None:
-        asset = self.get_selected_asset()
+        assets = self.get_selected_assets()
 
-        if asset is None:
+        if not assets:
             QMessageBox.information(
                 self,
-                "Asset löschen",
-                "Bitte zuerst ein Asset auswählen.",
+                "Assets löschen",
+                "Bitte zuerst mindestens ein Asset auswählen.",
             )
             return
 
+        identifiers = [
+            self.get_asset_identifier(asset)
+            for asset in assets[:5]
+        ]
+        selection_text = "\n".join(
+            f"• {identifier}"
+            for identifier in identifiers
+        )
+
+        if len(assets) > 5:
+            selection_text += (
+                f"\n• … und {len(assets) - 5} weitere"
+            )
+
         QMessageBox.information(
             self,
-            "Asset löschen",
+            "Assets löschen",
             (
                 "Diese Funktion wird im nächsten Schritt ergänzt.\n\n"
-                f"Ausgewählt: "
-                f"{self.get_asset_identifier(asset)}"
+                f"{len(assets)} Assets ausgewählt:\n"
+                f"{selection_text}"
             ),
         )
 
@@ -1431,8 +1837,40 @@ class MainWindow(QMainWindow):
                 padding: 10px;
             }
 
-            QLineEdit,
-            QComboBox {
+            QGroupBox {
+                background-color: #ffffff;
+                color: #111827;
+                font-weight: 600;
+                border: 1px solid #d8dde3;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+            }
+
+            QCheckBox {
+                background-color: transparent;
+                color: #111827;
+                spacing: 7px;
+                font-weight: 400;
+            }
+
+            /* Unter Windows-Dark-Mode übernimmt der Viewport eines
+               QScrollArea sonst teilweise die dunkle Systempalette. */
+            QScrollArea#categoryScrollArea,
+            QWidget#categoryScrollViewport,
+            QWidget#categoryContainer {
+                background-color: #ffffff;
+                color: #111827;
+                border: none;
+            }
+
+            QLineEdit {
                 min-height: 34px;
                 padding-left: 9px;
                 padding-right: 9px;
@@ -1442,17 +1880,10 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
             }
 
-            QLineEdit:focus,
-            QComboBox:focus {
+            QLineEdit:focus {
                 border: 1px solid #2f6fb7;
             }
 
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                color: #111827;
-                selection-background-color: #dbeafe;
-                selection-color: #111827;
-            }
 
             QPushButton {
                 min-height: 35px;
@@ -1513,6 +1944,13 @@ class MainWindow(QMainWindow):
                 outline: none;
             }
 
+            /* Auch der leere Bereich rechts neben der letzten
+               Tabellenüberschrift erhält eine helle Farbe. */
+            QHeaderView {
+                background-color: #edf1f5;
+                color: #111827;
+            }
+
             QHeaderView::section {
                 background-color: #edf1f5;
                 color: #111827;
@@ -1521,6 +1959,71 @@ class MainWindow(QMainWindow):
                 border-bottom: 1px solid #d8dde3;
                 padding: 8px;
                 font-weight: 600;
+            }
+
+            QTableCornerButton::section {
+                background-color: #edf1f5;
+                border: none;
+                border-right: 1px solid #d8dde3;
+                border-bottom: 1px solid #d8dde3;
+            }
+
+            /* Explizite Scrollbar-Farben verhindern unleserliche
+               Steuerelemente bei aktivem Windows-Dark-Mode. */
+            QScrollBar:horizontal {
+                background-color: #e5e7eb;
+                height: 16px;
+                margin: 0;
+                border: 1px solid #cbd5e1;
+            }
+
+            QScrollBar::handle:horizontal {
+                background-color: #8b96a3;
+                min-width: 36px;
+                margin: 2px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:horizontal:hover {
+                background-color: #647181;
+            }
+
+            QScrollBar:vertical {
+                background-color: #e5e7eb;
+                width: 16px;
+                margin: 0;
+                border: 1px solid #cbd5e1;
+            }
+
+            QScrollBar::handle:vertical {
+                background-color: #8b96a3;
+                min-height: 36px;
+                margin: 2px;
+                border-radius: 5px;
+            }
+
+            QScrollBar::handle:vertical:hover {
+                background-color: #647181;
+            }
+
+            QScrollBar::add-line,
+            QScrollBar::sub-line {
+                width: 0;
+                height: 0;
+                background: none;
+                border: none;
+            }
+
+            QScrollBar::add-page,
+            QScrollBar::sub-page {
+                background: transparent;
+            }
+
+            QToolTip {
+                background-color: #ffffff;
+                color: #111827;
+                border: 1px solid #9ca3af;
+                padding: 4px;
             }
 
             QStatusBar {
