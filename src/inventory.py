@@ -7,7 +7,7 @@ from typing import Any
 # Fachliche Codes
 # ---------------------------------------------------------------------------
 # Die grobe Gruppierung kommt primär aus product_categories.inventory_group.
-# Die Code-Sets bleiben nur als Fallback für ältere/teilweise geladene Daten.
+# Die Code-Sets bleiben als Fallback, falls Zusatzdaten einmal unvollständig sind.
 
 DEVICE_CATEGORY_CODES = {
     "barcode_scanner",
@@ -46,6 +46,8 @@ COMPONENT_CATEGORY_CODES = {
     "storage_drive",
 }
 
+# Einheitliche UI-Bezeichnungen. Die Datenbank-Codes bleiben technisch stabil,
+# die sichtbaren Namen werden überall (Tabelle + Filter) aus dieser Map erzeugt.
 CATEGORY_LABELS = {
     "barcode_scanner": "Barcodescanner",
     "cable": "Kabel",
@@ -54,7 +56,7 @@ CATEGORY_LABELS = {
     "headset": "Headsets",
     "keyboard": "Tastaturen",
     "lamp": "Lampen",
-    "laptop": "Notebooks",
+    "laptop": "Laptops",
     "lcd_display": "LCD-Anzeigen",
     "memory": "Arbeitsspeicher",
     "ram": "Arbeitsspeicher",
@@ -80,7 +82,7 @@ CATEGORY_LABELS = {
 INVENTORY_GROUP_LABELS = {
     "device": "Geräte",
     "peripheral": "Peripherie",
-    "component": "Komponenten / Ersatzteile",
+    "component": "Komponenten",
     "consumable": "Verbrauchsmaterial",
     "other": "Sonstiges",
 }
@@ -91,7 +93,6 @@ STATUS_LABELS = {
     "defective": "Defekt",
     "in_repair": "In Reparatur",
     "retired": "Ausgemustert",
-    # Zukunftskompatibel, falls die empfohlene Statusvereinfachung später kommt.
     "active": "Aktiv",
 }
 
@@ -102,7 +103,8 @@ TRACKING_MODE_LABELS = {
 }
 
 USAGE_STATE_LABELS = {
-    "installed": "Eingebaut",
+    "connected": "Verbunden",
+    "installed": "Verbunden",  # Fallback für ältere Datenstände
     "assigned": "Zugewiesen",
     "stored": "Im Lager",
     "unlocated": "Nicht zugeordnet",
@@ -111,31 +113,23 @@ USAGE_STATE_LABELS = {
 # ---------------------------------------------------------------------------
 # Tabellenansicht
 # ---------------------------------------------------------------------------
-# Reihenfolge basiert auf dem aktuellen Supabase-Schema. Zusätzliche spätere
-# Spalten werden vom Tabellen-Widget weiterhin automatisch hinten ergänzt.
+# Es werden bewusst nur fachlich relevante Spalten zugelassen.
+# Interne IDs, Codes und rohe JSON-Felder bleiben in Supabase erhalten,
+# erscheinen aber nicht als Tabellenspalten bzw. Spaltenfilter.
 
 PREFERRED_COLUMN_ORDER = [
-    "id",
     "asset_tag",
     "serial_number",
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
-    "product_category_code",
-    "product_category_inventory_group",
-    "inventory_usage",
-    "current_usage_state",
-    "installed_in",
-    "installed_slot",
-    "assigned_to",
+    "department_name",
     "storage_location",
+    "connected_product",
     "status",
-    "product_model_tracking_mode",
     "product_model_part_number",
-    "product_model_specifications",
-    "product_model_id",
     "purchase_date",
-    "purchase_cost",
+    "new_price",
     "warranty_until",
     "retired_at",
     "note",
@@ -149,48 +143,30 @@ DEFAULT_VISIBLE_COLUMNS = {
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
-    "inventory_usage",
-    "installed_in",
-    "assigned_to",
+    "department_name",
     "storage_location",
+    "connected_product",
     "status",
 }
 
 HEADER_LABELS = {
-    "id": "ID",
-    "product_model_id": "Produktmodell-ID",
     "asset_tag": "Asset-Tag",
     "serial_number": "Seriennummer",
+    "product_model_name": "Produktmodell",
+    "manufacturer_name": "Hersteller",
+    "product_category_name": "Produktkategorie",
+    "department_name": "Abteilung",
+    "storage_location": "Lagerort",
+    "connected_product": "Verbundenes Produkt",
+    "status": "Status",
+    "product_model_part_number": "Artikelnummer",
     "purchase_date": "Kaufdatum",
-    "purchase_cost": "Kaufpreis",
+    "new_price": "Neupreis",
     "warranty_until": "Garantie bis",
     "retired_at": "Ausgemustert am",
     "note": "Bemerkungen",
     "created_at": "Erstellt am",
     "updated_at": "Geändert am",
-    "status": "Status",
-    "product_model_name": "Produktmodell",
-    "product_model_manufacturer_id": "Hersteller-ID",
-    "product_model_category_id": "Kategorie-ID",
-    "product_model_part_number": "Artikelnummer",
-    "product_model_specifications": "Spezifikationen",
-    "product_model_tracking_mode": "Bestandsführung",
-    "product_model_is_active": "Modell aktiv",
-    "product_category_id": "Kategorie-ID",
-    "product_category_name": "Produktkategorie",
-    "product_category_code": "Kategoriecode",
-    "product_category_inventory_group": "Inventartyp",
-    "manufacturer_name": "Hersteller",
-    "inventory_usage": "Verwendung",
-    "current_usage_state": "Nutzungszustand (Code)",
-    "installed_in": "Eingebaut in",
-    "installed_in_asset_id": "Eltern-Asset-ID",
-    "installed_slot": "Steckplatz",
-    "assigned_to": "Zugewiesen an",
-    "assigned_employee_id": "Mitarbeiter-ID",
-    "assigned_department_id": "Abteilungs-ID",
-    "storage_location": "Lagerort",
-    "storage_location_id": "Lagerort-ID",
 }
 
 NAME_FIELDS = (
@@ -199,13 +175,14 @@ NAME_FIELDS = (
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
-    "assigned_to",
+    "department_name",
     "storage_location",
+    "connected_product",
 )
 
 
 def get_category_key(asset: dict[str, Any]) -> str | None:
-    """Liefert einen stabilen Schlüssel für den Kategorie-Checkboxfilter."""
+    """Liefert einen stabilen technischen Schlüssel für den Kategorie-Filter."""
 
     for field_name in (
         "product_category_code",
@@ -220,26 +197,24 @@ def get_category_key(asset: dict[str, Any]) -> str | None:
 
 
 def get_category_label(asset: dict[str, Any]) -> str:
-    """Liefert eine gut lesbare deutsche Kategoriebezeichnung."""
+    """Liefert überall dieselbe sichtbare Kategoriebezeichnung."""
 
     code = str(asset.get("product_category_code") or "").strip().casefold()
     if code in CATEGORY_LABELS:
         return CATEGORY_LABELS[code]
 
-    for field_name in (
-        "product_category_name",
-        "product_category_code",
-        "product_category_id",
-        "product_model_category_id",
-    ):
-        value = asset.get(field_name)
-        if value is not None and str(value).strip():
-            return str(value).strip()
+    value = asset.get("product_category_name")
+    if value is not None and str(value).strip():
+        return str(value).strip()
+
+    if code:
+        return code
+
     return "Unbekannte Kategorie"
 
 
 def get_inventory_group(asset: dict[str, Any]) -> str:
-    """Bestimmt den Inventartyp, primär aus product_categories.inventory_group."""
+    """Bestimmt den Inventartyp primär aus product_categories.inventory_group."""
 
     database_group = asset.get("product_category_inventory_group")
     if database_group is not None:
@@ -289,7 +264,7 @@ def get_asset_identifier(asset: dict[str, Any] | None) -> str:
 
 
 def format_inventory_value(column_name: str, value: Any) -> str:
-    """Formatiert technische Datenbankcodes nur für die Anzeige."""
+    """Formatiert technische Datenbankwerte für die deutsche UI."""
 
     if value is None:
         return ""
@@ -301,12 +276,6 @@ def format_inventory_value(column_name: str, value: Any) -> str:
 
     if column_name == "status" and normalized in STATUS_LABELS:
         return STATUS_LABELS[normalized]
-    if column_name == "product_model_tracking_mode" and normalized in TRACKING_MODE_LABELS:
-        return TRACKING_MODE_LABELS[normalized]
-    if column_name == "product_category_inventory_group" and normalized in INVENTORY_GROUP_LABELS:
-        return INVENTORY_GROUP_LABELS[normalized]
-    if column_name == "current_usage_state" and normalized in USAGE_STATE_LABELS:
-        return USAGE_STATE_LABELS[normalized]
 
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

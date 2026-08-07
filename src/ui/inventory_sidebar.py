@@ -165,10 +165,9 @@ class InventorySidebar(QDockWidget):
         type_title = QLabel("Inventartyp")
         type_title.setObjectName("sidebarTitle")
         self.group_dropdown = MultiSelectDropdown("Alle Inventartypen")
-        self.group_dropdown.set_options(
-            (key, label)
-            for key, label in INVENTORY_GROUP_LABELS.items()
-        )
+        self.group_dropdown.set_options([])
+        self.group_dropdown.setEnabled(False)
+        self.group_dropdown.button.setText("Inventartypen werden geladen ...")
 
         category_title = QLabel("Produktkategorien")
         category_title.setObjectName("sidebarTitle")
@@ -263,22 +262,44 @@ class InventorySidebar(QDockWidget):
         assets: list[dict[str, Any]],
         category_rows: list[dict[str, Any]] | None = None,
     ) -> None:
+        """Baut Inventartyp- und Kategorie-Filter nur aus sichtbaren Asset-Daten.
+
+        Dadurch enthalten die Filter keine Kategorien, die in der aktuellen
+        Asset-Tabelle gar nicht vorkommen. Kategoriebezeichnungen stammen aus
+        derselben Mapping-Funktion wie die Tabellenanzeige.
+        """
+
+        del category_rows  # Für diese Asset-Ansicht bewusst nicht verwendet.
+
+        groups: dict[str, str] = {}
         categories: dict[str, str] = {}
 
-        for category in category_rows or []:
-            normalized = {
-                f"product_category_{key}": value
-                for key, value in category.items()
-            }
-            key = get_category_key(normalized)
-            if key is not None:
-                categories[key] = get_category_label(normalized)
+        for asset in assets:
+            group_key = get_inventory_group(asset)
+            group_label = INVENTORY_GROUP_LABELS.get(
+                group_key,
+                group_key.replace("_", " ").title(),
+            )
+            groups[group_key] = group_label
 
-        if not categories:
-            for asset in assets:
-                key = get_category_key(asset)
-                if key is not None:
-                    categories[key] = get_category_label(asset)
+            category_key = get_category_key(asset)
+            if category_key is not None:
+                categories[category_key] = get_category_label(asset)
+
+        if groups:
+            self.group_dropdown.setEnabled(True)
+            self.group_dropdown.button.setToolTip("")
+            self.group_dropdown.set_options(
+                sorted(
+                    groups.items(),
+                    key=lambda item: item[1].casefold(),
+                ),
+                preserve_selection=True,
+            )
+        else:
+            self.group_dropdown.set_options([])
+            self.group_dropdown.setEnabled(False)
+            self.group_dropdown.button.setText("Keine Inventartypen verfügbar")
 
         if not categories:
             self.category_dropdown.set_options([])
@@ -287,7 +308,7 @@ class InventorySidebar(QDockWidget):
                 "Keine Produktkategorien verfügbar"
             )
             self.category_dropdown.button.setToolTip(
-                "Prüfe SELECT-Rechte/RLS für product_categories."
+                "In der aktuellen Asset-Tabelle sind keine Kategorien vorhanden."
             )
             return
 

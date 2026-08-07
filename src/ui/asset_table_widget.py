@@ -132,22 +132,17 @@ class AssetTableWidget(QTableWidget):
     def determine_columns(
         assets: list[dict[str, Any]],
     ) -> list[str]:
-        discovered = list(
-            dict.fromkeys(
-                column
-                for asset in assets
-                for column in asset
-            )
-        )
-        preferred = [
+        """Zeigt nur freigegebene Fachspalten, die in den geladenen Daten existieren."""
+
+        available = {
+            column
+            for asset in assets
+            for column in asset
+        }
+        return [
             column
             for column in PREFERRED_COLUMN_ORDER
-            if column in discovered
-        ]
-        return preferred + [
-            column
-            for column in discovered
-            if column not in preferred
+            if column in available
         ]
 
     def initialize_visible_columns(self) -> None:

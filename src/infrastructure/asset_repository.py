@@ -5,7 +5,7 @@ from typing import Any
 
 from supabase import Client
 
-from inventory import get_asset_identifier, get_inventory_group
+from inventory import get_asset_identifier, get_category_label, get_inventory_group
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +179,9 @@ class AssetRepository:
                     for key, value in category.items():
                         asset[f"product_category_{key}"] = value
 
+                    # Tabelle und Kategorie-Filter verwenden exakt denselben Namen.
+                    asset["product_category_name"] = get_category_label(asset)
+
                 manufacturer = manufacturers_by_id.get(model.get("manufacturer_id"))
                 if isinstance(manufacturer, dict):
                     asset["manufacturer_name"] = manufacturer.get("name")
@@ -216,14 +219,11 @@ class AssetRepository:
     def _initialize_usage_fields(assets: list[dict[str, Any]]) -> None:
         for asset in assets:
             asset["current_usage_state"] = "unlocated"
-            asset["inventory_usage"] = (
-                "Nicht eingebaut"
-                if get_inventory_group(asset) == "component"
-                else "Nicht zugeordnet"
-            )
-            asset["installed_in"] = ""
-            asset["installed_slot"] = ""
-            asset["assigned_to"] = ""
+            asset["inventory_usage"] = "Nicht zugeordnet"
+            asset["connected_product"] = ""
+            asset["connected_product_id"] = None
+            asset["department_name"] = ""
+            asset["assigned_to"] = ""  # intern für spätere Detailansichten
             asset["storage_location"] = ""
 
     def _enrich_locations_and_assignments(
@@ -289,14 +289,27 @@ class AssetRepository:
                 employee_id = assignment.get("employee_id")
                 department_id = assignment.get("department_id")
                 asset["assigned_employee_id"] = employee_id
-                asset["assigned_department_id"] = department_id
 
+                # Bei einer Personenzuweisung wird für die Haupttabelle trotzdem
+                # deren Abteilung angezeigt. Direkte Abteilungszuweisungen bleiben
+                # unverändert möglich.
                 if employee_id is not None:
                     employee = employees_by_id.get(employee_id)
                     asset["assigned_to"] = self._employee_label(employee, employee_id)
+                    if isinstance(employee, dict):
+                        department_id = employee.get("department_id")
                 elif department_id is not None:
                     department = departments_by_id.get(department_id)
                     asset["assigned_to"] = self._department_label(department, department_id)
+
+                asset["assigned_department_id"] = department_id
+
+                if department_id is not None:
+                    department = departments_by_id.get(department_id)
+                    asset["department_name"] = self._department_label(
+                        department,
+                        department_id,
+                    )
 
                 asset["current_usage_state"] = "assigned"
                 asset["inventory_usage"] = "Zugewiesen"
@@ -310,7 +323,7 @@ class AssetRepository:
             order_column="id",
             required=False,
             select_expression=(
-                "id,parent_asset_id,child_asset_id,installed_at,removed_at,slot"
+                "id,parent_asset_id,child_asset_id,installed_at,removed_at"
             ),
         )
         assets_by_id = self._index_by_id(assets)
@@ -326,15 +339,14 @@ class AssetRepository:
             parent_id = row.get("parent_asset_id")
             parent = assets_by_id.get(parent_id)
 
-            child["current_usage_state"] = "installed"
-            child["inventory_usage"] = "Eingebaut"
-            child["installed_in_asset_id"] = parent_id
-            child["installed_in"] = (
+            child["current_usage_state"] = "connected"
+            child["inventory_usage"] = "Verbunden"
+            child["connected_product_id"] = parent_id
+            child["connected_product"] = (
                 get_asset_identifier(parent)
                 if parent is not None
                 else str(parent_id or "")
             )
-            child["installed_slot"] = str(row.get("slot") or "")
 
     @staticmethod
     def _finalize_usage_state(assets: list[dict[str, Any]]) -> None:
@@ -342,11 +354,7 @@ class AssetRepository:
         # für spätere Regeln, ohne MainWindow oder Tabellenwidget anzupassen.
         for asset in assets:
             if asset.get("current_usage_state") == "unlocated":
-                asset["inventory_usage"] = (
-                    "Nicht eingebaut"
-                    if get_inventory_group(asset) == "component"
-                    else "Nicht zugeordnet"
-                )
+                asset["inventory_usage"] = "Nicht zugeordnet"
 
     # ------------------------------------------------------------------
     # Hilfsfunktionen
