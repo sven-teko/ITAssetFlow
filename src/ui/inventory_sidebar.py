@@ -147,12 +147,113 @@ class InventorySidebar(QDockWidget):
             QDockWidget.DockWidgetFeature.DockWidgetMovable
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(300)
+
+        # Lokales Sidebar-Design: etwas grösser, klarer und unabhängig von
+        # der Windows-Hell/Dunkel-Palette.
+        self.setStyleSheet("""
+            QDockWidget#navigationSidebar {
+                background-color: #f1f3f5;
+                color: #1f2937;
+                font-size: 10.5pt;
+            }
+
+            QDockWidget#navigationSidebar::title {
+                background-color: #e7eaee;
+                color: #111827;
+                padding: 8px 10px;
+                font-size: 10.5pt;
+                font-weight: 600;
+                border-bottom: 1px solid #d5d9df;
+            }
+
+            QWidget#navigationContent {
+                background-color: #f1f3f5;
+                color: #1f2937;
+            }
+
+            QLabel {
+                background-color: transparent;
+                color: #374151;
+                font-size: 10.5pt;
+            }
+
+            QLabel#sidebarTitle {
+                color: #111827;
+                font-size: 10.5pt;
+                font-weight: 600;
+            }
+
+            QLabel#selectionLabel {
+                background-color: #ffffff;
+                color: #374151;
+                border: 1px solid #d8dde5;
+                border-radius: 6px;
+                padding: 8px 9px;
+            }
+
+            QLabel#sidebarCountLabel {
+                color: #6b7280;
+                padding-top: 2px;
+            }
+
+            QLineEdit,
+            QPushButton#filterDropdownButton,
+            QPushButton {
+                min-height: 34px;
+                font-size: 10.5pt;
+                border: 1px solid #cfd5dd;
+                border-radius: 6px;
+                padding: 0px 10px;
+                background-color: #ffffff;
+                color: #1f2937;
+            }
+
+            QLineEdit:focus,
+            QPushButton#filterDropdownButton:focus,
+            QPushButton:focus {
+                border: 1px solid #9ca9bb;
+            }
+
+            QPushButton:hover {
+                background-color: #f8fafc;
+            }
+
+            QPushButton:disabled {
+                background-color: #eceff3;
+                color: #9aa3af;
+            }
+
+            QMenu {
+                background-color: #ffffff;
+                color: #1f2937;
+                border: 1px solid #d5d9df;
+                font-size: 10.5pt;
+                padding: 5px;
+            }
+
+            QMenu::item {
+                padding: 7px 10px;
+                border-radius: 4px;
+            }
+
+            QMenu::item:selected {
+                background-color: #eef2f6;
+            }
+
+            QCheckBox {
+                color: #1f2937;
+                font-size: 10.5pt;
+                spacing: 8px;
+                padding: 5px 8px;
+            }
+        """)
 
         content = QWidget()
+        content.setObjectName("navigationContent")
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         search_title = QLabel("Inventar durchsuchen")
         search_title.setObjectName("sidebarTitle")

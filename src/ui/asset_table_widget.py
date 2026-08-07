@@ -132,7 +132,11 @@ class AssetTableWidget(QTableWidget):
     def determine_columns(
         assets: list[dict[str, Any]],
     ) -> list[str]:
-        """Zeigt nur freigegebene Fachspalten, die in den geladenen Daten existieren."""
+        """Zeigt nur die freigegebenen Hauptspalten.
+
+        Spezifikationen bleiben im Asset-Datensatz erhalten, werden aber
+        bewusst in der separaten Detailansicht dargestellt.
+        """
 
         available = {
             column

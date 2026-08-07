@@ -169,6 +169,160 @@ HEADER_LABELS = {
     "updated_at": "Geändert am",
 }
 
+
+SPECIFICATION_COLUMN_PREFIX = "spec_"
+
+
+SPECIFICATION_KEY_ALIASES = {
+    # Frühere deutsche/alte JSON-Schlüssel -> heutige technische Schlüssel
+    "speicher_gb": "storage_gb",
+    "display_zoll": "screen_size_inch",
+    "betriebssystem": "operating_system",
+    "anschluss": "connection_type",
+    "anschluesse": "connections",
+    "anschlüsse": "connections",
+    "laenge_m": "length_m",
+    "länge_m": "length_m",
+    "anschluss_a": "connector_a",
+    "anschluss_b": "connector_b",
+    "leistung_w": "power_w",
+    "takt_mhz": "speed_mhz",
+    "groesse_zoll": "screen_size_inch",
+    "größe_zoll": "screen_size_inch",
+}
+
+SPECIFICATION_FALLBACK_LABELS = {
+    "cpu": "CPU",
+    "cpu_count": "Anzahl CPUs",
+    "ram_gb": "RAM [GB]",
+    "storage": "Datenträger",
+    "storage_gb": "Speicher [GB]",
+    "gpu": "Grafikkarte",
+    "operating_system": "Betriebssystem",
+    "form_factor": "Bauform",
+    "screen_size_inch": "Bildschirmgrösse [Zoll]",
+    "resolution": "Auflösung",
+    "panel_type": "Paneltyp",
+    "refresh_rate_hz": "Bildwiederholrate [Hz]",
+    "connections": "Anschlüsse",
+    "connection_type": "Anschluss",
+    "printer_type": "Drucktechnik",
+    "color": "Farbdruck",
+    "duplex": "Duplex",
+    "paper_format": "Papierformat",
+    "network": "Netzwerkfähig",
+    "port_count": "Ports",
+    "port_speed": "Portgeschwindigkeit",
+    "poe": "PoE",
+    "managed": "Managed",
+    "sfp_ports": "SFP/SFP+ Ports",
+    "wan_ports": "WAN-Ports",
+    "lan_ports": "LAN-Ports",
+    "wifi_standard": "WLAN-Standard",
+    "frequency_bands": "Frequenzbänder",
+    "max_speed": "Max. Geschwindigkeit",
+    "socket": "Sockel",
+    "cores": "Kerne",
+    "threads": "Threads",
+    "base_clock_ghz": "Basistakt [GHz]",
+    "boost_clock_ghz": "Boost-Takt [GHz]",
+    "tdp_w": "TDP [W]",
+    "capacity_gb": "Kapazität [GB]",
+    "memory_type": "Speichertyp",
+    "speed_mhz": "Takt [MHz]",
+    "drive_type": "Laufwerkstyp",
+    "interface": "Schnittstelle",
+    "chipset": "Chipsatz",
+    "memory_slots": "RAM-Steckplätze",
+    "power_w": "Leistung [W]",
+    "efficiency_rating": "Effizienz",
+    "storage_gb": "Speicher [GB]",
+    "phone_type": "Telefontyp",
+    "voip": "VoIP",
+    "camera_type": "Kameratyp",
+    "night_vision": "Nachtsicht",
+    "wireless": "Kabellos",
+    "barcode_types": "Barcode-Typen",
+    "layout": "Tastaturlayout",
+    "microphone": "Mikrofon",
+    "cable_type": "Kabeltyp",
+    "length_m": "Länge [m]",
+    "connector_a": "Anschluss A",
+    "connector_b": "Anschluss B",
+    "output_voltage_v": "Ausgangsspannung [V]",
+    "connector_type": "Stecker",
+    "frequency": "Frequenz",
+    "range_m": "Reichweite [m]",
+    "display": "Display",
+    "bluetooth": "Bluetooth",
+    "wifi": "WLAN",
+    "lamp_type": "Lampentyp",
+    "color_temperature_k": "Farbtemperatur [K]",
+}
+
+
+def normalize_specification_key(key: str) -> str:
+    normalized = str(key or "").strip().casefold()
+    return SPECIFICATION_KEY_ALIASES.get(normalized, normalized)
+
+
+def normalize_specifications(value: Any) -> dict[str, Any]:
+    """Normalisiert JSON-Spezifikationen, ohne unbekannte Felder zu verlieren."""
+
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = normalize_specification_key(str(raw_key))
+        if not key:
+            continue
+
+        # Falls sowohl ein alter Alias als auch bereits der neue Schlüssel
+        # existieren, gewinnt der explizite moderne Schlüssel.
+        if key not in normalized or str(raw_key).strip().casefold() == key:
+            normalized[key] = raw_value
+
+    return normalized
+
+
+def fallback_specification_label(key: str) -> str:
+    normalized = normalize_specification_key(key)
+    if normalized in SPECIFICATION_FALLBACK_LABELS:
+        return SPECIFICATION_FALLBACK_LABELS[normalized]
+
+    return normalized.replace("_", " ").strip().title()
+
+
+def specification_column_name(key: str) -> str:
+    return f"{SPECIFICATION_COLUMN_PREFIX}{key}"
+
+
+def is_specification_column(column_name: str) -> bool:
+    return column_name.startswith(SPECIFICATION_COLUMN_PREFIX)
+
+
+def get_specification_fields(category_schema: Any) -> list[dict[str, Any]]:
+    if not isinstance(category_schema, dict):
+        return []
+
+    fields = category_schema.get("fields")
+    if not isinstance(fields, list):
+        return []
+
+    return [
+        field for field in fields
+        if isinstance(field, dict)
+        and str(field.get("key") or "").strip()
+    ]
+
+
+def get_specification_label(field: dict[str, Any]) -> str:
+    key = str(field.get("key") or "").strip()
+    label = str(field.get("label") or key).strip() or key
+    unit = str(field.get("unit") or "").strip()
+    return f"{label} [{unit}]" if unit else label
+
 NAME_FIELDS = (
     "asset_tag",
     "serial_number",

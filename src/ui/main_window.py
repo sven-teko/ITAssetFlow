@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -55,6 +55,12 @@ try:
 except ImportError:
     InventorySidebar = None  # type: ignore[assignment]
     logger.warning("InventorySidebar ist nicht verfügbar.", exc_info=True)
+
+try:
+    from .asset_detail_sidebar import AssetDetailSidebar
+except ImportError:
+    AssetDetailSidebar = None  # type: ignore[assignment]
+    logger.warning("AssetDetailSidebar ist nicht verfügbar.", exc_info=True)
 
 try:
     from .theme import apply_light_theme
@@ -197,6 +203,7 @@ class MainWindow(QMainWindow):
         )
         self.assets: list[dict[str, Any]] = []
         self.sidebar = None
+        self.detail_sidebar = None
         self.is_loading = False
         self._reload_pending = False
 
@@ -205,12 +212,27 @@ class MainWindow(QMainWindow):
         self._reload_timer.setInterval(600)
         self._reload_timer.timeout.connect(self._run_scheduled_reload)
 
+        # Nach einem Drag-&-Drop-Docking normalisieren wir die Anordnung.
+        # Dadurch können Navigation und Detailansicht nicht dauerhaft
+        # übereinander oder als Tabs ineinander abgelegt werden.
+        self._dock_layout_timer = QTimer(self)
+        self._dock_layout_timer.setSingleShot(True)
+        self._dock_layout_timer.setInterval(0)
+        self._dock_layout_timer.timeout.connect(
+            self._normalize_sidebar_dock_layout
+        )
+        self._normalizing_sidebar_docks = False
+        self._navigation_dock_width = 300
+        self._detail_dock_width = 380
+
         self.setWindowTitle("ITAssetFlow")
         self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
+        # Verschachtelung wird benötigt, damit zwei Sidebars auf derselben
+        # Seite horizontal nebeneinander liegen können. Tabbed Docks werden
+        # dagegen bewusst nicht aktiviert.
         self.setDockNestingEnabled(True)
         self.setDockOptions(
-            self.dockOptions()
-            | QMainWindow.DockOption.AnimatedDocks
+            QMainWindow.DockOption.AnimatedDocks
             | QMainWindow.DockOption.AllowNestedDocks
         )
 
@@ -218,6 +240,9 @@ class MainWindow(QMainWindow):
         self._create_menu_bar()
         self._create_central_area()
         self._create_sidebar()
+        self._create_detail_sidebar()
+        QTimer.singleShot(0, self._restore_visible_dock_widths)
+        self._schedule_sidebar_dock_normalization()
         self._create_status_bar()
         self._connect_signals()
         self._apply_theme()
@@ -245,6 +270,28 @@ class MainWindow(QMainWindow):
         self.sidebar_float_action = QAction("Seitenleiste lösen", self)
         self.sidebar_float_action.triggered.connect(self.float_sidebar)
 
+        self.detail_visible_action = QAction("Detailansicht anzeigen", self)
+        self.detail_visible_action.setCheckable(True)
+        self.detail_visible_action.setChecked(True)
+        self.detail_visible_action.toggled.connect(
+            self.set_detail_sidebar_visible
+        )
+
+        self.detail_left_action = QAction("Links andocken", self)
+        self.detail_left_action.triggered.connect(
+            self.dock_detail_sidebar_left
+        )
+
+        self.detail_right_action = QAction("Rechts andocken", self)
+        self.detail_right_action.triggered.connect(
+            self.dock_detail_sidebar_right
+        )
+
+        self.detail_float_action = QAction("Detailansicht lösen", self)
+        self.detail_float_action.triggered.connect(
+            self.float_detail_sidebar
+        )
+
         self.exit_action = QAction("Beenden", self)
         self.exit_action.setShortcut("Ctrl+Q")
         self.exit_action.triggered.connect(self.close)
@@ -268,6 +315,13 @@ class MainWindow(QMainWindow):
         sidebar_menu.addAction(self.sidebar_left_action)
         sidebar_menu.addAction(self.sidebar_right_action)
         sidebar_menu.addAction(self.sidebar_float_action)
+
+        detail_menu = options_menu.addMenu("Detailansicht")
+        detail_menu.addAction(self.detail_visible_action)
+        detail_menu.addSeparator()
+        detail_menu.addAction(self.detail_left_action)
+        detail_menu.addAction(self.detail_right_action)
+        detail_menu.addAction(self.detail_float_action)
 
         options_menu.addSeparator()
         self.columns_menu = QMenu("Spalten", self)
@@ -322,6 +376,43 @@ class MainWindow(QMainWindow):
         self.sidebar.topLevelChanged.connect(self._sidebar_floating_changed)
         self.sidebar.dockLocationChanged.connect(self._sidebar_location_changed)
         self.sidebar.visibilityChanged.connect(self._sidebar_visibility_changed)
+        self.sidebar.installEventFilter(self)
+
+    def _create_detail_sidebar(self) -> None:
+        if AssetDetailSidebar is None:
+            for action in (
+                self.detail_visible_action,
+                self.detail_left_action,
+                self.detail_right_action,
+                self.detail_float_action,
+            ):
+                action.setEnabled(False)
+            logger.error(
+                "Die Detailansicht konnte nicht importiert werden. "
+                "Prüfe ui/asset_detail_sidebar.py und inventory.py."
+            )
+            return
+
+        self.detail_sidebar = AssetDetailSidebar(self)
+        self._last_detail_sidebar_area = (
+            Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.addDockWidget(
+            self._last_detail_sidebar_area,
+            self.detail_sidebar,
+        )
+        self.detail_sidebar.show()
+
+        self.detail_sidebar.topLevelChanged.connect(
+            self._detail_sidebar_floating_changed
+        )
+        self.detail_sidebar.dockLocationChanged.connect(
+            self._detail_sidebar_location_changed
+        )
+        self.detail_sidebar.visibilityChanged.connect(
+            self._detail_sidebar_visibility_changed
+        )
+        self.detail_sidebar.installEventFilter(self)
 
     def _create_status_bar(self) -> None:
         self.statusBar().showMessage("Bereit")
@@ -485,6 +576,7 @@ class MainWindow(QMainWindow):
         self.sidebar.setVisible(visible)
         if visible:
             self.sidebar.raise_()
+            self._schedule_sidebar_dock_normalization()
 
     @Slot()
     def dock_sidebar_left(self) -> None:
@@ -502,6 +594,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(area, self.sidebar)
         self.sidebar.show()
         self.sidebar.raise_()
+        self._schedule_sidebar_dock_normalization()
 
     @Slot()
     def float_sidebar(self) -> None:
@@ -526,6 +619,11 @@ class MainWindow(QMainWindow):
         self.sidebar_left_action.setEnabled(True)
         self.sidebar_right_action.setEnabled(True)
 
+        if floating:
+            QTimer.singleShot(0, self._restore_visible_dock_widths)
+        else:
+            self._schedule_sidebar_dock_normalization()
+
     @Slot(Qt.DockWidgetArea)
     def _sidebar_location_changed(self, area: Qt.DockWidgetArea) -> None:
         if area in (
@@ -533,6 +631,7 @@ class MainWindow(QMainWindow):
             Qt.DockWidgetArea.RightDockWidgetArea,
         ):
             self._last_sidebar_area = area
+            self._schedule_sidebar_dock_normalization()
 
     @Slot(bool)
     def _sidebar_visibility_changed(self, visible: bool) -> None:
@@ -540,15 +639,280 @@ class MainWindow(QMainWindow):
         self.sidebar_visible_action.setChecked(visible)
         self.sidebar_visible_action.blockSignals(False)
 
+    def eventFilter(self, watched, event) -> bool:
+        """Beobachtet Dock-Geometrieänderungen auch innerhalb derselben DockArea.
+
+        dockLocationChanged allein reicht nicht aus, wenn ein Dock innerhalb
+        derselben Seite vertikal über/unter das andere gezogen wird. Move- und
+        Resize-Events lösen deshalb ebenfalls eine Layoutprüfung aus.
+        """
+
+        if watched in (self.sidebar, self.detail_sidebar):
+            if event.type() in (
+                QEvent.Type.Move,
+                QEvent.Type.Resize,
+                QEvent.Type.Show,
+            ):
+                if not self._normalizing_sidebar_docks:
+                    self._schedule_sidebar_dock_normalization()
+
+        return super().eventFilter(watched, event)
+
+    def _remember_sidebar_widths(self) -> None:
+        """Merkt die aktuell vom Benutzer eingestellten Dock-Breiten."""
+
+        if (
+            self.sidebar is not None
+            and self.sidebar.isVisible()
+            and not self.sidebar.isFloating()
+        ):
+            width = self.sidebar.width()
+            if width >= self.sidebar.minimumWidth():
+                self._navigation_dock_width = width
+
+        if (
+            self.detail_sidebar is not None
+            and self.detail_sidebar.isVisible()
+            and not self.detail_sidebar.isFloating()
+        ):
+            width = self.detail_sidebar.width()
+            if width >= self.detail_sidebar.minimumWidth():
+                self._detail_dock_width = width
+
+    def _restore_visible_dock_widths(self) -> None:
+        """Verhindert, dass ein verbleibendes Dock beim Loslösen aufspringt."""
+
+        docks = []
+        widths = []
+
+        if (
+            self.sidebar is not None
+            and self.sidebar.isVisible()
+            and not self.sidebar.isFloating()
+        ):
+            docks.append(self.sidebar)
+            widths.append(self._navigation_dock_width)
+
+        if (
+            self.detail_sidebar is not None
+            and self.detail_sidebar.isVisible()
+            and not self.detail_sidebar.isFloating()
+        ):
+            docks.append(self.detail_sidebar)
+            widths.append(self._detail_dock_width)
+
+        if docks:
+            self.resizeDocks(
+                docks,
+                widths,
+                Qt.Orientation.Horizontal,
+            )
+
+    @staticmethod
+    def _docks_are_horizontal(first, second) -> bool:
+        """Erkennt, ob zwei Docks bereits sauber nebeneinander liegen."""
+
+        first_geometry = first.geometry()
+        second_geometry = second.geometry()
+
+        # Bei horizontaler Anordnung liegen die vertikalen Bereiche fast
+        # vollständig übereinander und die Docks überlappen horizontal nicht.
+        same_vertical_band = (
+            abs(first_geometry.top() - second_geometry.top()) <= 8
+            and abs(first_geometry.bottom() - second_geometry.bottom()) <= 8
+        )
+        separate_horizontally = (
+            first_geometry.right() <= second_geometry.left() + 2
+            or second_geometry.right() <= first_geometry.left() + 2
+        )
+        return same_vertical_band and separate_horizontally
+
+    def _schedule_sidebar_dock_normalization(self) -> None:
+        """Normalisiert die Dock-Anordnung nach Drag & Drop.
+
+        QMainWindow erlaubt mit AllowNestedDocks grundsätzlich auch vertikale
+        Splits. Für ITAssetFlow sollen Navigation und Detailansicht jedoch
+        ausschließlich horizontal nebeneinander liegen.
+        """
+
+        if self._normalizing_sidebar_docks:
+            return
+        self._dock_layout_timer.start()
+
+    @Slot()
+    def _normalize_sidebar_dock_layout(self) -> None:
+        if self._normalizing_sidebar_docks:
+            return
+
+        if self.sidebar is None or self.detail_sidebar is None:
+            return
+
+        valid_areas = (
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        )
+
+        # Ist eine Sidebar frei schwebend, bleibt die andere in ihrer zuletzt
+        # vom Benutzer gewählten Breite. Es wird keine feste Breite gesetzt;
+        # der Benutzer kann sie danach weiterhin normal verstellen.
+        if self.sidebar.isFloating() or self.detail_sidebar.isFloating():
+            self._normalizing_sidebar_docks = True
+            try:
+                self._restore_visible_dock_widths()
+            finally:
+                self._normalizing_sidebar_docks = False
+            return
+
+        sidebar_area = self.dockWidgetArea(self.sidebar)
+        detail_area = self.dockWidgetArea(self.detail_sidebar)
+
+        if sidebar_area not in valid_areas or detail_area not in valid_areas:
+            return
+
+        # Auf gegenüberliegenden Seiten sind beide Docks bereits eindeutig
+        # getrennt und können weder übereinander noch ineinander liegen.
+        if sidebar_area != detail_area:
+            self._remember_sidebar_widths()
+            return
+
+        tabified = (
+            self.detail_sidebar in self.tabifiedDockWidgets(self.sidebar)
+            or self.sidebar in self.tabifiedDockWidgets(self.detail_sidebar)
+        )
+        horizontal = self._docks_are_horizontal(
+            self.sidebar,
+            self.detail_sidebar,
+        )
+
+        # Bereits korrekt nebeneinander: Breiten als Benutzerpräferenz merken.
+        if horizontal and not tabified:
+            self._remember_sidebar_widths()
+            return
+
+        self._normalizing_sidebar_docks = True
+        try:
+            area = sidebar_area
+
+            # Eine eventuell durch Drag & Drop entstandene Tab-Gruppe wird
+            # vollständig aufgelöst.
+            if tabified:
+                self.removeDockWidget(self.detail_sidebar)
+                self.addDockWidget(area, self.detail_sidebar)
+
+            # Auf derselben Seite ist ausschließlich horizontales Docking
+            # zulässig.
+            if area == Qt.DockWidgetArea.LeftDockWidgetArea:
+                first = self.sidebar
+                second = self.detail_sidebar
+                widths = [
+                    self._navigation_dock_width,
+                    self._detail_dock_width,
+                ]
+            else:
+                first = self.detail_sidebar
+                second = self.sidebar
+                widths = [
+                    self._detail_dock_width,
+                    self._navigation_dock_width,
+                ]
+
+            self.splitDockWidget(
+                first,
+                second,
+                Qt.Orientation.Horizontal,
+            )
+
+            first.show()
+            second.show()
+
+            self.resizeDocks(
+                [first, second],
+                widths,
+                Qt.Orientation.Horizontal,
+            )
+        finally:
+            self._normalizing_sidebar_docks = False
+
+    @Slot(bool)
+    def set_detail_sidebar_visible(self, visible: bool) -> None:
+        if self.detail_sidebar is None:
+            return
+
+        self.detail_sidebar.setVisible(visible)
+        if visible:
+            self.detail_sidebar.raise_()
+            self._schedule_sidebar_dock_normalization()
+
+    @Slot()
+    def dock_detail_sidebar_left(self) -> None:
+        self._dock_detail_sidebar(Qt.DockWidgetArea.LeftDockWidgetArea)
+
+    @Slot()
+    def dock_detail_sidebar_right(self) -> None:
+        self._dock_detail_sidebar(Qt.DockWidgetArea.RightDockWidgetArea)
+
+    def _dock_detail_sidebar(self, area: Qt.DockWidgetArea) -> None:
+        if self.detail_sidebar is None:
+            return
+
+        self._last_detail_sidebar_area = area
+        self.detail_sidebar.setFloating(False)
+        self.addDockWidget(area, self.detail_sidebar)
+        self.detail_sidebar.show()
+        self.detail_sidebar.raise_()
+        self._schedule_sidebar_dock_normalization()
+
+    @Slot()
+    def float_detail_sidebar(self) -> None:
+        if self.detail_sidebar is None:
+            return
+
+        self.detail_sidebar.setFloating(True)
+        self.detail_sidebar.show()
+        self.detail_sidebar.raise_()
+
+    @Slot(bool)
+    def _detail_sidebar_floating_changed(self, floating: bool) -> None:
+        self.detail_float_action.setEnabled(not floating)
+        self.detail_left_action.setEnabled(True)
+        self.detail_right_action.setEnabled(True)
+
+        if floating:
+            QTimer.singleShot(0, self._restore_visible_dock_widths)
+        else:
+            self._schedule_sidebar_dock_normalization()
+
+    @Slot(Qt.DockWidgetArea)
+    def _detail_sidebar_location_changed(
+        self,
+        area: Qt.DockWidgetArea,
+    ) -> None:
+        if area in (
+            Qt.DockWidgetArea.LeftDockWidgetArea,
+            Qt.DockWidgetArea.RightDockWidgetArea,
+        ):
+            self._last_detail_sidebar_area = area
+            self._schedule_sidebar_dock_normalization()
+
+    @Slot(bool)
+    def _detail_sidebar_visibility_changed(self, visible: bool) -> None:
+        self.detail_visible_action.blockSignals(True)
+        self.detail_visible_action.setChecked(visible)
+        self.detail_visible_action.blockSignals(False)
+
     @Slot()
     def _selection_changed(self) -> None:
-        if self.sidebar is None:
-            return
-        identifiers = [
-            get_asset_identifier(asset)
-            for asset in self.asset_table.get_selected_assets()
-        ]
-        self.sidebar.set_selection(identifiers)
+        selected_assets = self.asset_table.get_selected_assets()
+
+        if self.sidebar is not None:
+            identifiers = [
+                get_asset_identifier(asset)
+                for asset in selected_assets
+            ]
+            self.sidebar.set_selection(identifiers)
+
+        if self.detail_sidebar is not None:
+            self.detail_sidebar.set_assets(selected_assets)
 
     @Slot(int, int)
     def _update_count_labels(self, visible: int, total: int) -> None:

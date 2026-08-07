@@ -5,7 +5,17 @@ from typing import Any
 
 from supabase import Client
 
-from inventory import get_asset_identifier, get_category_label, get_inventory_group
+from inventory import (
+    get_asset_identifier,
+    get_category_label,
+    get_inventory_group,
+    fallback_specification_label,
+    get_specification_fields,
+    get_specification_label,
+    normalize_specification_key,
+    normalize_specifications,
+    specification_column_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +192,12 @@ class AssetRepository:
                     # Tabelle und Kategorie-Filter verwenden exakt denselben Namen.
                     asset["product_category_name"] = get_category_label(asset)
 
+                    AssetRepository._merge_specification_columns(
+                        asset,
+                        model,
+                        category,
+                    )
+
                 manufacturer = manufacturers_by_id.get(model.get("manufacturer_id"))
                 if isinstance(manufacturer, dict):
                     asset["manufacturer_name"] = manufacturer.get("name")
@@ -189,6 +205,95 @@ class AssetRepository:
             result.append(asset)
 
         return result
+
+    @staticmethod
+    def _merge_specification_columns(
+        asset: dict[str, Any],
+        model: dict[str, Any],
+        category: dict[str, Any],
+    ) -> None:
+        """Bereitet Spezifikationen robust für die Detailansicht auf.
+
+        1. Liest product_models.specifications und assets.specifications.
+        2. Normalisiert ältere/deutsche JSON-Schlüssel auf aktuelle Keys.
+        3. Nutzt specification_schema für Reihenfolge, Label und Scope.
+        4. Zeigt zusätzlich gespeicherte JSON-Werte, die noch nicht im
+           Schema definiert sind, statt sie still zu verstecken.
+        """
+
+        fields = get_specification_fields(
+            category.get("specification_schema")
+        )
+
+        model_specs = normalize_specifications(
+            model.get("specifications")
+        )
+        asset_specs = normalize_specifications(
+            asset.get("specifications")
+        )
+
+        labels = asset.setdefault("_specification_labels", {})
+        configured_keys: set[str] = set()
+
+        # Zuerst die im Kategorie-Schema definierten Felder in der
+        # dort festgelegten Reihenfolge anlegen.
+        for field in fields:
+            raw_key = str(field.get("key") or "").strip()
+            key = normalize_specification_key(raw_key)
+            if not key:
+                continue
+
+            configured_keys.add(key)
+            column_name = specification_column_name(key)
+            scope = str(
+                field.get("scope") or "model"
+            ).strip().casefold()
+
+            if scope == "asset":
+                value = asset_specs.get(key)
+                if value is None:
+                    value = model_specs.get(key)
+            else:
+                value = model_specs.get(key)
+
+                # Ein konkreter Asset-Wert darf einen Modellwert ergänzen/
+                # überschreiben, falls das Feld historisch dort gespeichert
+                # wurde. Dadurch gehen migrierte Daten nicht verloren.
+                if key in asset_specs and asset_specs.get(key) is not None:
+                    value = asset_specs.get(key)
+
+            asset[column_name] = value
+            labels[column_name] = get_specification_label(field)
+
+        # Danach alle tatsächlich gespeicherten, aber noch nicht im Schema
+        # beschriebenen Werte ergänzen. So bleibt die Detailansicht auch bei
+        # älteren Datenständen vollständig.
+        merged_specs = dict(model_specs)
+        merged_specs.update(
+            {
+                key: value
+                for key, value in asset_specs.items()
+                if value is not None
+            }
+        )
+
+        for key, value in merged_specs.items():
+            if key in configured_keys:
+                continue
+
+            column_name = specification_column_name(key)
+            asset[column_name] = value
+            labels[column_name] = fallback_specification_label(key)
+
+        asset["_has_specification_schema"] = bool(fields)
+        asset["_has_specification_values"] = any(
+            value is not None
+            and not (
+                isinstance(value, str)
+                and not value.strip()
+            )
+            for value in merged_specs.values()
+        )
 
     # ------------------------------------------------------------------
     # Aktueller fachlicher Zustand
