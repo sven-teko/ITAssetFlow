@@ -22,7 +22,6 @@ from .dock_manager import DockManager
 from .inventory_sidebar import InventorySidebar
 from .inventory_view_controller import InventoryViewController
 from .main_window_menu import MainWindowMenu
-from .theme import apply_light_theme
 
 from inventory import get_asset_identifier
 
@@ -33,7 +32,7 @@ class MainWindow(QMainWindow):
     MainWindow übernimmt nur noch die Koordination der UI-Komponenten.
 
     Ausgelagerte Verantwortlichkeiten:
-    - Docking/Floating/Breiten: DockManager
+    - Docking/Floating: DockManager
     - Menüleiste und Actions: MainWindowMenu
     - Inventar laden/Refresh/Cloud-Monitor: InventoryViewController
     """
@@ -69,7 +68,6 @@ class MainWindow(QMainWindow):
         self._create_status_bar()
 
         self._connect_signals()
-        self._apply_theme()
         self._restore_window_settings()
 
         QTimer.singleShot(
@@ -318,32 +316,16 @@ class MainWindow(QMainWindow):
     # Inventardaten / Filter / Auswahl
     # ------------------------------------------------------------------
 
-    @Slot(object, object)
-    def _inventory_loaded(
-        self,
-        assets: object,
-        categories: object,
-    ) -> None:
-        self.assets = [
-            row
-            for row in assets
-            if isinstance(row, dict)
-        ] if isinstance(assets, list) else []
-
-        category_rows = [
-            row
-            for row in categories
-            if isinstance(row, dict)
-        ] if isinstance(categories, list) else []
-
-        self.sidebar.rebuild_category_filter(
-            self.assets,
-            category_rows,
+    @Slot(object)
+    def _inventory_loaded(self, assets: object) -> None:
+        self.assets = (
+            [row for row in assets if isinstance(row, dict)]
+            if isinstance(assets, list)
+            else []
         )
 
-        self.asset_table.populate_assets(
-            self.assets
-        )
+        self.sidebar.rebuild_filters(self.assets)
+        self.asset_table.populate_assets(self.assets)
 
         self.apply_filter()
         self._selection_changed()
@@ -355,10 +337,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         self.assets = []
 
-        self.sidebar.rebuild_category_filter(
-            [],
-            [],
-        )
+        self.sidebar.rebuild_filters([])
+        self.sidebar.set_selection([])
         self.asset_table.clear_assets()
         self.detail_sidebar.set_assets([])
 
@@ -527,7 +507,7 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    # Hilfe / Theme
+    # Hilfe
     # ------------------------------------------------------------------
 
     @Slot()
@@ -552,11 +532,6 @@ class MainWindow(QMainWindow):
         )
         dialog.exec()
 
-    def _apply_theme(self) -> None:
-        apply_light_theme(
-            self
-        )
-
     # ------------------------------------------------------------------
     # Fensterzustand
     # ------------------------------------------------------------------
@@ -567,9 +542,11 @@ class MainWindow(QMainWindow):
         )
 
         if geometry:
-            self.restoreGeometry(
-                geometry
-            )
+            self.restoreGeometry(geometry)
+
+        state = self.settings_manager.load_window_state()
+        if state:
+            self.restoreState(state)
 
         if not self._is_on_available_screen():
             self._move_to_primary_screen()
@@ -632,8 +609,11 @@ class MainWindow(QMainWindow):
         self.settings_manager.save_window_geometry(
             self.saveGeometry()
         )
+        self.settings_manager.save_window_state(
+            self.saveState()
+        )
         self.settings_manager.save_window_maximized(
             self.isMaximized()
         )
 
-        event.accept()
+        super().closeEvent(event)

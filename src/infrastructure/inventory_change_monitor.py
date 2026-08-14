@@ -3,8 +3,16 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QObject,
+    QRunnable,
+    QThreadPool,
+    QTimer,
+    Signal,
+    Slot,
+)
 from supabase import Client
+
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +35,16 @@ class _RevisionWorker(QRunnable):
         except Exception as error:
             self.signals.failed.emit(str(error))
             return
+
         self.signals.success.emit(revision)
 
 
 class InventoryChangeMonitor(QObject):
-    """Performance-schonender Cloud-Änderungsmonitor.
+    """Prüft mit einer kleinen Revisionsabfrage auf Cloud-Änderungen.
 
-    Normalbetrieb:
-        alle 5 Sekunden genau eine sehr kleine SELECT-Abfrage auf
-        inventory_change_state.
-
-    Wenn die Hilfstabelle nicht eingerichtet wurde:
-        nach zwei Fehlern Fallback auf eine vollständige Aktualisierung
-        alle 60 Sekunden. Die Anwendung funktioniert dadurch trotzdem.
+    Normalbetrieb: alle 5 Sekunden ein SELECT auf ``inventory_change_state``.
+    Wenn diese Hilfstabelle nicht verfügbar ist, wird nach zwei Fehlern nur
+    noch alle 60 Sekunden ein vollständiger Reload angefordert.
     """
 
     changed = Signal()
@@ -51,16 +56,19 @@ class InventoryChangeMonitor(QObject):
     def __init__(
         self,
         client: Client,
+        *,
+        thread_pool: QThreadPool,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
+
         self.client = client
+        self._thread_pool = thread_pool
         self._last_revision: int | None = None
         self._failures = 0
         self._check_running = False
         self._fallback_mode = False
         self._active = False
-        self._thread_pool = QThreadPool.globalInstance()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -68,6 +76,7 @@ class InventoryChangeMonitor(QObject):
     def start(self) -> None:
         if self._active:
             return
+
         self._active = True
         self._timer.setInterval(self.NORMAL_INTERVAL_MS)
         self._timer.start()
@@ -79,6 +88,7 @@ class InventoryChangeMonitor(QObject):
 
     def notify_local_change(self) -> None:
         """Nach erfolgreicher lokaler Schreibaktion sofort neu laden."""
+
         if self._active:
             self.changed.emit()
 
@@ -89,6 +99,9 @@ class InventoryChangeMonitor(QObject):
         self._check_revision()
 
     def _check_revision(self) -> None:
+        if not self._active:
+            return
+
         self._check_running = True
         worker = _RevisionWorker(self._load_revision)
         worker.signals.success.connect(self._revision_loaded)
@@ -104,7 +117,11 @@ class InventoryChangeMonitor(QObject):
             .limit(1)
             .execute()
         )
-        rows = [row for row in (response.data or []) if isinstance(row, dict)]
+        rows = [
+            row
+            for row in (response.data or [])
+            if isinstance(row, dict)
+        ]
         if not rows:
             raise RuntimeError(
                 "inventory_change_state ist leer oder nicht lesbar."
@@ -114,6 +131,9 @@ class InventoryChangeMonitor(QObject):
     @Slot(object)
     def _revision_loaded(self, revision: Any) -> None:
         self._check_running = False
+        if not self._active:
+            return
+
         self._failures = 0
         current = int(revision)
 
@@ -133,8 +153,14 @@ class InventoryChangeMonitor(QObject):
     @Slot(str)
     def _revision_failed(self, message: str) -> None:
         self._check_running = False
+        if not self._active:
+            return
+
         self._failures += 1
-        logger.warning("Cloud-Änderungsprüfung fehlgeschlagen: %s", message)
+        logger.warning(
+            "Cloud-Änderungsprüfung fehlgeschlagen: %s",
+            message,
+        )
 
         if self._failures < 2:
             return
@@ -145,6 +171,5 @@ class InventoryChangeMonitor(QObject):
             self.mode_changed.emit("fallback")
             return
 
-        # Auch ohne Hilfstabelle bleibt automatische Aktualisierung möglich,
-        # nur deutlich seltener und dadurch mit mehr Datenverkehr.
+        # Im Fallback ersetzt ein vollständiger Reload die Revisionsprüfung.
         self.changed.emit()

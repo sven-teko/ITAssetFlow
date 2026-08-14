@@ -9,13 +9,13 @@ from supabase import Client
 from inventory import (
     get_asset_identifier,
     get_category_label,
-    get_inventory_group,
     fallback_specification_label,
     get_specification_fields,
     get_specification_label,
     normalize_specification_key,
     normalize_specifications,
     specification_column_name,
+    USAGE_STATE_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,12 +45,8 @@ class AssetRepository:
 
     def load_inventory(
         self,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> list[dict[str, Any]]:
         """Lädt Einzel-Assets und mengenverwaltete Lagerbestände gemeinsam.
-
-        Rückgabe:
-        - Einzelgeräte aus ``assets``
-        - Bestandszeilen aus ``stock_levels`` für quantity/hybrid-Modelle
 
         Beide Datensatzarten werden in dieselbe flache UI-Struktur gebracht.
         Technische Unterschiede bleiben über ``_record_type`` erhalten.
@@ -83,14 +79,14 @@ class AssetRepository:
             order_column="id",
             required=False,
         )
-        stock_levels = self.load_stock_levels()
+        stock_levels = self._load_stock_levels()
 
         if not product_models:
-            self._add_warning(
+            self._warn(
                 "Keine Produktmodelle lesbar. Prüfe SELECT/RLS für product_models."
             )
         if not product_categories:
-            self._add_warning(
+            self._warn(
                 "Keine Produktkategorien lesbar. Prüfe SELECT/RLS für product_categories."
             )
 
@@ -118,46 +114,14 @@ class AssetRepository:
             storage_locations,
         )
 
-        return merged_assets + stock_rows, product_categories
+        return merged_assets + stock_rows
 
-    def load_product_categories(self) -> list[dict[str, Any]]:
-        """Kompatibilitätsmethode für ältere MainWindow-Versionen."""
-
-        return self._load_rows(
-            "product_categories",
-            order_column="name",
-            required=False,
-        )
-
-    def enrich_component_state(self, assets: list[dict[str, Any]]) -> None:
-        """Kompatibilitätsmethode: ergänzt mindestens den Komponenteneinbau."""
-
-        self._enrich_component_assignments(assets)
-
-    def load_stock_levels(self) -> list[dict[str, Any]]:
+    def _load_stock_levels(self) -> list[dict[str, Any]]:
         """Lädt den berechneten Mengenbestand nach Lagerort und Zustand."""
 
         return self._load_rows(
             "stock_levels",
             order_column=None,
-            required=False,
-        )
-
-    def load_stock_movements(self) -> list[dict[str, Any]]:
-        """Lädt das unveränderliche Journal der Lagerbewegungen."""
-
-        return self._load_rows(
-            "stock_movements",
-            order_column="moved_at",
-            required=False,
-        )
-
-    def load_stock_counts(self) -> list[dict[str, Any]]:
-        """Lädt Inventurzählungen; für eine spätere Mengenbestandsansicht."""
-
-        return self._load_rows(
-            "stock_counts",
-            order_column="counted_at",
             required=False,
         )
 
@@ -182,8 +146,7 @@ class AssetRepository:
             message = f"Tabelle/View {table_name!r} konnte nicht gelesen werden: {error}"
             if required:
                 raise RuntimeError(message) from error
-            logger.warning(message, exc_info=True)
-            self._add_warning(message)
+            self._warn(message, exc_info=True)
             return []
 
         return [
@@ -318,7 +281,7 @@ class AssetRepository:
                 "condition": condition,
                 "stock_quantity": quantity,
                 "current_usage_state": "stored",
-                "inventory_usage": "Im Lager",
+                "inventory_usage": USAGE_STATE_LABELS["stored"],
                 "department_name": "",
                 "connected_product": "",
             }
@@ -474,13 +437,12 @@ class AssetRepository:
             storage_locations=storage_locations,
         )
         self._enrich_component_assignments(assets)
-        self._finalize_usage_state(assets)
 
     @staticmethod
     def _initialize_usage_fields(assets: list[dict[str, Any]]) -> None:
         for asset in assets:
             asset["current_usage_state"] = "unlocated"
-            asset["inventory_usage"] = "Nicht zugeordnet"
+            asset["inventory_usage"] = USAGE_STATE_LABELS["unlocated"]
             asset["connected_product"] = ""
             asset["connected_product_id"] = None
             asset["department_name"] = ""
@@ -547,7 +509,7 @@ class AssetRepository:
                 asset["storage_location_id"] = location_id
                 asset["storage_location"] = self._location_label(location, location_id)
                 asset["current_usage_state"] = "stored"
-                asset["inventory_usage"] = "Im Lager"
+                asset["inventory_usage"] = USAGE_STATE_LABELS["stored"]
 
             assignment = current_assignments.get(asset_id)
             if assignment is not None:
@@ -562,7 +524,9 @@ class AssetRepository:
                     employee = employees_by_id.get(employee_id)
                     asset["assigned_to"] = self._employee_label(employee, employee_id)
                     if isinstance(employee, dict):
-                        department_id = employee.get("department_id")
+                        employee_department_id = employee.get("department_id")
+                        if employee_department_id is not None:
+                            department_id = employee_department_id
                 elif department_id is not None:
                     department = departments_by_id.get(department_id)
                     asset["assigned_to"] = self._department_label(department, department_id)
@@ -577,7 +541,7 @@ class AssetRepository:
                     )
 
                 asset["current_usage_state"] = "assigned"
-                asset["inventory_usage"] = "Zugewiesen"
+                asset["inventory_usage"] = USAGE_STATE_LABELS["assigned"]
 
     def _enrich_component_assignments(
         self,
@@ -605,21 +569,13 @@ class AssetRepository:
             parent = assets_by_id.get(parent_id)
 
             child["current_usage_state"] = "connected"
-            child["inventory_usage"] = "Verbunden"
+            child["inventory_usage"] = USAGE_STATE_LABELS["connected"]
             child["connected_product_id"] = parent_id
             child["connected_product"] = (
                 get_asset_identifier(parent)
                 if parent is not None
                 else str(parent_id or "")
             )
-
-    @staticmethod
-    def _finalize_usage_state(assets: list[dict[str, Any]]) -> None:
-        # Absichtlich klein gehalten. Die Methode dient als Erweiterungspunkt
-        # für spätere Regeln, ohne MainWindow oder Tabellenwidget anzupassen.
-        for asset in assets:
-            if asset.get("current_usage_state") == "unlocated":
-                asset["inventory_usage"] = "Nicht zugeordnet"
 
     # ------------------------------------------------------------------
     # Hilfsfunktionen
@@ -692,49 +648,15 @@ class AssetRepository:
                 return code
         return f"Lagerort #{location_id}"
 
-    def _add_warning(self, message: str) -> None:
-        logger.warning(message)
+    def _warn(
+        self,
+        message: str,
+        *,
+        exc_info: bool = False,
+    ) -> None:
+        logger.warning(message, exc_info=exc_info)
         if self.catalog_warning:
             if message not in self.catalog_warning:
                 self.catalog_warning = f"{self.catalog_warning}\n{message}"
         else:
             self.catalog_warning = message
-
-    # ------------------------------------------------------------------
-    # Kompatibilität mit älteren Repository-Versionen
-    # ------------------------------------------------------------------
-
-    def load_assets_with_product_model(self) -> Any:
-        """Ältere API: versucht weiterhin das PostgREST-Embedding."""
-
-        return (
-            self.client
-            .table(self.asset_table_name)
-            .select(
-                "*, product_model:product_models(*, category:product_categories(*))"
-            )
-            .order("id")
-            .execute()
-        )
-
-    @staticmethod
-    def flatten_asset(asset: dict[str, Any]) -> dict[str, Any]:
-        """Ältere API: verschachtelte model/category-Daten abflachen."""
-
-        flattened = {
-            key: value
-            for key, value in asset.items()
-            if key != "product_model"
-        }
-        product_model = asset.get("product_model")
-        if not isinstance(product_model, dict):
-            return flattened
-
-        category = product_model.get("category")
-        for key, value in product_model.items():
-            if key != "category":
-                flattened[f"product_model_{key}"] = value
-        if isinstance(category, dict):
-            for key, value in category.items():
-                flattened[f"product_category_{key}"] = value
-        return flattened

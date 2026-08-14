@@ -16,11 +16,11 @@ from PySide6.QtWidgets import (
 )
 
 from inventory import (
-    CONDITION_LABELS,
     INVENTORY_GROUP_LABELS,
     get_category_key,
     get_category_label,
     get_condition_key,
+    get_condition_label,
     get_inventory_group,
 )
 
@@ -139,6 +139,8 @@ class InventorySidebar(QDockWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__("Navigation", parent)
+        self._is_loading = False
+        self._selection_count = 0
         self._build_ui()
         self._connect_signals()
 
@@ -153,125 +155,6 @@ class InventorySidebar(QDockWidget):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         self.setMinimumWidth(300)
-
-        # Lokales Sidebar-Design: etwas grösser, klarer und unabhängig von
-        # der Windows-Hell/Dunkel-Palette.
-        self.setStyleSheet("""
-            QDockWidget#navigationSidebar {
-                background-color: #f1f3f5;
-                color: #1f2937;
-                font-size: 10.5pt;
-            }
-
-            QDockWidget#navigationSidebar::title {
-                background-color: #e7eaee;
-                color: #111827;
-                padding: 8px 10px;
-                font-size: 10.5pt;
-                font-weight: 600;
-                border-bottom: 1px solid #d5d9df;
-            }
-
-            QWidget#navigationContent {
-                background-color: #f1f3f5;
-                color: #1f2937;
-            }
-
-            QLabel {
-                background-color: transparent;
-                color: #374151;
-                font-size: 10.5pt;
-            }
-
-            QLabel#sidebarTitle {
-                color: #111827;
-                font-size: 10.5pt;
-                font-weight: 600;
-            }
-
-            QLabel#selectionLabel {
-                background-color: #ffffff;
-                color: #374151;
-                border: 1px solid #d8dde5;
-                border-radius: 6px;
-                padding: 8px 9px;
-            }
-
-            QLabel#sidebarCountLabel {
-                color: #6b7280;
-                padding-top: 2px;
-            }
-
-            QLineEdit,
-            QPushButton#filterDropdownButton,
-            QPushButton {
-                min-height: 34px;
-                font-size: 10.5pt;
-                border: 1px solid #cfd5dd;
-                border-radius: 6px;
-                padding: 0px 10px;
-                background-color: #ffffff;
-                color: #1f2937;
-            }
-
-            QLineEdit:focus,
-            QPushButton#filterDropdownButton:focus,
-            QPushButton:focus {
-                border: 1px solid #9ca9bb;
-            }
-
-            QPushButton:hover {
-                background-color: #f8fafc;
-            }
-
-            QPushButton:disabled {
-                background-color: #eceff3;
-                color: #9aa3af;
-            }
-
-            QMenu {
-                background-color: #ffffff;
-                color: #1f2937;
-                border: 1px solid #d5d9df;
-                font-size: 10.5pt;
-                padding: 5px;
-            }
-
-            QMenu::item {
-                padding: 7px 10px;
-                border-radius: 4px;
-            }
-
-            QMenu::item:selected {
-                background-color: #eef2f6;
-            }
-
-            QCheckBox {
-                color: #1f2937;
-                font-size: 10.5pt;
-                spacing: 8px;
-                padding: 5px 8px;
-            }
-
-            QCheckBox#filterOption {
-                background-color: transparent;
-                border-radius: 5px;
-                padding: 7px 10px;
-            }
-
-            QCheckBox#filterOption:hover {
-                background-color: #e8eef5;
-                color: #111827;
-            }
-
-            QCheckBox#filterOption:checked {
-                background-color: #f3f6fa;
-            }
-
-            QCheckBox#filterOption:checked:hover {
-                background-color: #e3ebf4;
-            }
-        """)
 
         content = QWidget()
         content.setObjectName("navigationContent")
@@ -411,10 +294,9 @@ class InventorySidebar(QDockWidget):
         condition_key = get_condition_key(asset)
         return condition_key is not None and condition_key in selected
 
-    def rebuild_category_filter(
+    def rebuild_filters(
         self,
         assets: list[dict[str, Any]],
-        category_rows: list[dict[str, Any]] | None = None,
     ) -> None:
         """Baut Inventartyp- und Kategorie-Filter nur aus sichtbaren Asset-Daten.
 
@@ -423,7 +305,6 @@ class InventorySidebar(QDockWidget):
         derselben Mapping-Funktion wie die Tabellenanzeige.
         """
 
-        del category_rows  # Für diese Asset-Ansicht bewusst nicht verwendet.
 
         groups: dict[str, str] = {}
         categories: dict[str, str] = {}
@@ -443,10 +324,7 @@ class InventorySidebar(QDockWidget):
 
             condition_key = get_condition_key(asset)
             if condition_key is not None:
-                conditions[condition_key] = CONDITION_LABELS.get(
-                    condition_key,
-                    condition_key.replace("_", " ").title(),
-                )
+                conditions[condition_key] = get_condition_label(asset)
 
         if groups:
             self.group_dropdown.setEnabled(True)
@@ -501,29 +379,34 @@ class InventorySidebar(QDockWidget):
             )
 
     def set_loading_state(self, is_loading: bool) -> None:
-        # Suche und Filter bleiben während des Ladens bedienbar.
-        # Schreibaktionen werden vorsichtshalber gesperrt.
-        self.create_button.setEnabled(not is_loading)
-        if is_loading:
-            self.edit_button.setEnabled(False)
-            self.delete_button.setEnabled(False)
+        self._is_loading = is_loading
+        self._update_action_state()
 
     def set_selection(self, identifiers: list[str]) -> None:
-        count = len(identifiers)
-        if count == 0:
+        self._selection_count = len(identifiers)
+
+        if self._selection_count == 0:
             self.selection_label.setText("Kein Eintrag ausgewählt")
-            self.edit_button.setEnabled(False)
-            self.delete_button.setEnabled(False)
-        elif count == 1:
+        elif self._selection_count == 1:
             self.selection_label.setText(
                 f"Ausgewählter Eintrag:\n{identifiers[0]}"
             )
-            self.edit_button.setEnabled(True)
-            self.delete_button.setEnabled(True)
         else:
-            self.selection_label.setText(f"{count} Einträge ausgewählt")
-            self.edit_button.setEnabled(False)
-            self.delete_button.setEnabled(True)
+            self.selection_label.setText(
+                f"{self._selection_count} Einträge ausgewählt"
+            )
+
+        self._update_action_state()
+
+    def _update_action_state(self) -> None:
+        writable = not self._is_loading
+        self.create_button.setEnabled(writable)
+        self.edit_button.setEnabled(
+            writable and self._selection_count == 1
+        )
+        self.delete_button.setEnabled(
+            writable and self._selection_count > 0
+        )
 
     def set_count_text(self, text: str) -> None:
         self.count_label.setText(text)

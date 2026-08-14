@@ -19,6 +19,8 @@ from inventory import (
     SPECIFICATION_COLUMN_PREFIX,
     format_inventory_value,
     get_asset_identifier,
+    is_specification_column,
+    is_stock_record,
 )
 
 
@@ -71,120 +73,6 @@ class AssetDetailSidebar(QDockWidget):
         )
         self.setMinimumWidth(380)
 
-        # Die Anwendung verwendet eine helle Oberfläche. Windows-Dark-Mode
-        # darf deshalb nicht dazu führen, dass der Scroll-/Content-Bereich
-        # schwarz wird, während die Labels weiterhin dunkle Schrift haben.
-        # Das Stylesheet ist bewusst nur auf diese Detailansicht begrenzt.
-        self.setStyleSheet("""
-            QDockWidget#assetDetailSidebar {
-                background-color: #f1f3f5;
-                color: #1f2937;
-                font-size: 10.5pt;
-            }
-
-            QDockWidget#assetDetailSidebar::title {
-                background-color: #e7eaee;
-                color: #111827;
-                padding: 8px 10px;
-                font-size: 10.5pt;
-                font-weight: 600;
-                border-bottom: 1px solid #d5d9df;
-            }
-
-            QWidget#detailRoot,
-            QWidget#detailDetailsWidget,
-            QScrollArea#detailScrollArea,
-            QScrollArea#detailScrollArea > QWidget > QWidget {
-                background-color: #f1f3f5;
-                color: #1f2937;
-            }
-
-            QWidget#detailSection {
-                background-color: #ffffff;
-                border: 1px solid #dde2e8;
-                border-radius: 7px;
-            }
-
-            QLabel {
-                background-color: transparent;
-                color: #374151;
-                font-size: 10.5pt;
-            }
-
-            QLabel#detailSelectionTitle {
-                color: #111827;
-                font-size: 12pt;
-                font-weight: 700;
-            }
-
-            QLabel#detailSelectionHint {
-                color: #5b6470;
-                font-size: 10.5pt;
-            }
-
-            QLabel#detailSectionTitle {
-                color: #111827;
-                font-size: 10.5pt;
-                font-weight: 700;
-            }
-
-            QLabel#detailFieldName {
-                color: #5b6470;
-                font-size: 10.5pt;
-            }
-
-            QLabel#detailFieldValue {
-                color: #111827;
-                font-size: 10.5pt;
-                font-weight: 500;
-            }
-
-            QLabel#detailInfoText {
-                color: #5b6470;
-                font-size: 10.5pt;
-            }
-
-            QFrame#detailSeparator {
-                color: #cfd5dd;
-                background-color: #cfd5dd;
-                max-height: 1px;
-            }
-
-            QScrollBar:vertical {
-                background: #e9edf1;
-                width: 12px;
-                margin: 0px;
-            }
-
-            QScrollBar::handle:vertical {
-                background: #b9c1cb;
-                min-height: 28px;
-                border-radius: 5px;
-            }
-
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-
-            QScrollBar:horizontal {
-                background: #e9edf1;
-                height: 12px;
-                margin: 0px;
-            }
-
-            QScrollBar::handle:horizontal {
-                background: #b9c1cb;
-                min-width: 28px;
-                border-radius: 5px;
-            }
-
-            QScrollBar::add-line:horizontal,
-            QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
-        """)
-
         self._root = QWidget(self)
         self._root.setObjectName("detailRoot")
         root_layout = QVBoxLayout(self._root)
@@ -193,10 +81,6 @@ class AssetDetailSidebar(QDockWidget):
 
         self.selection_title = QLabel("Kein Asset ausgewählt")
         self.selection_title.setObjectName("detailSelectionTitle")
-        font = self.selection_title.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() + 1)
-        self.selection_title.setFont(font)
         self.selection_title.setWordWrap(True)
 
         self.selection_hint = QLabel(
@@ -268,7 +152,7 @@ class AssetDetailSidebar(QDockWidget):
                 part for part in (model_name, category_name)
                 if part
             ]
-            if asset.get("_record_type") == "stock":
+            if is_stock_record(asset):
                 summary_parts.insert(0, "Lagerartikel")
 
             self.selection_hint.setText(
@@ -361,7 +245,7 @@ class AssetDetailSidebar(QDockWidget):
         # Das Repository legt die spec_* Felder in der Reihenfolge des
         # specification_schema in das Asset-Dictionary.
         for field_name, value in asset.items():
-            if not field_name.startswith(SPECIFICATION_COLUMN_PREFIX):
+            if not is_specification_column(field_name):
                 continue
 
             label = str(
@@ -431,7 +315,7 @@ class AssetDetailSidebar(QDockWidget):
             keys = {
                 key
                 for key in asset
-                if key.startswith(SPECIFICATION_COLUMN_PREFIX)
+                if is_specification_column(key)
             }
             common_keys = keys if common_keys is None else common_keys & keys
 
@@ -606,9 +490,6 @@ class AssetDetailSidebar(QDockWidget):
 
         title_label = QLabel(title)
         title_label.setObjectName("detailSectionTitle")
-        title_font = title_label.font()
-        title_font.setBold(True)
-        title_label.setFont(title_font)
         layout.addWidget(title_label)
 
         grid = QGridLayout()
@@ -663,9 +544,7 @@ class AssetDetailSidebar(QDockWidget):
         layout.setSpacing(7)
 
         title_label = QLabel(title)
-        title_font = title_label.font()
-        title_font.setBold(True)
-        title_label.setFont(title_font)
+        title_label.setObjectName("detailSectionTitle")
 
         info = QLabel(text)
         info.setObjectName("detailInfoText")

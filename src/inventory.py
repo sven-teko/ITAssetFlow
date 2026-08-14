@@ -105,18 +105,28 @@ CONDITION_LABELS = {
     "defective": "Defekt",
 }
 
-TRACKING_MODE_LABELS = {
-    "serialized": "Einzeln",
-    "quantity": "Menge",
-    "hybrid": "Hybrid",
-}
-
 USAGE_STATE_LABELS = {
     "connected": "Verbunden",
     "installed": "Verbunden",  # Fallback für ältere Datenstände
     "assigned": "Zugewiesen",
     "stored": "Im Lager",
     "unlocated": "Nicht zugeordnet",
+}
+
+INVENTORY_GROUP_ALIASES = {
+    "device": "device",
+    "geraet": "device",
+    "gerät": "device",
+    "peripheral": "peripheral",
+    "peripherie": "peripheral",
+    "component": "component",
+    "komponente": "component",
+    "spare_part": "component",
+    "ersatzteil": "component",
+    "consumable": "consumable",
+    "verbrauchsmaterial": "consumable",
+    "other": "other",
+    "sonstiges": "other",
 }
 
 # ---------------------------------------------------------------------------
@@ -248,7 +258,6 @@ SPECIFICATION_FALLBACK_LABELS = {
     "memory_slots": "RAM-Steckplätze",
     "power_w": "Leistung [W]",
     "efficiency_rating": "Effizienz",
-    "storage_gb": "Speicher [GB]",
     "phone_type": "Telefontyp",
     "voip": "VoIP",
     "camera_type": "Kameratyp",
@@ -335,17 +344,6 @@ def get_specification_label(field: dict[str, Any]) -> str:
     unit = str(field.get("unit") or "").strip()
     return f"{label} [{unit}]" if unit else label
 
-NAME_FIELDS = (
-    "asset_tag",
-    "serial_number",
-    "product_model_name",
-    "manufacturer_name",
-    "product_category_name",
-    "department_name",
-    "storage_location",
-    "connected_product",
-)
-
 
 def get_category_key(asset: dict[str, Any]) -> str | None:
     """Liefert einen stabilen technischen Schlüssel für den Kategorie-Filter."""
@@ -415,23 +413,8 @@ def get_inventory_group(asset: dict[str, Any]) -> str:
     database_group = asset.get("product_category_inventory_group")
     if database_group is not None:
         normalized = str(database_group).strip().casefold()
-        aliases = {
-            "device": "device",
-            "geraet": "device",
-            "gerät": "device",
-            "peripheral": "peripheral",
-            "peripherie": "peripheral",
-            "component": "component",
-            "komponente": "component",
-            "spare_part": "component",
-            "ersatzteil": "component",
-            "consumable": "consumable",
-            "verbrauchsmaterial": "consumable",
-            "other": "other",
-            "sonstiges": "other",
-        }
-        if normalized in aliases:
-            return aliases[normalized]
+        if normalized in INVENTORY_GROUP_ALIASES:
+            return INVENTORY_GROUP_ALIASES[normalized]
 
     code = str(asset.get("product_category_code") or "").strip().casefold()
     if code in DEVICE_CATEGORY_CODES:
@@ -487,6 +470,6 @@ def format_inventory_value(column_name: str, value: Any) -> str:
         return f"{number:.3f}".rstrip("0").rstrip(".")
 
     if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
     return str(value)

@@ -238,27 +238,3 @@ class MainWindowMenu(QObject):
         self.refresh_action.setEnabled(
             not loading
         )
-
-    def set_navigation_actions_enabled(
-        self,
-        enabled: bool,
-    ) -> None:
-        for action in (
-            self.navigation_visible_action,
-            self.navigation_left_action,
-            self.navigation_right_action,
-            self.navigation_float_action,
-        ):
-            action.setEnabled(enabled)
-
-    def set_detail_actions_enabled(
-        self,
-        enabled: bool,
-    ) -> None:
-        for action in (
-            self.detail_visible_action,
-            self.detail_left_action,
-            self.detail_right_action,
-            self.detail_float_action,
-        ):
-            action.setEnabled(enabled)
