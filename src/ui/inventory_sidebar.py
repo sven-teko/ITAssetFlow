@@ -16,9 +16,11 @@ from PySide6.QtWidgets import (
 )
 
 from inventory import (
+    CONDITION_LABELS,
     INVENTORY_GROUP_LABELS,
     get_category_key,
     get_category_label,
+    get_condition_key,
     get_inventory_group,
 )
 
@@ -302,17 +304,27 @@ class InventorySidebar(QDockWidget):
             "Kategorien werden geladen ..."
         )
 
+        condition_title = QLabel("Zustand")
+        condition_title.setObjectName("sidebarTitle")
+        self.condition_dropdown = MultiSelectDropdown(
+            "Alle Zustände"
+        )
+        self.condition_dropdown.setEnabled(False)
+        self.condition_dropdown.button.setText(
+            "Zustände werden geladen ..."
+        )
+
         action_title = QLabel("Inventar")
         action_title.setObjectName("sidebarTitle")
-        self.create_button = QPushButton("Neues Asset")
-        self.edit_button = QPushButton("Asset bearbeiten")
-        self.delete_button = QPushButton("Assets löschen")
+        self.create_button = QPushButton("Neuer Eintrag")
+        self.edit_button = QPushButton("Eintrag bearbeiten")
+        self.delete_button = QPushButton("Einträge löschen")
         self.edit_button.setEnabled(False)
         self.delete_button.setEnabled(False)
 
         selection_title = QLabel("Auswahl")
         selection_title.setObjectName("sidebarTitle")
-        self.selection_label = QLabel("Kein Asset ausgewählt")
+        self.selection_label = QLabel("Kein Eintrag ausgewählt")
         self.selection_label.setObjectName("selectionLabel")
         self.selection_label.setWordWrap(True)
         self.count_label = QLabel("0 Datensätze")
@@ -325,6 +337,8 @@ class InventorySidebar(QDockWidget):
         layout.addWidget(self.group_dropdown)
         layout.addWidget(category_title)
         layout.addWidget(self.category_dropdown)
+        layout.addWidget(condition_title)
+        layout.addWidget(self.condition_dropdown)
         layout.addSpacing(8)
         layout.addWidget(action_title)
         layout.addWidget(self.create_button)
@@ -346,6 +360,9 @@ class InventorySidebar(QDockWidget):
         self.category_dropdown.selection_changed.connect(
             self.filter_changed.emit
         )
+        self.condition_dropdown.selection_changed.connect(
+            self.filter_changed.emit
+        )
         self.create_button.clicked.connect(
             lambda _checked=False: self.create_requested.emit()
         )
@@ -361,7 +378,11 @@ class InventorySidebar(QDockWidget):
         return self.search_input.text()
 
     def matches(self, asset: dict[str, Any] | None) -> bool:
-        return self.matches_group(asset) and self.matches_category(asset)
+        return (
+            self.matches_group(asset)
+            and self.matches_category(asset)
+            and self.matches_condition(asset)
+        )
 
     def matches_group(self, asset: dict[str, Any] | None) -> bool:
         selected = self.group_dropdown.selected_keys
@@ -380,6 +401,16 @@ class InventorySidebar(QDockWidget):
         category_key = get_category_key(asset)
         return category_key is not None and category_key in selected
 
+    def matches_condition(self, asset: dict[str, Any] | None) -> bool:
+        selected = self.condition_dropdown.selected_keys
+        if not selected:
+            return True
+        if asset is None:
+            return False
+
+        condition_key = get_condition_key(asset)
+        return condition_key is not None and condition_key in selected
+
     def rebuild_category_filter(
         self,
         assets: list[dict[str, Any]],
@@ -396,6 +427,7 @@ class InventorySidebar(QDockWidget):
 
         groups: dict[str, str] = {}
         categories: dict[str, str] = {}
+        conditions: dict[str, str] = {}
 
         for asset in assets:
             group_key = get_inventory_group(asset)
@@ -408,6 +440,13 @@ class InventorySidebar(QDockWidget):
             category_key = get_category_key(asset)
             if category_key is not None:
                 categories[category_key] = get_category_label(asset)
+
+            condition_key = get_condition_key(asset)
+            if condition_key is not None:
+                conditions[condition_key] = CONDITION_LABELS.get(
+                    condition_key,
+                    condition_key.replace("_", " ").title(),
+                )
 
         if groups:
             self.group_dropdown.setEnabled(True)
@@ -431,19 +470,35 @@ class InventorySidebar(QDockWidget):
                 "Keine Kategorien verfügbar"
             )
             self.category_dropdown.button.setToolTip(
-                "In der aktuellen Asset-Tabelle sind keine Kategorien vorhanden."
+                "In der aktuellen Inventartabelle sind keine Kategorien vorhanden."
             )
-            return
+        else:
+            self.category_dropdown.setEnabled(True)
+            self.category_dropdown.button.setToolTip("")
+            self.category_dropdown.set_options(
+                sorted(
+                    categories.items(),
+                    key=lambda item: item[1].casefold(),
+                ),
+                preserve_selection=True,
+            )
 
-        self.category_dropdown.setEnabled(True)
-        self.category_dropdown.button.setToolTip("")
-        self.category_dropdown.set_options(
-            sorted(
-                categories.items(),
-                key=lambda item: item[1].casefold(),
-            ),
-            preserve_selection=True,
-        )
+        if conditions:
+            self.condition_dropdown.setEnabled(True)
+            self.condition_dropdown.button.setToolTip("")
+            self.condition_dropdown.set_options(
+                sorted(
+                    conditions.items(),
+                    key=lambda item: item[1].casefold(),
+                ),
+                preserve_selection=True,
+            )
+        else:
+            self.condition_dropdown.set_options([])
+            self.condition_dropdown.setEnabled(False)
+            self.condition_dropdown.button.setText(
+                "Keine Zustände verfügbar"
+            )
 
     def set_loading_state(self, is_loading: bool) -> None:
         # Suche und Filter bleiben während des Ladens bedienbar.
@@ -456,17 +511,17 @@ class InventorySidebar(QDockWidget):
     def set_selection(self, identifiers: list[str]) -> None:
         count = len(identifiers)
         if count == 0:
-            self.selection_label.setText("Kein Asset ausgewählt")
+            self.selection_label.setText("Kein Eintrag ausgewählt")
             self.edit_button.setEnabled(False)
             self.delete_button.setEnabled(False)
         elif count == 1:
             self.selection_label.setText(
-                f"Ausgewähltes Asset:\n{identifiers[0]}"
+                f"Ausgewählter Eintrag:\n{identifiers[0]}"
             )
             self.edit_button.setEnabled(True)
             self.delete_button.setEnabled(True)
         else:
-            self.selection_label.setText(f"{count} Assets ausgewählt")
+            self.selection_label.setText(f"{count} Einträge ausgewählt")
             self.edit_button.setEnabled(False)
             self.delete_button.setEnabled(True)
 

@@ -28,6 +28,8 @@ GENERAL_DETAIL_FIELDS = (
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
+    "condition",
+    "stock_quantity",
     "department_name",
     "storage_location",
     "connected_product",
@@ -36,7 +38,6 @@ GENERAL_DETAIL_FIELDS = (
     "purchase_date",
     "new_price",
     "warranty_until",
-    "retired_at",
     "note",
 )
 
@@ -267,21 +268,24 @@ class AssetDetailSidebar(QDockWidget):
                 part for part in (model_name, category_name)
                 if part
             ]
+            if asset.get("_record_type") == "stock":
+                summary_parts.insert(0, "Lagerartikel")
+
             self.selection_hint.setText(
                 " · ".join(summary_parts)
                 if summary_parts
-                else "1 Asset ausgewählt"
+                else "1 Eintrag ausgewählt"
             )
 
             general_rows = self._single_general_rows(asset)
             specification_rows = self._single_specification_rows(asset)
         else:
             self.selection_title.setText(
-                f"{len(valid_assets)} Assets ausgewählt"
+                f"{len(valid_assets)} Einträge ausgewählt"
             )
             self.selection_hint.setText(
                 "Es werden nur Werte angezeigt, die bei allen "
-                "ausgewählten Assets gleich sind."
+                "ausgewählten Einträgen gleich sind."
             )
 
             general_rows = self._common_general_rows(valid_assets)
@@ -303,7 +307,7 @@ class AssetDetailSidebar(QDockWidget):
                 self._add_info_section(
                     "Spezifikationen",
                     "Keine identischen Spezifikationswerte bei allen "
-                    "ausgewählten Assets vorhanden.",
+                    "ausgewählten Einträgen vorhanden.",
                 )
 
         if not general_rows and not specification_rows:

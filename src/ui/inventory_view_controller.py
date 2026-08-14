@@ -19,7 +19,7 @@ class InventoryViewController(QObject):
     """Steuert Laden und automatische Aktualisierung des Inventars.
 
     Aufgaben:
-    - Inventardaten über AssetRepository laden
+    - Inventardaten (Assets + Mengenbestand) über AssetRepository laden
     - Cloud-Änderungen über InventoryChangeMonitor beobachten
     - schnelle Reload-Anforderungen bündeln
     - Loading-, Status- und Fehlerzustände an die UI melden
@@ -135,13 +135,13 @@ class InventoryViewController(QObject):
                     warning,
                 )
                 self.status_message.emit(
-                    f"{len(self.assets)} Datensätze geladen; "
+                    f"{len(self.assets)} Inventareinträge geladen; "
                     "einige Zusatzdaten sind nicht lesbar. Siehe Log.",
                     8000,
                 )
             else:
                 self.status_message.emit(
-                    f"{len(self.assets)} Datensätze geladen.",
+                    f"{len(self.assets)} Inventareinträge geladen.",
                     3500,
                 )
 

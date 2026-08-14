@@ -461,7 +461,7 @@ class MainWindow(QMainWindow):
     def show_create_asset_placeholder(self) -> None:
         QMessageBox.information(
             self,
-            "Neues Asset",
+            "Neuer Eintrag",
             "Diese Funktion wird im nächsten Schritt ergänzt.",
         )
 
@@ -474,14 +474,14 @@ class MainWindow(QMainWindow):
         if asset is None:
             QMessageBox.information(
                 self,
-                "Asset bearbeiten",
-                "Bitte genau ein Asset auswählen.",
+                "Eintrag bearbeiten",
+                "Bitte genau einen Eintrag auswählen.",
             )
             return
 
         QMessageBox.information(
             self,
-            "Asset bearbeiten",
+            "Eintrag bearbeiten",
             (
                 "Diese Funktion wird im nächsten Schritt ergänzt.\n\n"
                 f"Ausgewählt: {get_asset_identifier(asset)}"
@@ -497,8 +497,8 @@ class MainWindow(QMainWindow):
         if not assets:
             QMessageBox.information(
                 self,
-                "Assets löschen",
-                "Bitte zuerst mindestens ein Asset auswählen.",
+                "Einträge löschen",
+                "Bitte zuerst mindestens einen Eintrag auswählen.",
             )
             return
 
@@ -519,10 +519,10 @@ class MainWindow(QMainWindow):
 
         QMessageBox.information(
             self,
-            "Assets löschen",
+            "Einträge löschen",
             (
                 "Diese Funktion wird im nächsten Schritt ergänzt.\n\n"
-                f"{len(assets)} Assets ausgewählt:\n{text}"
+                f"{len(assets)} Einträge ausgewählt:\n{text}"
             ),
         )
 

@@ -96,6 +96,15 @@ STATUS_LABELS = {
     "active": "Aktiv",
 }
 
+
+CONDITION_LABELS = {
+    "new": "Neu",
+    "like_new": "Neuwertig",
+    "used": "Gebraucht",
+    "worn": "Stark gebraucht",
+    "defective": "Defekt",
+}
+
 TRACKING_MODE_LABELS = {
     "serialized": "Einzeln",
     "quantity": "Menge",
@@ -123,6 +132,8 @@ PREFERRED_COLUMN_ORDER = [
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
+    "condition",
+    "stock_quantity",
     "department_name",
     "storage_location",
     "connected_product",
@@ -131,7 +142,6 @@ PREFERRED_COLUMN_ORDER = [
     "purchase_date",
     "new_price",
     "warranty_until",
-    "retired_at",
     "note",
     "created_at",
     "updated_at",
@@ -143,9 +153,10 @@ DEFAULT_VISIBLE_COLUMNS = {
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
+    "condition",
+    "stock_quantity",
     "department_name",
     "storage_location",
-    "connected_product",
     "status",
 }
 
@@ -155,6 +166,8 @@ HEADER_LABELS = {
     "product_model_name": "Produktmodell",
     "manufacturer_name": "Hersteller",
     "product_category_name": "Produktkategorie",
+    "condition": "Zustand",
+    "stock_quantity": "Lagerbestand",
     "department_name": "Abteilung",
     "storage_location": "Lagerort",
     "connected_product": "Verbundenes Produkt",
@@ -163,7 +176,6 @@ HEADER_LABELS = {
     "purchase_date": "Kaufdatum",
     "new_price": "Neupreis",
     "warranty_until": "Garantie bis",
-    "retired_at": "Ausgemustert am",
     "note": "Bemerkungen",
     "created_at": "Erstellt am",
     "updated_at": "Geändert am",
@@ -367,6 +379,36 @@ def get_category_label(asset: dict[str, Any]) -> str:
     return "Unbekannte Kategorie"
 
 
+def get_condition_key(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+
+    value = item.get("condition")
+    if value is None:
+        return None
+
+    normalized = str(value).strip().casefold()
+    return normalized or None
+
+
+def get_condition_label(item: dict[str, Any] | None) -> str:
+    key = get_condition_key(item)
+    if key is None:
+        return ""
+
+    return CONDITION_LABELS.get(
+        key,
+        key.replace("_", " ").title(),
+    )
+
+
+def is_stock_record(item: dict[str, Any] | None) -> bool:
+    return (
+        isinstance(item, dict)
+        and item.get("_record_type") == "stock"
+    )
+
+
 def get_inventory_group(asset: dict[str, Any]) -> str:
     """Bestimmt den Inventartyp primär aus product_categories.inventory_group."""
 
@@ -430,6 +472,19 @@ def format_inventory_value(column_name: str, value: Any) -> str:
 
     if column_name == "status" and normalized in STATUS_LABELS:
         return STATUS_LABELS[normalized]
+
+    if column_name == "condition" and normalized in CONDITION_LABELS:
+        return CONDITION_LABELS[normalized]
+
+    if column_name == "stock_quantity":
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:.3f}".rstrip("0").rstrip(".")
 
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True)

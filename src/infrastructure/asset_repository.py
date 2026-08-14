@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from supabase import Client
@@ -45,7 +46,15 @@ class AssetRepository:
     def load_inventory(
         self,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Lädt Einzel-Assets und ergänzt Katalog, Ort, Zuweisung und Einbau."""
+        """Lädt Einzel-Assets und mengenverwaltete Lagerbestände gemeinsam.
+
+        Rückgabe:
+        - Einzelgeräte aus ``assets``
+        - Bestandszeilen aus ``stock_levels`` für quantity/hybrid-Modelle
+
+        Beide Datensatzarten werden in dieselbe flache UI-Struktur gebracht.
+        Technische Unterschiede bleiben über ``_record_type`` erhalten.
+        """
 
         self.catalog_warning = None
 
@@ -69,6 +78,12 @@ class AssetRepository:
             order_column="name",
             required=False,
         )
+        storage_locations = self._load_rows(
+            "storage_locations",
+            order_column="id",
+            required=False,
+        )
+        stock_levels = self.load_stock_levels()
 
         if not product_models:
             self._add_warning(
@@ -85,8 +100,25 @@ class AssetRepository:
             product_categories,
             manufacturers,
         )
-        self.enrich_current_context(merged_assets)
-        return merged_assets, product_categories
+
+        for asset in merged_assets:
+            asset["_record_type"] = "asset"
+            asset.setdefault("stock_quantity", None)
+
+        self.enrich_current_context(
+            merged_assets,
+            storage_locations=storage_locations,
+        )
+
+        stock_rows = self._merge_stock_level_rows(
+            stock_levels,
+            product_models,
+            product_categories,
+            manufacturers,
+            storage_locations,
+        )
+
+        return merged_assets + stock_rows, product_categories
 
     def load_product_categories(self) -> list[dict[str, Any]]:
         """Kompatibilitätsmethode für ältere MainWindow-Versionen."""
@@ -103,11 +135,20 @@ class AssetRepository:
         self._enrich_component_assignments(assets)
 
     def load_stock_levels(self) -> list[dict[str, Any]]:
-        """Lädt den berechneten Mengenbestand; noch nicht Teil der Asset-Tabelle."""
+        """Lädt den berechneten Mengenbestand nach Lagerort und Zustand."""
 
         return self._load_rows(
             "stock_levels",
             order_column=None,
+            required=False,
+        )
+
+    def load_stock_movements(self) -> list[dict[str, Any]]:
+        """Lädt das unveränderliche Journal der Lagerbewegungen."""
+
+        return self._load_rows(
+            "stock_movements",
+            order_column="moved_at",
             required=False,
         )
 
@@ -206,6 +247,113 @@ class AssetRepository:
 
         return result
 
+    @classmethod
+    def _merge_stock_level_rows(
+        cls,
+        stock_levels: list[dict[str, Any]],
+        product_models: list[dict[str, Any]],
+        product_categories: list[dict[str, Any]],
+        manufacturers: list[dict[str, Any]],
+        storage_locations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Bereitet ``stock_levels`` wie normale Inventarzeilen für die UI auf.
+
+        Eine Zeile entspricht Produktmodell + Lagerort + Zustand.
+        Null-/Negativbestände werden nicht als physischer Lagerbestand
+        dargestellt. Die Historie bleibt vollständig in ``stock_movements``.
+        """
+
+        models_by_id = cls._index_by_id(product_models)
+        categories_by_id = cls._index_by_id(product_categories)
+        manufacturers_by_id = cls._index_by_id(manufacturers)
+        locations_by_id = cls._index_by_id(storage_locations)
+
+        result: list[dict[str, Any]] = []
+
+        for level in stock_levels:
+            product_model_id = level.get("product_model_id")
+            storage_location_id = level.get("storage_location_id")
+            condition = level.get("condition")
+            quantity = level.get("quantity")
+
+            try:
+                numeric_quantity = Decimal(str(quantity or 0))
+            except (InvalidOperation, ValueError, TypeError):
+                logger.warning(
+                    "Ungültige Lagermenge in stock_levels: %r",
+                    quantity,
+                )
+                continue
+
+            if numeric_quantity <= 0:
+                continue
+
+            model = models_by_id.get(product_model_id)
+            if not isinstance(model, dict):
+                logger.warning(
+                    "stock_levels verweist auf unbekanntes Produktmodell %r.",
+                    product_model_id,
+                )
+                continue
+
+            tracking_mode = str(
+                model.get("tracking_mode") or ""
+            ).strip().casefold()
+            if tracking_mode not in ("quantity", "hybrid"):
+                logger.warning(
+                    "Bestand für Produktmodell %r mit tracking_mode %r ignoriert.",
+                    product_model_id,
+                    tracking_mode,
+                )
+                continue
+
+            row: dict[str, Any] = {
+                "id": (
+                    f"stock:{product_model_id}:"
+                    f"{storage_location_id}:{condition or 'unknown'}"
+                ),
+                "_record_type": "stock",
+                "product_model_id": product_model_id,
+                "storage_location_id": storage_location_id,
+                "condition": condition,
+                "stock_quantity": quantity,
+                "current_usage_state": "stored",
+                "inventory_usage": "Im Lager",
+                "department_name": "",
+                "connected_product": "",
+            }
+
+            for key, value in model.items():
+                row[f"product_model_{key}"] = value
+
+            category = categories_by_id.get(model.get("category_id"))
+            if isinstance(category, dict):
+                for key, value in category.items():
+                    row[f"product_category_{key}"] = value
+
+                row["product_category_name"] = get_category_label(row)
+                cls._merge_specification_columns(
+                    row,
+                    model,
+                    category,
+                )
+
+            manufacturer = manufacturers_by_id.get(
+                model.get("manufacturer_id")
+            )
+            if isinstance(manufacturer, dict):
+                row["manufacturer_name"] = manufacturer.get("name")
+
+            location = locations_by_id.get(storage_location_id)
+            row["storage_location"] = cls._location_label(
+                location,
+                storage_location_id,
+            )
+
+            result.append(row)
+
+        return result
+
     @staticmethod
     def _merge_specification_columns(
         asset: dict[str, Any],
@@ -299,7 +447,12 @@ class AssetRepository:
     # Aktueller fachlicher Zustand
     # ------------------------------------------------------------------
 
-    def enrich_current_context(self, assets: list[dict[str, Any]]) -> None:
+    def enrich_current_context(
+        self,
+        assets: list[dict[str, Any]],
+        *,
+        storage_locations: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Ergänzt den aktuell abgeleiteten Nutzungszustand eines Assets.
 
         Priorität des Zustands:
@@ -316,7 +469,10 @@ class AssetRepository:
             return
 
         self._initialize_usage_fields(assets)
-        self._enrich_locations_and_assignments(assets)
+        self._enrich_locations_and_assignments(
+            assets,
+            storage_locations=storage_locations,
+        )
         self._enrich_component_assignments(assets)
         self._finalize_usage_state(assets)
 
@@ -330,10 +486,13 @@ class AssetRepository:
             asset["department_name"] = ""
             asset["assigned_to"] = ""  # intern für spätere Detailansichten
             asset["storage_location"] = ""
+            asset.setdefault("stock_quantity", None)
 
     def _enrich_locations_and_assignments(
         self,
         assets: list[dict[str, Any]],
+        *,
+        storage_locations: list[dict[str, Any]] | None = None,
     ) -> None:
         asset_locations = self._load_rows(
             "asset_locations",
@@ -343,11 +502,12 @@ class AssetRepository:
                 "id,asset_id,storage_location_id,valid_from,valid_to"
             ),
         )
-        storage_locations = self._load_rows(
-            "storage_locations",
-            order_column="id",
-            required=False,
-        )
+        if storage_locations is None:
+            storage_locations = self._load_rows(
+                "storage_locations",
+                order_column="id",
+                required=False,
+            )
         asset_assignments = self._load_rows(
             "asset_assignments",
             order_column="id",
