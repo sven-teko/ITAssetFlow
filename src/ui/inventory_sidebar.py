@@ -77,6 +77,9 @@ class MultiSelectDropdown(QWidget):
         for key, label in options:
             normalized_key = str(key).strip().casefold()
             checkbox = QCheckBox(label)
+            checkbox.setObjectName("filterOption")
+            checkbox.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
             checkbox.setChecked(normalized_key in previous)
             checkbox.toggled.connect(self._selection_toggled)
 
@@ -247,6 +250,25 @@ class InventorySidebar(QDockWidget):
                 spacing: 8px;
                 padding: 5px 8px;
             }
+
+            QCheckBox#filterOption {
+                background-color: transparent;
+                border-radius: 5px;
+                padding: 7px 10px;
+            }
+
+            QCheckBox#filterOption:hover {
+                background-color: #e8eef5;
+                color: #111827;
+            }
+
+            QCheckBox#filterOption:checked {
+                background-color: #f3f6fa;
+            }
+
+            QCheckBox#filterOption:checked:hover {
+                background-color: #e3ebf4;
+            }
         """)
 
         content = QWidget()
@@ -270,10 +292,10 @@ class InventorySidebar(QDockWidget):
         self.group_dropdown.setEnabled(False)
         self.group_dropdown.button.setText("Inventartypen werden geladen ...")
 
-        category_title = QLabel("Produktkategorien")
+        category_title = QLabel("Kategorien")
         category_title.setObjectName("sidebarTitle")
         self.category_dropdown = MultiSelectDropdown(
-            "Alle Produktkategorien"
+            "Alle Kategorien"
         )
         self.category_dropdown.setEnabled(False)
         self.category_dropdown.button.setText(
@@ -406,7 +428,7 @@ class InventorySidebar(QDockWidget):
             self.category_dropdown.set_options([])
             self.category_dropdown.setEnabled(False)
             self.category_dropdown.button.setText(
-                "Keine Produktkategorien verfügbar"
+                "Keine Kategorien verfügbar"
             )
             self.category_dropdown.button.setToolTip(
                 "In der aktuellen Asset-Tabelle sind keine Kategorien vorhanden."

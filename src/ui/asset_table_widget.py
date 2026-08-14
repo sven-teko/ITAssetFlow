@@ -115,7 +115,6 @@ class AssetTableWidget(QTableWidget):
                     asset.get(column_name),
                 )
                 item = QTableWidgetItem(display_value)
-                item.setToolTip(display_value)
                 if column_index == 0:
                     item.setData(Qt.ItemDataRole.UserRole, asset)
                 self.setItem(row_index, column_index, item)

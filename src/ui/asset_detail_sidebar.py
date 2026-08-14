@@ -368,8 +368,11 @@ class AssetDetailSidebar(QDockWidget):
             )
 
             display_value = (
-                "—"
-                if self._is_empty(value)
+                "Keine"
+                if (
+                    self._is_empty(value)
+                    or self._is_placeholder_specification_value(value)
+                )
                 else self._display_text(field_name, value)
             )
 
@@ -528,6 +531,29 @@ class AssetDetailSidebar(QDockWidget):
         if isinstance(value, (list, tuple, dict, set)):
             return len(value) == 0
         return False
+
+    @staticmethod
+    def _is_placeholder_specification_value(value: Any) -> bool:
+        """Erkennt alte Entwicklungs-Platzhalter wie "DEINE CPU"."""
+
+        if not isinstance(value, str):
+            return False
+
+        text = value.strip()
+        if not text or text != text.upper():
+            return False
+
+        normalized = text.casefold()
+        return normalized.startswith(
+            (
+                "dein ",
+                "deine ",
+                "deinen ",
+                "deinem ",
+                "deiner ",
+                "deines ",
+            )
+        )
 
     @staticmethod
     def _display_text(
