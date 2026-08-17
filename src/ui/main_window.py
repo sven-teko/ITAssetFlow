@@ -16,6 +16,7 @@ from supabase import Client
 
 from settings_manager import SettingsManager
 
+from .asset_create_dialog import AssetCreateDialog
 from .asset_detail_sidebar import AssetDetailSidebar
 from .asset_table_widget import AssetTableWidget
 from .dock_manager import DockManager
@@ -53,6 +54,7 @@ class MainWindow(QMainWindow):
         self.settings_manager = SettingsManager()
 
         self.assets: list[dict[str, Any]] = []
+        self._create_dialog: AssetCreateDialog | None = None
 
         self.setWindowTitle("ITAssetFlow")
         self.resize(
@@ -219,7 +221,7 @@ class MainWindow(QMainWindow):
         )
 
         self.sidebar.create_requested.connect(
-            self.show_create_asset_placeholder
+            self.show_create_asset_dialog
         )
         self.sidebar.edit_requested.connect(
             self.show_edit_asset_placeholder
@@ -311,6 +313,21 @@ class MainWindow(QMainWindow):
         controller.status_message.connect(
             self._show_status_message
         )
+        controller.create_form_loaded.connect(
+            self._open_create_asset_dialog
+        )
+        controller.create_form_failed.connect(
+            self._create_form_failed
+        )
+        controller.entry_created.connect(
+            self._entry_created
+        )
+        controller.entry_create_failed.connect(
+            self._entry_create_failed
+        )
+        controller.writing_changed.connect(
+            self._set_writing_state
+        )
 
     # ------------------------------------------------------------------
     # Inventardaten / Filter / Auswahl
@@ -394,14 +411,24 @@ class MainWindow(QMainWindow):
     @Slot(bool)
     def _set_loading_state(
         self,
-        loading: bool,
+        _loading: bool,
     ) -> None:
-        self.menu_controller.set_loading_state(
-            loading
+        self._sync_busy_state()
+
+    @Slot(bool)
+    def _set_writing_state(
+        self,
+        _writing: bool,
+    ) -> None:
+        self._sync_busy_state()
+
+    def _sync_busy_state(self) -> None:
+        busy = (
+            self.inventory_controller.is_loading
+            or self.inventory_controller.is_writing
         )
-        self.sidebar.set_loading_state(
-            loading
-        )
+        self.menu_controller.set_loading_state(busy)
+        self.sidebar.set_loading_state(busy)
 
     def notify_inventory_changed(self) -> None:
         """Nach erfolgreichem Create/Edit/Delete aufrufen."""
@@ -438,11 +465,76 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     @Slot()
-    def show_create_asset_placeholder(self) -> None:
-        QMessageBox.information(
+    def show_create_asset_dialog(self) -> None:
+        """Lädt die Stammdaten und öffnet danach den Eingabedialog."""
+
+        if self._create_dialog is not None:
+            self._create_dialog.raise_()
+            self._create_dialog.activateWindow()
+            return
+
+        self.inventory_controller.load_create_form_data()
+
+    @Slot(object)
+    def _open_create_asset_dialog(self, data: object) -> None:
+        if not isinstance(data, dict):
+            QMessageBox.critical(
+                self,
+                "Neuer Eintrag",
+                "Die Stammdaten für das Eingabefenster sind ungültig.",
+            )
+            return
+
+        dialog = AssetCreateDialog(data, self)
+        self._create_dialog = dialog
+        dialog.submit_requested.connect(
+            self.inventory_controller.create_inventory_entry
+        )
+
+        try:
+            dialog.exec()
+        finally:
+            self._create_dialog = None
+
+    @Slot(str)
+    def _create_form_failed(self, message: str) -> None:
+        QMessageBox.critical(
             self,
             "Neuer Eintrag",
-            "Diese Funktion wird im nächsten Schritt ergänzt.",
+            (
+                "Die Daten für das Eingabefenster konnten nicht geladen werden.\n\n"
+                f"{message}"
+            ),
+        )
+
+    @Slot(object)
+    def _entry_created(self, result: object) -> None:
+        if self._create_dialog is not None:
+            self._create_dialog.set_saving(False)
+            self._create_dialog.accept()
+
+        if isinstance(result, dict):
+            if result.get("entry_type") == "asset":
+                identifier = result.get("asset_tag") or result.get("id")
+                self.statusBar().showMessage(
+                    f"Asset {identifier} wurde angelegt.",
+                    5000,
+                )
+            else:
+                self.statusBar().showMessage(
+                    "Mengenbestand wurde eingebucht.",
+                    5000,
+                )
+
+    @Slot(str)
+    def _entry_create_failed(self, message: str) -> None:
+        if self._create_dialog is not None:
+            self._create_dialog.set_saving(False)
+
+        QMessageBox.critical(
+            self._create_dialog or self,
+            "Eintrag konnte nicht gespeichert werden",
+            message,
         )
 
     @Slot()

@@ -64,6 +64,17 @@ QDockWidget#assetDetailSidebar {
     font-size: 10.5pt;
 }
 
+/* Auch als gelöstes, natives Fenster bleibt der Sidebar-Inhalt grau.
+   Die Windows-Titelleiste selbst wird bewusst NICHT gestylt. */
+QDockWidget#navigationSidebar QWidget#navigationContent,
+QDockWidget#assetDetailSidebar QWidget#detailRoot,
+QDockWidget#assetDetailSidebar QWidget#detailDetailsWidget,
+QDockWidget#assetDetailSidebar QScrollArea#detailScrollArea,
+QDockWidget#assetDetailSidebar QScrollArea#detailScrollArea > QWidget > QWidget {
+    background-color: #f1f3f5;
+    color: #1f2937;
+}
+
 QWidget#navigationContent,
 QWidget#detailRoot,
 QWidget#detailDetailsWidget,
@@ -171,6 +182,151 @@ QLineEdit {
 
 QLineEdit:focus {
     border: 1px solid #2f6fb7;
+}
+
+
+
+QComboBox {
+    min-height: 34px;
+    padding-left: 9px;
+    padding-right: 9px;
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+    border-radius: 5px;
+}
+
+QComboBox:focus {
+    border: 1px solid #2f6fb7;
+}
+
+QComboBox:disabled {
+    color: #8b95a1;
+    background-color: #f4f6f8;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #111827;
+    selection-background-color: #e9eef4;
+    selection-color: #111827;
+}
+
+QTextEdit {
+    padding: 7px 9px;
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+    border-radius: 5px;
+}
+
+QTextEdit:focus {
+    border: 1px solid #2f6fb7;
+}
+
+/* Neuer-Eintrag-Dialog: vollständig vom Betriebssystem-Dark-Mode entkoppelt. */
+QDialog#assetCreateDialog {
+    background-color: #f4f6f8;
+    color: #111827;
+}
+
+QDialog#assetCreateDialog QScrollArea#assetCreateScroll,
+QDialog#assetCreateDialog QWidget#assetCreateContent,
+QDialog#assetCreateDialog QScrollArea#assetCreateScroll > QWidget > QWidget {
+    background-color: #f4f6f8;
+    color: #111827;
+}
+
+QDialog#assetCreateDialog QLabel {
+    background-color: transparent;
+    color: #111827;
+}
+
+QDialog#assetCreateDialog QGroupBox {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #d8dde3;
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 14px 10px 10px 10px;
+}
+
+QDialog#assetCreateDialog QGroupBox::title {
+    color: #111827;
+    background-color: #ffffff;
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 5px;
+}
+
+QDialog#assetCreateDialog QLineEdit,
+QDialog#assetCreateDialog QComboBox,
+QDialog#assetCreateDialog QTextEdit {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+    selection-background-color: #cfe4ff;
+    selection-color: #111827;
+}
+
+QDialog#assetCreateDialog QLineEdit:disabled,
+QDialog#assetCreateDialog QComboBox:disabled,
+QDialog#assetCreateDialog QTextEdit:disabled {
+    background-color: #eef1f4;
+    color: #7a8490;
+}
+
+QDialog#assetCreateDialog QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+    selection-background-color: #dbeafe;
+    selection-color: #111827;
+    outline: 0;
+}
+
+QDialog#assetCreateDialog QComboBox::drop-down {
+    width: 28px;
+    border: none;
+    background-color: transparent;
+}
+
+QDialog#assetCreateDialog QLabel#dialogHint {
+    color: #5f6b78;
+}
+
+QDialog#assetCreateDialog QLabel#dialogInfoBox {
+    background-color: #f8fafb;
+    color: #374151;
+    border: 1px solid #dde2e8;
+    border-radius: 5px;
+    padding: 8px;
+}
+
+QDialog#assetCreateDialog QDialogButtonBox {
+    background-color: #f4f6f8;
+}
+
+QDialog#assetCreateDialog QDialogButtonBox QPushButton {
+    min-width: 110px;
+    text-align: center;
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+}
+
+QDialog#assetCreateDialog QDialogButtonBox QPushButton:hover {
+    background-color: #edf2f6;
+}
+
+QDialog#assetCreateDialog QDialogButtonBox QPushButton#primaryButton {
+    background-color: #2868ad;
+    border-color: #2868ad;
+    color: #ffffff;
+}
+
+QDialog#assetCreateDialog QDialogButtonBox QPushButton#primaryButton:hover {
+    background-color: #215b98;
 }
 
 QPushButton {
@@ -406,6 +562,13 @@ QLabel#userStatusLabel {
 
 
 def apply_light_theme(app: QApplication) -> None:
-    """Wendet das zentrale helle Design auf die gesamte Anwendung an."""
+    """Wendet das helle In-App-Design an, ohne Windows-Fensterrahmen zu erzwingen.
+
+    Wichtig: Es wird absichtlich weder eine globale QPalette gesetzt noch der
+    Qt-Stil auf Fusion umgestellt. Dadurch bleiben native Windows-Titelleisten
+    (z. B. bei gelösten Sidebars oder Dialogen) im vom Betriebssystem gewählten
+    Hell-/Dunkelmodus. Die Lesbarkeit der eigentlichen App-Inhalte wird über das
+    Stylesheet und – beim AssetCreateDialog – über eine lokale Palette geregelt.
+    """
 
     app.setStyleSheet(LIGHT_STYLESHEET)

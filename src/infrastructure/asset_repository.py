@@ -116,6 +116,468 @@ class AssetRepository:
 
         return merged_assets + stock_rows
 
+    def load_create_form_data(self) -> dict[str, list[dict[str, Any]]]:
+        """Lädt die Stammdaten für den Dialog ``Neuer Eintrag``.
+
+        Die Datenmenge ist klein und wird bewusst separat vom eigentlichen
+        Inventar geladen. Dadurch kann der Dialog auch Produktmodelle anbieten,
+        die aktuell noch keinen Bestand besitzen.
+        """
+
+        product_categories = self._load_rows(
+            "product_categories",
+            order_column="name",
+            required=True,
+            select_expression=(
+                "id,name,code,inventory_group,specification_schema"
+            ),
+        )
+        manufacturers = self._load_rows(
+            "manufacturers",
+            order_column="name",
+            required=True,
+            select_expression="id,name",
+        )
+        product_models = self._load_rows(
+            "product_models",
+            order_column="name",
+            required=True,
+            select_expression=(
+                "id,manufacturer_id,category_id,name,part_number,"
+                "specifications,tracking_mode,is_active,sku,unit_code"
+            ),
+        )
+        sites = self._load_rows(
+            "sites",
+            order_column="name",
+            required=True,
+            select_expression="id,name",
+        )
+        storage_locations = self._load_rows(
+            "storage_locations",
+            order_column="name",
+            required=True,
+            select_expression=(
+                "id,site_id,name,parent_location_id,location_type,code,is_active"
+            ),
+        )
+        employees = self._load_rows(
+            "employees",
+            order_column="last_name",
+            required=False,
+            select_expression=(
+                "id,employee_number,first_name,last_name,email,"
+                "department_id,is_active"
+            ),
+        )
+        departments = self._load_rows(
+            "departments",
+            order_column="name",
+            required=False,
+            select_expression="id,name",
+        )
+        assets = self._load_rows(
+            self.asset_table_name,
+            order_column="asset_tag",
+            required=False,
+            select_expression="id,asset_tag,serial_number,product_model_id,status",
+        )
+
+        models_by_id = self._index_by_id(product_models)
+        parent_assets: list[dict[str, Any]] = []
+        for asset in assets:
+            if str(asset.get("status") or "").strip().casefold() == "retired":
+                continue
+            model = models_by_id.get(asset.get("product_model_id"))
+            parts = [
+                str(asset.get("asset_tag") or "").strip(),
+                str(model.get("name") or "").strip() if isinstance(model, dict) else "",
+                str(asset.get("serial_number") or "").strip(),
+            ]
+            label = " · ".join(part for part in parts if part)
+            parent_assets.append(
+                {
+                    "id": asset.get("id"),
+                    "label": label or f"Asset #{asset.get('id')}",
+                }
+            )
+
+        return {
+            "product_categories": product_categories,
+            "manufacturers": manufacturers,
+            "product_models": product_models,
+            "sites": sites,
+            "storage_locations": storage_locations,
+            "employees": employees,
+            "departments": departments,
+            "parent_assets": parent_assets,
+        }
+
+    def create_inventory_entry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Legt einen neuen Einzel- oder Mengenbestand an.
+
+        Für ``serialized``-Einträge wird ein Datensatz in ``assets`` erzeugt
+        und optional der aktuelle Lagerort, eine organisatorische Zuweisung
+        sowie eine Komponentenbeziehung ergänzt. Mengenbestände werden korrekt
+        über eine ``receipt``-Buchung in ``stock_movements`` aufgebaut.
+
+        Der Aufruf benötigt aufgrund der vorhandenen RLS-Policies einen als
+        ``admin`` verknüpften Supabase-Benutzer.
+        """
+
+        if not isinstance(payload, dict):
+            raise ValueError("Ungültige Daten für den neuen Inventareintrag.")
+
+        created_model_id: Any | None = None
+        created_manufacturer_id: Any | None = None
+        created_asset_id: Any | None = None
+
+        try:
+            model_info = payload.get("model")
+            if not isinstance(model_info, dict):
+                raise ValueError("Produktmodell fehlt.")
+
+            model_id, tracking_mode, created_model_id, created_manufacturer_id = (
+                self._resolve_or_create_product_model(model_info)
+            )
+
+            requested_entry_type = str(payload.get("entry_type") or "").strip().casefold()
+            if tracking_mode == "serialized":
+                entry_type = "asset"
+            elif tracking_mode == "quantity":
+                entry_type = "stock"
+            elif tracking_mode == "hybrid":
+                if requested_entry_type not in ("asset", "stock"):
+                    raise ValueError("Bei einem Hybrid-Modell muss die Eintragsart gewählt werden.")
+                entry_type = requested_entry_type
+            else:
+                raise ValueError(
+                    f"Unbekannte Verwaltungsart des Produktmodells: {tracking_mode!r}."
+                )
+
+            condition = str(payload.get("condition") or "used").strip().casefold()
+            storage_location_id = payload.get("storage_location_id")
+
+            if entry_type == "asset":
+                result = self._create_serialized_asset(
+                    model_id=model_id,
+                    condition=condition,
+                    storage_location_id=storage_location_id,
+                    asset_data=payload.get("asset"),
+                    assignment=payload.get("assignment"),
+                    parent_asset_id=payload.get("parent_asset_id"),
+                )
+                created_asset_id = result.get("id")
+                return {
+                    "entry_type": "asset",
+                    "id": created_asset_id,
+                    "product_model_id": model_id,
+                    "asset_tag": result.get("asset_tag"),
+                }
+
+            result = self._create_stock_receipt(
+                model_id=model_id,
+                condition=condition,
+                storage_location_id=storage_location_id,
+                stock_data=payload.get("stock"),
+            )
+            return {
+                "entry_type": "stock",
+                "id": result.get("id"),
+                "product_model_id": model_id,
+                "quantity": result.get("quantity"),
+            }
+
+        except Exception as error:
+            # PostgREST-Aufrufe über mehrere Tabellen sind keine gemeinsame
+            # DB-Transaktion. Bei einem Folgefehler werden neu erzeugte
+            # Stammdaten/Assets deshalb best-effort wieder entfernt.
+            self._cleanup_failed_create(
+                asset_id=created_asset_id,
+                model_id=created_model_id,
+                manufacturer_id=created_manufacturer_id,
+            )
+
+            message = str(error)
+            if "row-level security" in message.casefold() or "permission denied" in message.casefold():
+                raise RuntimeError(
+                    "Der Inventareintrag konnte wegen der Supabase-Berechtigungen "
+                    "nicht gespeichert werden. Der angemeldete Benutzer muss in "
+                    "public.employees über auth_user_id verknüpft, aktiv und mit "
+                    "app_role='admin' hinterlegt sein.\n\n"
+                    f"Technischer Fehler: {error}"
+                ) from error
+            raise
+
+    def _resolve_or_create_product_model(
+        self,
+        model_info: dict[str, Any],
+    ) -> tuple[Any, str, Any | None, Any | None]:
+        mode = str(model_info.get("mode") or "existing").strip().casefold()
+
+        if mode == "existing":
+            model_id = model_info.get("id")
+            if model_id is None:
+                raise ValueError("Produktmodell-ID fehlt.")
+
+            response = (
+                self.client
+                .table("product_models")
+                .select("id,tracking_mode")
+                .eq("id", model_id)
+                .limit(1)
+                .execute()
+            )
+            rows = [row for row in (response.data or []) if isinstance(row, dict)]
+            if not rows:
+                raise ValueError("Das ausgewählte Produktmodell existiert nicht mehr.")
+            tracking_mode = str(rows[0].get("tracking_mode") or "serialized").strip().casefold()
+            return model_id, tracking_mode, None, None
+
+        if mode != "new":
+            raise ValueError("Ungültiger Produktmodell-Modus.")
+
+        category_id = model_info.get("category_id")
+        name = str(model_info.get("name") or "").strip()
+        tracking_mode = str(model_info.get("tracking_mode") or "serialized").strip().casefold()
+        unit_code = str(model_info.get("unit_code") or "piece").strip().casefold()
+
+        if category_id is None:
+            raise ValueError("Produktkategorie fehlt.")
+        if not name:
+            raise ValueError("Modellbezeichnung fehlt.")
+        if tracking_mode not in ("serialized", "quantity", "hybrid"):
+            raise ValueError("Ungültige Verwaltungsart für das Produktmodell.")
+        if unit_code not in ("piece", "meter", "pack", "box"):
+            raise ValueError("Ungültige Einheit für das Produktmodell.")
+
+        manufacturer_id = model_info.get("manufacturer_id")
+        created_manufacturer_id: Any | None = None
+        if manufacturer_id is None:
+            manufacturer_name = str(model_info.get("manufacturer_name") or "Keiner").strip() or "Keiner"
+            manufacturer_id, created_manufacturer_id = self._find_or_create_manufacturer(
+                manufacturer_name
+            )
+
+        row = {
+            "manufacturer_id": manufacturer_id,
+            "category_id": category_id,
+            "name": name,
+            "part_number": self._none_if_blank(model_info.get("part_number")),
+            "sku": self._none_if_blank(model_info.get("sku")),
+            "tracking_mode": tracking_mode,
+            "unit_code": unit_code,
+            "specifications": (
+                model_info.get("specifications")
+                if isinstance(model_info.get("specifications"), dict)
+                else {}
+            ),
+            "is_active": True,
+        }
+        response = self.client.table("product_models").insert(row).execute()
+        rows = [item for item in (response.data or []) if isinstance(item, dict)]
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase hat für das neue Produktmodell keine ID zurückgegeben.")
+
+        model_id = rows[0]["id"]
+        return model_id, tracking_mode, model_id, created_manufacturer_id
+
+    def _find_or_create_manufacturer(self, name: str) -> tuple[Any, Any | None]:
+        response = self.client.table("manufacturers").select("id,name").execute()
+        for row in (response.data or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("name") or "").strip().casefold() == name.casefold():
+                return row.get("id"), None
+
+        response = self.client.table("manufacturers").insert({"name": name}).execute()
+        rows = [row for row in (response.data or []) if isinstance(row, dict)]
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase hat für den neuen Hersteller keine ID zurückgegeben.")
+        manufacturer_id = rows[0]["id"]
+        return manufacturer_id, manufacturer_id
+
+    def _create_serialized_asset(
+        self,
+        *,
+        model_id: Any,
+        condition: str,
+        storage_location_id: Any | None,
+        asset_data: Any,
+        assignment: Any,
+        parent_asset_id: Any | None,
+    ) -> dict[str, Any]:
+        if not isinstance(asset_data, dict):
+            raise ValueError("Assetdaten fehlen.")
+
+        asset_tag = str(asset_data.get("asset_tag") or "").strip()
+        if not asset_tag:
+            raise ValueError("Produkterkennung fehlt.")
+        if not asset_data.get("purchase_date"):
+            raise ValueError("Kaufdatum fehlt.")
+
+        row = {
+            "product_model_id": model_id,
+            "asset_tag": asset_tag,
+            "serial_number": self._none_if_blank(asset_data.get("serial_number")),
+            "purchase_date": asset_data.get("purchase_date"),
+            "new_price": asset_data.get("new_price") or 0,
+            "warranty_until": asset_data.get("warranty_until"),
+            "retired_at": asset_data.get("retired_at"),
+            "note": self._none_if_blank(asset_data.get("note")),
+            "status": str(asset_data.get("status") or "available").strip().casefold(),
+            "condition": condition,
+            "specifications": (
+                asset_data.get("specifications")
+                if isinstance(asset_data.get("specifications"), dict)
+                else {}
+            ),
+        }
+
+        if storage_location_id is None:
+            raise ValueError("Lagerort fehlt.")
+        if not isinstance(assignment, dict) or assignment.get("department_id") is None:
+            raise ValueError("Abteilung fehlt.")
+
+        response = self.client.table(self.asset_table_name).insert(row).execute()
+        rows = [item for item in (response.data or []) if isinstance(item, dict)]
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase hat für das neue Asset keine ID zurückgegeben.")
+
+        asset = rows[0]
+        asset_id = asset["id"]
+
+        try:
+            if storage_location_id is not None:
+                self.client.table("asset_locations").insert(
+                    {
+                        "asset_id": asset_id,
+                        "storage_location_id": storage_location_id,
+                    }
+                ).execute()
+
+            if isinstance(assignment, dict):
+                employee_id = assignment.get("employee_id")
+                department_id = assignment.get("department_id")
+                if employee_id is not None or department_id is not None:
+                    self.client.table("asset_assignments").insert(
+                        {
+                            "asset_id": asset_id,
+                            "employee_id": employee_id,
+                            "department_id": department_id,
+                        }
+                    ).execute()
+
+            if parent_asset_id is not None:
+                if parent_asset_id == asset_id:
+                    raise ValueError("Ein Asset kann nicht mit sich selbst verbunden werden.")
+                self.client.table("asset_component_assignments").insert(
+                    {
+                        "parent_asset_id": parent_asset_id,
+                        "child_asset_id": asset_id,
+                    }
+                ).execute()
+        except Exception:
+            self._cleanup_failed_create(
+                asset_id=asset_id,
+                model_id=None,
+                manufacturer_id=None,
+            )
+            raise
+
+        return asset
+
+    def _create_stock_receipt(
+        self,
+        *,
+        model_id: Any,
+        condition: str,
+        storage_location_id: Any | None,
+        stock_data: Any,
+    ) -> dict[str, Any]:
+        if storage_location_id is None:
+            raise ValueError("Für Mengenbestand ist ein Lagerort erforderlich.")
+        if not isinstance(stock_data, dict):
+            raise ValueError("Bestandsdaten fehlen.")
+
+        try:
+            quantity = Decimal(str(stock_data.get("quantity")))
+        except (InvalidOperation, TypeError, ValueError) as error:
+            raise ValueError("Ungültige Bestandsmenge.") from error
+        if quantity <= 0:
+            raise ValueError("Die Bestandsmenge muss grösser als 0 sein.")
+
+        department_id = stock_data.get("department_id")
+        if department_id is None:
+            raise ValueError("Abteilung fehlt.")
+        purchase_date = stock_data.get("purchase_date")
+        if not purchase_date:
+            raise ValueError("Kaufdatum fehlt.")
+        status = str(stock_data.get("status") or "").strip().casefold()
+        if not status:
+            raise ValueError("Status fehlt.")
+
+        row = {
+            "product_model_id": model_id,
+            "from_storage_location_id": None,
+            "to_storage_location_id": storage_location_id,
+            "quantity": float(quantity),
+            "movement_type": "receipt",
+            "from_condition": None,
+            "to_condition": condition,
+            "department_id": department_id,
+            "purchase_date": purchase_date,
+            "new_price": stock_data.get("new_price") or 0,
+            "status": status,
+            "note": self._none_if_blank(stock_data.get("note")),
+        }
+        response = self.client.table("stock_movements").insert(row).execute()
+        rows = [item for item in (response.data or []) if isinstance(item, dict)]
+        if not rows or rows[0].get("id") is None:
+            raise RuntimeError("Supabase hat für die Lagerbewegung keine ID zurückgegeben.")
+        return rows[0]
+
+    def _cleanup_failed_create(
+        self,
+        *,
+        asset_id: Any | None,
+        model_id: Any | None,
+        manufacturer_id: Any | None,
+    ) -> None:
+        try:
+            if asset_id is not None:
+                for table, field in (
+                    ("asset_component_assignments", "child_asset_id"),
+                    ("asset_assignments", "asset_id"),
+                    ("asset_locations", "asset_id"),
+                ):
+                    try:
+                        self.client.table(table).delete().eq(field, asset_id).execute()
+                    except Exception:
+                        logger.exception(
+                            "Rollback für %s bei Asset %r fehlgeschlagen.",
+                            table,
+                            asset_id,
+                        )
+                self.client.table(self.asset_table_name).delete().eq("id", asset_id).execute()
+
+            if model_id is not None:
+                self.client.table("product_models").delete().eq("id", model_id).execute()
+
+            if manufacturer_id is not None:
+                self.client.table("manufacturers").delete().eq("id", manufacturer_id).execute()
+        except Exception:
+            logger.exception("Best-effort-Rollback des fehlgeschlagenen Creates ist unvollständig.")
+
+    @staticmethod
+    def _none_if_blank(value: Any) -> Any | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        return value
+
     def _load_stock_levels(self) -> list[dict[str, Any]]:
         """Lädt den berechneten Mengenbestand nach Lagerort und Zustand."""
 

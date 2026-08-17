@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from PySide6.QtCore import (
     QObject,
@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 class _LoadSignals(QObject):
     succeeded = Signal(object, object)
+    failed = Signal(str)
+
+
+class _TaskSignals(QObject):
+    succeeded = Signal(object)
     failed = Signal(str)
 
 
@@ -46,19 +51,44 @@ class _InventoryLoadWorker(QRunnable):
         self.signals.succeeded.emit(assets, warning)
 
 
-class InventoryViewController(QObject):
-    """Steuert Laden, Reload-Bündelung und Cloud-Aktualisierung des Inventars.
+class _RepositoryTaskWorker(QRunnable):
+    """Kleine generische Hülle für weitere Repository-Aufrufe."""
 
-    Die Klasse kennt keine Widgets. Alle blockierenden Supabase-Lesezugriffe
-    laufen über einen einzelnen Hintergrund-Thread, damit die Qt-Oberfläche
-    während Netzwerkzugriffen bedienbar bleibt und der gemeinsame Supabase-
-    Client nicht parallel aus mehreren Worker-Threads verwendet wird.
+    def __init__(self, task: Callable[[], Any]) -> None:
+        super().__init__()
+        self.task = task
+        self.signals = _TaskSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.task()
+        except Exception as error:
+            logger.exception("Repository-Aktion fehlgeschlagen.")
+            self.signals.failed.emit(str(error))
+            return
+        self.signals.succeeded.emit(result)
+
+
+class InventoryViewController(QObject):
+    """Steuert Laden, Schreiben, Reload-Bündelung und Cloud-Aktualisierung.
+
+    Die Klasse kennt keine Widgets. Sämtliche blockierenden Supabase-Zugriffe
+    laufen über einen einzelnen Hintergrund-Thread. Dadurch bleibt die Qt-UI
+    bedienbar und die gemeinsame Supabase-Client-Instanz wird nicht gleichzeitig
+    aus mehreren Worker-Threads verwendet.
     """
 
     inventory_loaded = Signal(object)
     loading_changed = Signal(bool)
     load_failed = Signal(str)
     status_message = Signal(str, int)
+
+    create_form_loaded = Signal(object)
+    create_form_failed = Signal(str)
+    entry_created = Signal(object)
+    entry_create_failed = Signal(str)
+    writing_changed = Signal(bool)
 
     RELOAD_DELAY_MS = 600
 
@@ -77,7 +107,7 @@ class InventoryViewController(QObject):
             asset_table_name,
         )
 
-        # Ein Worker reicht: sämtliche Supabase-Lesezugriffe dieses Controllers
+        # Ein Worker reicht: sämtliche Supabase-Zugriffe dieses Controllers
         # werden bewusst seriell ausgeführt.
         self._thread_pool = QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
@@ -90,6 +120,8 @@ class InventoryViewController(QObject):
 
         self.assets: list[dict[str, Any]] = []
         self._is_loading = False
+        self._is_writing = False
+        self._create_form_loading = False
         self._reload_pending = False
         self._started = False
 
@@ -104,6 +136,10 @@ class InventoryViewController(QObject):
     @property
     def is_loading(self) -> bool:
         return self._is_loading
+
+    @property
+    def is_writing(self) -> bool:
+        return self._is_writing
 
     @Slot()
     def start(self) -> None:
@@ -121,6 +157,10 @@ class InventoryViewController(QObject):
         self._reload_timer.stop()
         self.change_monitor.stop()
         self._thread_pool.clear()
+
+    # ------------------------------------------------------------------
+    # Inventar laden
+    # ------------------------------------------------------------------
 
     @Slot()
     def load_inventory(self) -> None:
@@ -189,6 +229,76 @@ class InventoryViewController(QObject):
             self._reload_pending = False
             self.schedule_reload()
 
+    # ------------------------------------------------------------------
+    # Neuer Eintrag
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def load_create_form_data(self) -> None:
+        if self._create_form_loading:
+            return
+
+        self._create_form_loading = True
+        self.status_message.emit(
+            "Stammdaten für den neuen Eintrag werden geladen ...",
+            0,
+        )
+
+        worker = _RepositoryTaskWorker(self.repository.load_create_form_data)
+        worker.signals.succeeded.connect(self._create_form_data_loaded)
+        worker.signals.failed.connect(self._create_form_data_failed)
+        self._thread_pool.start(worker)
+
+    @Slot(object)
+    def _create_form_data_loaded(self, data: object) -> None:
+        self._create_form_loading = False
+        self.status_message.emit("Eingabefenster bereit.", 2500)
+        self.create_form_loaded.emit(data)
+
+    @Slot(str)
+    def _create_form_data_failed(self, message: str) -> None:
+        self._create_form_loading = False
+        self.status_message.emit("Stammdaten konnten nicht geladen werden.", 5000)
+        self.create_form_failed.emit(message)
+
+    @Slot(object)
+    def create_inventory_entry(self, payload: object) -> None:
+        if self._is_writing:
+            return
+        if not isinstance(payload, dict):
+            self.entry_create_failed.emit("Ungültige Formulardaten.")
+            return
+
+        self._set_writing(True)
+        self.status_message.emit("Inventareintrag wird gespeichert ...", 0)
+
+        worker = _RepositoryTaskWorker(
+            lambda: self.repository.create_inventory_entry(payload)
+        )
+        worker.signals.succeeded.connect(self._entry_created)
+        worker.signals.failed.connect(self._entry_create_failed)
+        self._thread_pool.start(worker)
+
+    @Slot(object)
+    def _entry_created(self, result: object) -> None:
+        self._set_writing(False)
+        self.entry_created.emit(result)
+        self.status_message.emit("Inventareintrag wurde gespeichert.", 4000)
+
+        # Sofortigen Reload anfordern. Der ChangeMonitor bündelt dies mit
+        # allfälligen Trigger-/Cloud-Signalen.
+        self.notify_inventory_changed()
+
+    @Slot(str)
+    def _entry_create_failed(self, message: str) -> None:
+        self._set_writing(False)
+        self.status_message.emit("Inventareintrag konnte nicht gespeichert werden.", 6000)
+        self.entry_create_failed.emit(message)
+
+    # ------------------------------------------------------------------
+    # Reload / Cloud-Monitor
+    # ------------------------------------------------------------------
+
     @Slot()
     def schedule_reload(self) -> None:
         """Bündelt mehrere schnelle Änderungen zu einem einzigen Reload."""
@@ -236,3 +346,9 @@ class InventoryViewController(QObject):
 
         self._is_loading = loading
         self.loading_changed.emit(loading)
+
+    def _set_writing(self, writing: bool) -> None:
+        if self._is_writing == writing:
+            return
+        self._is_writing = writing
+        self.writing_changed.emit(writing)
