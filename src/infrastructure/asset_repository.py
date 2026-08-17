@@ -86,6 +86,12 @@ class AssetRepository:
             required=False,
             select_expression="id,name",
         )
+        departments = self._load_rows(
+            "departments",
+            order_column="name",
+            required=False,
+            select_expression="id,name,site_id",
+        )
         stock_levels = self._load_stock_levels()
 
         if not product_models:
@@ -121,6 +127,7 @@ class AssetRepository:
             manufacturers,
             storage_locations,
             sites,
+            departments,
         )
 
         return merged_assets + stock_rows
@@ -1711,6 +1718,7 @@ class AssetRepository:
         manufacturers: list[dict[str, Any]],
         storage_locations: list[dict[str, Any]],
         sites: list[dict[str, Any]],
+        departments: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Bereitet ``stock_levels`` wie normale Inventarzeilen für die UI auf.
 
@@ -1724,6 +1732,7 @@ class AssetRepository:
         manufacturers_by_id = cls._index_by_id(manufacturers)
         locations_by_id = cls._index_by_id(storage_locations)
         sites_by_id = cls._index_by_id(sites)
+        departments_by_id = cls._index_by_id(departments)
 
         result: list[dict[str, Any]] = []
 
@@ -1815,6 +1824,14 @@ class AssetRepository:
                     sites_by_id.get(site_id),
                     site_id,
                 )
+
+                department_id = location.get("department_id")
+                row["department_id"] = department_id
+                if department_id is not None:
+                    row["department_name"] = cls._department_label(
+                        departments_by_id.get(department_id),
+                        department_id,
+                    )
 
             result.append(row)
 
@@ -2032,6 +2049,14 @@ class AssetRepository:
                         sites_by_id.get(site_id),
                         site_id,
                     )
+
+                    location_department_id = location.get("department_id")
+                    if location_department_id is not None:
+                        asset["department_name"] = self._department_label(
+                            departments_by_id.get(location_department_id),
+                            location_department_id,
+                        )
+                        asset["assigned_department_id"] = location_department_id
 
                 asset["current_usage_state"] = "stored"
                 asset["inventory_usage"] = USAGE_STATE_LABELS["stored"]

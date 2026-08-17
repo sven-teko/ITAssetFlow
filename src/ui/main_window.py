@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import (
@@ -13,6 +15,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -23,6 +26,7 @@ from PySide6.QtWidgets import (
 from supabase import Client
 
 from settings_manager import SettingsManager
+from infrastructure.data_transfer_service import DataTransferService
 
 from .asset_create_dialog import AssetCreateDialog
 from .asset_detail_sidebar import AssetDetailSidebar
@@ -805,8 +809,12 @@ class MainWindow(QMainWindow):
         self._settings_service = _SettingsService(
             self.supabase_client
         )
+        self._data_transfer_service = DataTransferService(
+            self.supabase_client
+        )
         self._thread_pool = QThreadPool.globalInstance()
         self._settings_busy = False
+        self._transfer_busy = False
         self._pending_default_columns: list[str] | None = None
         self._default_columns_applied = False
 
@@ -990,6 +998,19 @@ class MainWindow(QMainWindow):
         menu.refresh_requested.connect(
             self.inventory_controller.load_inventory
         )
+        menu.import_csv_requested.connect(
+            self.import_csv
+        )
+        menu.import_postgresql_requested.connect(
+            self.import_postgresql
+        )
+        menu.export_csv_requested.connect(
+            self.export_csv
+        )
+        menu.export_postgresql_requested.connect(
+            self.export_postgresql
+        )
+
         menu.settings_requested.connect(
             self.show_settings_dialog
         )
@@ -1241,6 +1262,366 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             message,
             3000,
+        )
+
+    # ------------------------------------------------------------------
+    # Import / Export
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def export_csv(self) -> None:
+        if self._transfer_busy:
+            return
+
+        default_name = self._default_transfer_filename(
+            ".csv"
+        )
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "ITAssetFlow als CSV exportieren",
+            default_name,
+            "CSV-Datei (*.csv)",
+        )
+        if not file_path:
+            return
+
+        self._start_transfer(
+            task=lambda: self._data_transfer_service.export_csv(
+                file_path
+            ),
+            working_message="CSV-Export wird erstellt ...",
+            success_callback=self._export_finished,
+        )
+
+    @Slot()
+    def export_postgresql(self) -> None:
+        if self._transfer_busy:
+            return
+
+        default_name = self._default_transfer_filename(
+            ".sql"
+        )
+        file_path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "ITAssetFlow als PostgreSQL exportieren",
+            default_name,
+            "PostgreSQL-SQL-Datei (*.sql)",
+        )
+        if not file_path:
+            return
+
+        self._start_transfer(
+            task=lambda: self._data_transfer_service.export_postgresql(
+                file_path
+            ),
+            working_message="PostgreSQL-Export wird erstellt ...",
+            success_callback=self._export_finished,
+        )
+
+    @Slot()
+    def import_csv(self) -> None:
+        if self._transfer_busy:
+            return
+
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "ITAssetFlow-CSV importieren",
+            "",
+            "CSV-Datei (*.csv)",
+        )
+        if not file_path:
+            return
+
+        if not self._confirm_import(
+            Path(file_path).name,
+            "CSV",
+        ):
+            return
+
+        self._start_transfer(
+            task=lambda: self._data_transfer_service.import_csv(
+                file_path
+            ),
+            working_message="CSV-Daten werden importiert ...",
+            success_callback=self._import_finished,
+        )
+
+    @Slot()
+    def import_postgresql(self) -> None:
+        if self._transfer_busy:
+            return
+
+        file_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "ITAssetFlow-PostgreSQL-Export importieren",
+            "",
+            "PostgreSQL-SQL-Datei (*.sql)",
+        )
+        if not file_path:
+            return
+
+        if not self._confirm_import(
+            Path(file_path).name,
+            "PostgreSQL",
+        ):
+            return
+
+        self._start_transfer(
+            task=lambda: self._data_transfer_service.import_postgresql(
+                file_path
+            ),
+            working_message="PostgreSQL-Daten werden importiert ...",
+            success_callback=self._import_finished,
+        )
+
+    def _start_transfer(
+        self,
+        *,
+        task: Callable[[], object],
+        working_message: str,
+        success_callback: Callable[[object], None],
+    ) -> None:
+        self._set_transfer_busy(
+            True
+        )
+        self.statusBar().showMessage(
+            working_message,
+            0,
+        )
+
+        worker = _TaskWorker(
+            task
+        )
+        worker.signals.succeeded.connect(
+            success_callback
+        )
+        worker.signals.failed.connect(
+            self._transfer_failed
+        )
+        self._thread_pool.start(
+            worker
+        )
+
+    @Slot(object)
+    def _export_finished(
+        self,
+        result: object,
+    ) -> None:
+        self._set_transfer_busy(
+            False
+        )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+            self._transfer_failed(
+                "Der Export hat kein gültiges Ergebnis geliefert."
+            )
+            return
+
+        exported_rows = int(
+            result.get(
+                "exported_rows"
+            )
+            or 0
+        )
+        table_count = int(
+            result.get(
+                "table_count"
+            )
+            or 0
+        )
+        file_path = str(
+            result.get(
+                "path"
+            )
+            or ""
+        )
+        format_label = str(
+            result.get(
+                "format"
+            )
+            or "Export"
+        )
+
+        self.statusBar().showMessage(
+            (
+                f"{format_label}-Export abgeschlossen: "
+                f"{exported_rows} Datensätze."
+            ),
+            5000,
+        )
+
+        QMessageBox.information(
+            self,
+            "Export abgeschlossen",
+            (
+                f"{format_label}-Export wurde erfolgreich erstellt.\n\n"
+                f"Tabellen: {table_count}\n"
+                f"Datensätze: {exported_rows}\n\n"
+                f"Datei:\n{file_path}"
+            ),
+        )
+
+    @Slot(object)
+    def _import_finished(
+        self,
+        result: object,
+    ) -> None:
+        self._set_transfer_busy(
+            False
+        )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+            self._transfer_failed(
+                "Der Import hat kein gültiges Ergebnis geliefert."
+            )
+            return
+
+        imported_rows = int(
+            result.get(
+                "imported_rows"
+            )
+            or 0
+        )
+        table_count = int(
+            result.get(
+                "table_count"
+            )
+            or 0
+        )
+        format_label = str(
+            result.get(
+                "format"
+            )
+            or "Import"
+        )
+
+        self.statusBar().showMessage(
+            (
+                f"{format_label}-Import abgeschlossen: "
+                f"{imported_rows} Datensätze."
+            ),
+            5000,
+        )
+
+        QMessageBox.information(
+            self,
+            "Import abgeschlossen",
+            (
+                f"{format_label}-Import wurde erfolgreich abgeschlossen.\n\n"
+                f"Tabellen: {table_count}\n"
+                f"Datensätze: {imported_rows}\n\n"
+                "Bestehende Datensätze mit derselben ID wurden "
+                "aktualisiert; neue Datensätze wurden ergänzt."
+            ),
+        )
+
+        # Inventar, Filter und Details direkt mit den importierten Daten
+        # synchronisieren.
+        self.inventory_controller.notify_inventory_changed()
+
+    @Slot(str)
+    def _transfer_failed(
+        self,
+        message: str,
+    ) -> None:
+        self._set_transfer_busy(
+            False
+        )
+        self.statusBar().showMessage(
+            "Import/Export ist fehlgeschlagen.",
+            6000,
+        )
+
+        QMessageBox.critical(
+            self,
+            "Import/Export fehlgeschlagen",
+            (
+                f"{message}\n\n"
+                "Es wurden keine SQL-Dateien direkt ausgeführt. "
+                "PostgreSQL-Importe akzeptieren nur Dateien, die "
+                "von ITAssetFlow exportiert wurden."
+            ),
+        )
+
+    def _confirm_import(
+        self,
+        file_name: str,
+        format_label: str,
+    ) -> bool:
+        dialog = QMessageBox(
+            self
+        )
+        dialog.setWindowTitle(
+            f"{format_label}-Import bestätigen"
+        )
+        dialog.setIcon(
+            QMessageBox.Icon.Warning
+        )
+        dialog.setText(
+            "<b>Import wirklich starten?</b>"
+        )
+        dialog.setInformativeText(
+            (
+                f"Datei: {file_name}\n\n"
+                "Der Import arbeitet als Merge/Upsert:\n"
+                "• gleiche Primärschlüssel werden aktualisiert\n"
+                "• neue Datensätze werden ergänzt\n"
+                "• zusätzliche bestehende Datensätze werden nicht gelöscht\n\n"
+                "Die Datei muss aus einem ITAssetFlow-Export stammen."
+            )
+        )
+        dialog.setStandardButtons(
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.Cancel
+        )
+        dialog.setDefaultButton(
+            QMessageBox.StandardButton.Cancel
+        )
+
+        import_button = dialog.button(
+            QMessageBox.StandardButton.Yes
+        )
+        if import_button is not None:
+            import_button.setText(
+                "Importieren"
+            )
+
+        cancel_button = dialog.button(
+            QMessageBox.StandardButton.Cancel
+        )
+        if cancel_button is not None:
+            cancel_button.setText(
+                "Abbrechen"
+            )
+
+        return (
+            dialog.exec()
+            == QMessageBox.StandardButton.Yes
+        )
+
+    def _set_transfer_busy(
+        self,
+        busy: bool,
+    ) -> None:
+        self._transfer_busy = busy
+        self._sync_busy_state()
+
+    @staticmethod
+    def _default_transfer_filename(
+        suffix: str,
+    ) -> str:
+        timestamp = datetime.now().strftime(
+            "%Y-%m-%d_%H-%M"
+        )
+        return (
+            f"ITAssetFlow_Export_{timestamp}"
+            f"{suffix}"
         )
 
     # ------------------------------------------------------------------

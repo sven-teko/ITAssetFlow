@@ -17,6 +17,11 @@ class MainWindowMenu(QObject):
     about_requested = Signal()
     settings_requested = Signal()
 
+    import_csv_requested = Signal()
+    import_postgresql_requested = Signal()
+    export_csv_requested = Signal()
+    export_postgresql_requested = Signal()
+
     navigation_visibility_requested = Signal(bool)
     navigation_left_requested = Signal()
     navigation_right_requested = Signal()
@@ -90,6 +95,23 @@ class MainWindowMenu(QObject):
             self.window,
         )
 
+        self.import_csv_action = QAction(
+            "CSV",
+            self.window,
+        )
+        self.import_postgresql_action = QAction(
+            "PostgreSQL",
+            self.window,
+        )
+        self.export_csv_action = QAction(
+            "CSV",
+            self.window,
+        )
+        self.export_postgresql_action = QAction(
+            "PostgreSQL",
+            self.window,
+        )
+
         self.settings_action = QAction(
             "Einstellungen",
             self.window,
@@ -112,6 +134,17 @@ class MainWindowMenu(QObject):
 
         file_menu = menu_bar.addMenu("Datei")
         file_menu.addAction(self.refresh_action)
+        file_menu.addSeparator()
+
+        import_menu = file_menu.addMenu("Import")
+        import_menu.addAction(self.import_csv_action)
+        import_menu.addAction(self.import_postgresql_action)
+
+        export_menu = file_menu.addMenu("Export")
+        export_menu.addAction(self.export_csv_action)
+        export_menu.addAction(self.export_postgresql_action)
+
+        file_menu.addSeparator()
         file_menu.addAction(self.settings_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
@@ -164,6 +197,19 @@ class MainWindowMenu(QObject):
         self.refresh_action.triggered.connect(
             lambda _checked=False: self.refresh_requested.emit()
         )
+        self.import_csv_action.triggered.connect(
+            lambda _checked=False: self.import_csv_requested.emit()
+        )
+        self.import_postgresql_action.triggered.connect(
+            lambda _checked=False: self.import_postgresql_requested.emit()
+        )
+        self.export_csv_action.triggered.connect(
+            lambda _checked=False: self.export_csv_requested.emit()
+        )
+        self.export_postgresql_action.triggered.connect(
+            lambda _checked=False: self.export_postgresql_requested.emit()
+        )
+
         self.settings_action.triggered.connect(
             lambda _checked=False: self.settings_requested.emit()
         )
@@ -251,3 +297,13 @@ class MainWindowMenu(QObject):
         self.settings_action.setEnabled(
             not loading
         )
+
+        for action in (
+            self.import_csv_action,
+            self.import_postgresql_action,
+            self.export_csv_action,
+            self.export_postgresql_action,
+        ):
+            action.setEnabled(
+                not loading
+            )

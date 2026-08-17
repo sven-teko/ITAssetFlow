@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 import json
 from typing import Any
 
@@ -42,6 +44,19 @@ GENERAL_DETAIL_FIELDS = (
     "warranty_until",
     "note",
 )
+
+
+DATE_DETAIL_FIELDS = {
+    "purchase_date",
+    "warranty_until",
+    "retired_at",
+    "created_at",
+    "updated_at",
+}
+
+PRICE_DETAIL_FIELDS = {
+    "new_price",
+}
 
 
 class AssetDetailSidebar(QDockWidget):
@@ -168,8 +183,8 @@ class AssetDetailSidebar(QDockWidget):
                 f"{len(valid_assets)} Einträge ausgewählt"
             )
             self.selection_hint.setText(
-                "Es werden nur Werte angezeigt, die bei allen "
-                "ausgewählten Einträgen gleich sind."
+                "Gemeinsame Werte werden angezeigt; Preisfelder "
+                "werden über die Auswahl summiert."
             )
 
             general_rows = self._common_general_rows(valid_assets)
@@ -284,6 +299,26 @@ class AssetDetailSidebar(QDockWidget):
         rows: list[tuple[str, str]] = []
 
         for field_name in GENERAL_DETAIL_FIELDS:
+            label = HEADER_LABELS.get(
+                field_name,
+                field_name.replace("_", " ").title(),
+            )
+
+            if field_name in PRICE_DETAIL_FIELDS:
+                total = self._sum_numeric_values(
+                    [asset.get(field_name) for asset in assets]
+                )
+                if total is None:
+                    continue
+
+                rows.append(
+                    (
+                        label,
+                        self._display_text(field_name, total),
+                    )
+                )
+                continue
+
             common_value = self._common_nonempty_value(
                 [asset.get(field_name) for asset in assets]
             )
@@ -292,10 +327,7 @@ class AssetDetailSidebar(QDockWidget):
 
             rows.append(
                 (
-                    HEADER_LABELS.get(
-                        field_name,
-                        field_name.replace("_", " ").title(),
-                    ),
+                    label,
                     self._display_text(field_name, common_value),
                 )
             )
@@ -392,6 +424,33 @@ class AssetDetailSidebar(QDockWidget):
 
         return None
 
+    @classmethod
+    def _sum_numeric_values(
+        cls,
+        values: list[Any],
+    ) -> Decimal | None:
+        """Summiert vorhandene Preiswerte der Mehrfachauswahl.
+
+        Leere Preiswerte werden wie 0 behandelt. Sind alle Werte leer,
+        wird das Feld nicht angezeigt.
+        """
+
+        total = Decimal("0")
+        found_value = False
+
+        for value in values:
+            if cls._is_empty(value):
+                continue
+
+            try:
+                total += Decimal(str(value))
+                found_value = True
+            except (InvalidOperation, ValueError, TypeError):
+                # Ein ungültiger Preis soll nicht zu einer falschen Summe führen.
+                return None
+
+        return total if found_value else None
+
     @staticmethod
     def _normalize_for_comparison(value: Any) -> Any:
         if isinstance(value, str):
@@ -443,12 +502,69 @@ class AssetDetailSidebar(QDockWidget):
             )
         )
 
-    @staticmethod
+    @classmethod
     def _display_text(
+        cls,
         field_name: str,
         value: Any,
     ) -> str:
+        if field_name in DATE_DETAIL_FIELDS:
+            return cls._format_date(value)
+
+        if field_name in PRICE_DETAIL_FIELDS:
+            return cls._format_chf(value)
+
         return format_inventory_value(field_name, value)
+
+    @staticmethod
+    def _format_date(value: Any) -> str:
+        """Datum in der Detailansicht konsequent als DD-MM-YYYY."""
+
+        if isinstance(value, datetime):
+            return value.strftime("%d-%m-%Y")
+
+        if isinstance(value, date):
+            return value.strftime("%d-%m-%Y")
+
+        text = str(value or "").strip()
+        if not text:
+            return ""
+
+        # ISO-Datum oder ISO-Timestamp aus Supabase.
+        try:
+            if "T" in text or " " in text:
+                normalized = text.replace("Z", "+00:00")
+                parsed = datetime.fromisoformat(normalized)
+                return parsed.strftime("%d-%m-%Y")
+
+            parsed_date = date.fromisoformat(text[:10])
+            return parsed_date.strftime("%d-%m-%Y")
+        except ValueError:
+            # Bei unerwarteten Altwerten nicht crashen.
+            return text
+
+    @staticmethod
+    def _format_chf(value: Any) -> str:
+        """Schweizer Preisformat, z.B. CHF 1'250.- bzw. CHF 1'250.50."""
+
+        try:
+            amount = Decimal(str(value or 0))
+        except (InvalidOperation, ValueError, TypeError):
+            return str(value or "")
+
+        amount = amount.quantize(Decimal("0.01"))
+        sign = "-" if amount < 0 else ""
+        amount = abs(amount)
+
+        integer_part = int(amount)
+        cents = int((amount - integer_part) * 100)
+
+        integer_text = f"{integer_part:,}".replace(",", "'")
+
+        if cents == 0:
+            return f"CHF {sign}{integer_text}.-"
+
+        return f"CHF {sign}{integer_text}.{cents:02d}"
 
     # ------------------------------------------------------------------
     # UI-Aufbau
