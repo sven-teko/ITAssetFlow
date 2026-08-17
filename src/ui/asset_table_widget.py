@@ -38,6 +38,7 @@ class AssetTableWidget(QTableWidget):
         self.columns_menu = columns_menu
         self.current_columns: list[str] = []
         self.visible_columns: set[str] = set()
+        self.default_visible_columns: set[str] = set(DEFAULT_VISIBLE_COLUMNS)
         self.column_actions: dict[str, QAction] = {}
         self.column_visibility_initialized = False
         self._configure_table()
@@ -151,7 +152,7 @@ class AssetTableWidget(QTableWidget):
     def initialize_visible_columns(self) -> None:
         available = set(self.current_columns)
         if not self.column_visibility_initialized:
-            self.visible_columns = DEFAULT_VISIBLE_COLUMNS & available
+            self.visible_columns = self.default_visible_columns & available
             if not self.visible_columns:
                 self.visible_columns = set(self.current_columns[:5])
             self.column_visibility_initialized = True
@@ -246,10 +247,30 @@ class AssetTableWidget(QTableWidget):
         self.resize_visible_columns()
         self.visible_columns_changed.emit()
 
+    def set_default_visible_columns(
+        self,
+        columns: set[str] | list[str] | tuple[str, ...],
+        *,
+        apply_now: bool = False,
+    ) -> None:
+        selected = {
+            str(column)
+            for column in columns
+            if str(column) in PREFERRED_COLUMN_ORDER
+        }
+        self.default_visible_columns = (
+            selected
+            if selected
+            else set(DEFAULT_VISIBLE_COLUMNS)
+        )
+
+        if apply_now and self.current_columns:
+            self.reset_visible_columns()
+
     @Slot()
     def reset_visible_columns(self) -> None:
         available = set(self.current_columns)
-        self.visible_columns = DEFAULT_VISIBLE_COLUMNS & available
+        self.visible_columns = self.default_visible_columns & available
         if not self.visible_columns:
             self.visible_columns = set(self.current_columns[:5])
         self.sync_column_actions()
@@ -311,6 +332,8 @@ class AssetTableWidget(QTableWidget):
 
         assets: list[dict[str, Any]] = []
         for index in sorted(model.selectedRows(), key=lambda item: item.row()):
+            if self.isRowHidden(index.row()):
+                continue
             asset = self.get_asset_from_row(index.row())
             if asset is not None:
                 assets.append(asset)
@@ -344,6 +367,23 @@ class AssetTableWidget(QTableWidget):
                 else True
             )
             row_matches = search_matches and additional_matches
+
+            if not row_matches:
+                selection_model = self.selectionModel()
+                if (
+                    selection_model is not None
+                    and selection_model.isRowSelected(
+                        row_index,
+                        self.rootIndex(),
+                    )
+                ):
+                    index = self.model().index(row_index, 0)
+                    selection_model.select(
+                        index,
+                        QItemSelectionModel.SelectionFlag.Deselect
+                        | QItemSelectionModel.SelectionFlag.Rows,
+                    )
+
             self.setRowHidden(row_index, not row_matches)
             visible_count += int(row_matches)
 

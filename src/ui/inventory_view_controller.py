@@ -88,6 +88,10 @@ class InventoryViewController(QObject):
     create_form_failed = Signal(str)
     entry_created = Signal(object)
     entry_create_failed = Signal(str)
+
+    entries_deleted = Signal(object)
+    entries_delete_failed = Signal(str)
+
     writing_changed = Signal(bool)
 
     RELOAD_DELAY_MS = 600
@@ -294,6 +298,85 @@ class InventoryViewController(QObject):
         self._set_writing(False)
         self.status_message.emit("Inventareintrag konnte nicht gespeichert werden.", 6000)
         self.entry_create_failed.emit(message)
+
+    # ------------------------------------------------------------------
+    # Einträge löschen
+    # ------------------------------------------------------------------
+
+    @Slot(object)
+    def delete_inventory_entries(
+        self,
+        entries: object,
+    ) -> None:
+        if self._is_writing:
+            return
+
+        if not isinstance(entries, list) or not entries:
+            self.entries_delete_failed.emit(
+                "Keine Inventareinträge zum Löschen ausgewählt."
+            )
+            return
+
+        selected = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+        if not selected:
+            self.entries_delete_failed.emit(
+                "Die ausgewählten Inventareinträge sind ungültig."
+            )
+            return
+
+        self._set_writing(True)
+
+        count = len(selected)
+        self.status_message.emit(
+            (
+                "Inventareintrag wird gelöscht ..."
+                if count == 1
+                else f"{count} Inventareinträge werden gelöscht ..."
+            ),
+            0,
+        )
+
+        worker = _RepositoryTaskWorker(
+            lambda: self.repository.delete_inventory_entries(
+                selected
+            )
+        )
+        worker.signals.succeeded.connect(
+            self._entries_deleted
+        )
+        worker.signals.failed.connect(
+            self._entries_delete_failed
+        )
+        self._thread_pool.start(worker)
+
+    @Slot(object)
+    def _entries_deleted(
+        self,
+        result: object,
+    ) -> None:
+        self._set_writing(False)
+        self.entries_deleted.emit(result)
+        self.status_message.emit(
+            "Ausgewählte Inventareinträge wurden gelöscht.",
+            4500,
+        )
+        self.notify_inventory_changed()
+
+    @Slot(str)
+    def _entries_delete_failed(
+        self,
+        message: str,
+    ) -> None:
+        self._set_writing(False)
+        self.status_message.emit(
+            "Inventareinträge konnten nicht gelöscht werden.",
+            6500,
+        )
+        self.entries_delete_failed.emit(message)
 
     # ------------------------------------------------------------------
     # Reload / Cloud-Monitor

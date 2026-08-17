@@ -519,13 +519,13 @@ class AssetCreateDialog(QDialog):
         context_form.addRow("Zustand *:", self.condition_combo)
 
         self.site_combo = NoWheelComboBox()
-        context_form.addRow("Standort:", self.site_combo)
-
-        self.location_combo = NoWheelComboBox()
-        context_form.addRow("Lagerort *:", self.location_combo)
+        context_form.addRow("Standort *:", self.site_combo)
 
         self.department_combo = NoWheelComboBox()
         context_form.addRow("Abteilung *:", self.department_combo)
+
+        self.location_combo = NoWheelComboBox()
+        context_form.addRow("Lagerort *:", self.location_combo)
 
         self.parent_asset_combo = NoWheelComboBox()
         context_form.addRow("Verbunden mit:", self.parent_asset_combo)
@@ -586,35 +586,32 @@ class AssetCreateDialog(QDialog):
         self.manufacturer_combo.setCurrentIndex(0)
 
         self.site_combo.clear()
-        self.site_combo.addItem("Kein Standort", None)
+        self.site_combo.addItem("Bitte Standort auswählen *", None)
         sites = self.sites
         if not sites:
-            # Rückwärtskompatibilität, falls ein älteres Repository noch keine
-            # site-Datensätze an den Dialog liefert.
             site_ids = sorted(
-                {row.get("site_id") for row in self.locations if row.get("site_id") is not None},
+                {
+                    row.get("site_id")
+                    for row in self.departments
+                    if row.get("site_id") is not None
+                },
                 key=str,
             )
-            sites = [{"id": site_id, "name": f"Standort #{site_id}"} for site_id in site_ids]
-        for site in sorted(sites, key=lambda row: str(row.get("name") or "").casefold()):
+            sites = [
+                {"id": site_id, "name": f"Standort #{site_id}"}
+                for site_id in site_ids
+            ]
+        for site in sorted(
+            sites,
+            key=lambda row: str(row.get("name") or "").casefold(),
+        ):
             self.site_combo.addItem(
                 str(site.get("name") or f"Standort #{site.get('id')}"),
                 site.get("id"),
             )
 
-        self._repopulate_locations()
-
-        self.department_combo.clear()
-        self.department_combo.addItem("Bitte Abteilung auswählen *", None)
-        for department in sorted(
-            self.departments,
-            key=lambda row: str(row.get("name") or "").casefold(),
-        ):
-            self.department_combo.addItem(
-                str(department.get("name") or f"Abteilung #{department.get('id')}"),
-                department.get("id"),
-            )
-
+        self._repopulate_departments(preserve_selection=False)
+        self._repopulate_locations(preserve_selection=False)
         self._repopulate_employees(preserve_selection=False)
 
         self.parent_asset_combo.clear()
@@ -793,35 +790,103 @@ class AssetCreateDialog(QDialog):
         self._update_parent_asset_visibility()
 
     def _site_changed(self) -> None:
-        self._repopulate_locations()
+        self._repopulate_departments(preserve_selection=True)
+        self._repopulate_locations(preserve_selection=True)
+        self._repopulate_employees(preserve_selection=True)
 
-    def _repopulate_locations(self) -> None:
-        selected_location_id = self.location_combo.currentData() if self.location_combo.count() else None
-        site_id = self.site_combo.currentData() if hasattr(self, "site_combo") else None
+    def _repopulate_departments(
+        self,
+        *,
+        preserve_selection: bool = True,
+        preferred_department_id: Any | None = None,
+    ) -> None:
+        selected_id = (
+            preferred_department_id
+            if preferred_department_id is not None
+            else (
+                self.department_combo.currentData()
+                if preserve_selection and self.department_combo.count()
+                else None
+            )
+        )
+        site_id = self.site_combo.currentData()
+
+        self.department_combo.blockSignals(True)
+        self.department_combo.clear()
+        self.department_combo.addItem("Bitte Abteilung auswählen *", None)
+
+        available = [
+            row
+            for row in self.departments
+            if site_id is not None
+            and row.get("site_id") == site_id
+        ]
+        restore_index = 0
+        for department in sorted(
+            available,
+            key=lambda row: str(row.get("name") or "").casefold(),
+        ):
+            self.department_combo.addItem(
+                str(
+                    department.get("name")
+                    or f"Abteilung #{department.get('id')}"
+                ),
+                department.get("id"),
+            )
+            if department.get("id") == selected_id:
+                restore_index = self.department_combo.count() - 1
+
+        self.department_combo.setCurrentIndex(restore_index)
+        self.department_combo.setEnabled(site_id is not None)
+        self.department_combo.blockSignals(False)
+
+    def _repopulate_locations(
+        self,
+        *,
+        preserve_selection: bool = True,
+    ) -> None:
+        selected_location_id = (
+            self.location_combo.currentData()
+            if preserve_selection and self.location_combo.count()
+            else None
+        )
+        site_id = self.site_combo.currentData()
+        department_id = self.department_combo.currentData()
 
         self.location_combo.blockSignals(True)
         self.location_combo.clear()
         self.location_combo.addItem("Bitte Lagerort auswählen *", None)
 
         active_locations = [
-            row for row in self.locations
+            row
+            for row in self.locations
             if row.get("is_active", True)
-            and (site_id is None or row.get("site_id") == site_id)
+            and site_id is not None
+            and department_id is not None
+            and row.get("site_id") == site_id
+            and row.get("department_id") == department_id
         ]
+
         restore_index = 0
-        for location in sorted(active_locations, key=lambda row: str(row.get("name") or "").casefold()):
-            name = str(location.get("name") or f"Lagerort #{location.get('id')}")
-            code = str(location.get("code") or "").strip()
-            label = f"{name} ({code})" if code else name
-            self.location_combo.addItem(label, location.get("id"))
+        for location in sorted(
+            active_locations,
+            key=lambda row: str(row.get("name") or "").casefold(),
+        ):
+            self.location_combo.addItem(
+                str(location.get("name") or f"Lagerort #{location.get('id')}"),
+                location.get("id"),
+            )
             if location.get("id") == selected_location_id:
                 restore_index = self.location_combo.count() - 1
 
         self.location_combo.setCurrentIndex(restore_index)
+        self.location_combo.setEnabled(
+            site_id is not None and department_id is not None
+        )
         self.location_combo.blockSignals(False)
 
     def _employee_assignment_changed(self) -> None:
-        """Übernimmt bei Bedarf automatisch die Abteilung des Mitarbeiters."""
+        """Übernimmt bei Bedarf Standort und Abteilung des Mitarbeiters."""
 
         employee_id = self.employee_combo.currentData()
         if employee_id is None:
@@ -834,28 +899,45 @@ class AssetCreateDialog(QDialog):
         if not isinstance(employee, dict):
             return
 
-        employee_department_id = employee.get("department_id")
-        if employee_department_id is None:
+        department_id = employee.get("department_id")
+        if department_id is None:
             return
 
-        # Ist noch keine Abteilung gewählt, wird die Abteilung des Mitarbeiters
-        # automatisch ergänzt. Bei bereits gewählter Abteilung werden durch die
-        # Filterung ohnehin nur passende Mitarbeiter angeboten.
-        if self.department_combo.currentData() is None:
-            index = self.department_combo.findData(employee_department_id)
-            if index >= 0:
-                self.department_combo.blockSignals(True)
-                self.department_combo.setCurrentIndex(index)
-                self.department_combo.blockSignals(False)
-                self._repopulate_employees(
-                    preserve_selection=True,
-                    preferred_employee_id=employee_id,
+        department = next(
+            (row for row in self.departments if row.get("id") == department_id),
+            None,
+        )
+        if not isinstance(department, dict):
+            return
+
+        site_id = department.get("site_id")
+        if site_id is not None and self.site_combo.currentData() != site_id:
+            site_index = self.site_combo.findData(site_id)
+            if site_index >= 0:
+                self.site_combo.blockSignals(True)
+                self.site_combo.setCurrentIndex(site_index)
+                self.site_combo.blockSignals(False)
+                self._repopulate_departments(
+                    preserve_selection=False,
+                    preferred_department_id=department_id,
                 )
+        elif self.department_combo.currentData() != department_id:
+            department_index = self.department_combo.findData(department_id)
+            if department_index >= 0:
+                self.department_combo.blockSignals(True)
+                self.department_combo.setCurrentIndex(department_index)
+                self.department_combo.blockSignals(False)
+
+        self._repopulate_locations(preserve_selection=True)
+        self._repopulate_employees(
+            preserve_selection=True,
+            preferred_employee_id=employee_id,
+        )
 
     def _department_assignment_changed(self) -> None:
+        # Hierarchie: Standort -> Abteilung -> Lagerort.
+        self._repopulate_locations(preserve_selection=True)
         # Eine Abteilung und ein Mitarbeiter dürfen gleichzeitig gesetzt sein.
-        # Bei gewählter Abteilung zeigt das Mitarbeiterfeld nur Personen dieser
-        # Abteilung; bei "keine" stehen wieder alle aktiven Mitarbeiter bereit.
         self._repopulate_employees(preserve_selection=True)
 
     def _repopulate_employees(
@@ -1032,11 +1114,14 @@ class AssetCreateDialog(QDialog):
         if not str(self.condition_combo.currentData() or "").strip():
             missing.append(("Zustand", self.condition_combo))
 
-        if self.location_combo.currentData() is None:
-            missing.append(("Lagerort", self.location_combo))
+        if self.site_combo.currentData() is None:
+            missing.append(("Standort", self.site_combo))
 
         if self.department_combo.currentData() is None:
             missing.append(("Abteilung", self.department_combo))
+
+        if self.location_combo.currentData() is None:
+            missing.append(("Lagerort", self.location_combo))
 
         if not str(self.status_combo.currentData() or "").strip():
             missing.append(("Status", self.status_combo))
@@ -1057,8 +1142,9 @@ class AssetCreateDialog(QDialog):
             self.tracking_combo,
             self.asset_tag_input,
             self.condition_combo,
-            self.location_combo,
+            self.site_combo,
             self.department_combo,
+            self.location_combo,
             self.status_combo,
             self.purchase_date_input,
         )

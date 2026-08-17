@@ -15,6 +15,7 @@ class MainWindowMenu(QObject):
     refresh_requested = Signal()
     exit_requested = Signal()
     about_requested = Signal()
+    settings_requested = Signal()
 
     navigation_visibility_requested = Signal(bool)
     navigation_left_requested = Signal()
@@ -89,6 +90,11 @@ class MainWindowMenu(QObject):
             self.window,
         )
 
+        self.settings_action = QAction(
+            "Einstellungen",
+            self.window,
+        )
+
         self.exit_action = QAction(
             "Beenden",
             self.window,
@@ -106,6 +112,7 @@ class MainWindowMenu(QObject):
 
         file_menu = menu_bar.addMenu("Datei")
         file_menu.addAction(self.refresh_action)
+        file_menu.addAction(self.settings_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
 
@@ -156,6 +163,9 @@ class MainWindowMenu(QObject):
     def _connect_actions(self) -> None:
         self.refresh_action.triggered.connect(
             lambda _checked=False: self.refresh_requested.emit()
+        )
+        self.settings_action.triggered.connect(
+            lambda _checked=False: self.settings_requested.emit()
         )
         self.exit_action.triggered.connect(
             lambda _checked=False: self.exit_requested.emit()
@@ -236,5 +246,8 @@ class MainWindowMenu(QObject):
         loading: bool,
     ) -> None:
         self.refresh_action.setEnabled(
+            not loading
+        )
+        self.settings_action.setEnabled(
             not loading
         )

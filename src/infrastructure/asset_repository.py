@@ -79,6 +79,12 @@ class AssetRepository:
             order_column="id",
             required=False,
         )
+        sites = self._load_rows(
+            "sites",
+            order_column="name",
+            required=False,
+            select_expression="id,name",
+        )
         stock_levels = self._load_stock_levels()
 
         if not product_models:
@@ -104,6 +110,7 @@ class AssetRepository:
         self.enrich_current_context(
             merged_assets,
             storage_locations=storage_locations,
+            sites=sites,
         )
 
         stock_rows = self._merge_stock_level_rows(
@@ -112,9 +119,75 @@ class AssetRepository:
             product_categories,
             manufacturers,
             storage_locations,
+            sites,
         )
 
         return merged_assets + stock_rows
+
+    def delete_inventory_entries(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        """Löscht ausgewählte Inventareinträge.
+
+        Einzelartikel werden inklusive ihrer direkten Zuordnungen gelöscht.
+        Mengenbestand wird aus Gründen der Bestandsnachvollziehbarkeit nicht
+        aus der Bewegungshistorie entfernt. Stattdessen wird der aktuell
+        vorhandene Bestand per Korrekturbuchung vollständig ausgebucht.
+        """
+
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("Keine Inventareinträge zum Löschen ausgewählt.")
+
+        normalized = [
+            entry
+            for entry in entries
+            if isinstance(entry, dict)
+        ]
+        if not normalized:
+            raise ValueError("Die ausgewählten Inventareinträge sind ungültig.")
+
+        # Zuerst alle Datensätze prüfen, bevor die erste Schreiboperation läuft.
+        for entry in normalized:
+            record_type = str(
+                entry.get("_record_type")
+                or "asset"
+            ).strip().casefold()
+
+            if record_type == "stock":
+                self._validate_stock_delete(entry)
+            elif record_type == "asset":
+                if entry.get("id") is None:
+                    raise ValueError(
+                        "Ein ausgewählter Einzelartikel besitzt keine ID."
+                    )
+            else:
+                raise ValueError(
+                    f"Unbekannter Inventartyp: {record_type or 'leer'}"
+                )
+
+        asset_count = 0
+        stock_count = 0
+
+        for entry in normalized:
+            record_type = str(
+                entry.get("_record_type")
+                or "asset"
+            ).strip().casefold()
+
+            if record_type == "stock":
+                if self._delete_stock_level(entry):
+                    stock_count += 1
+                continue
+
+            self._delete_asset(entry.get("id"))
+            asset_count += 1
+
+        return {
+            "deleted_count": asset_count + stock_count,
+            "asset_count": asset_count,
+            "stock_count": stock_count,
+        }
 
     def load_create_form_data(self) -> dict[str, list[dict[str, Any]]]:
         """Lädt die Stammdaten für den Dialog ``Neuer Eintrag``.
@@ -153,14 +226,19 @@ class AssetRepository:
             required=True,
             select_expression="id,name",
         )
-        storage_locations = self._load_rows(
-            "storage_locations",
-            order_column="name",
-            required=True,
-            select_expression=(
-                "id,site_id,name,parent_location_id,location_type,code,is_active"
-            ),
-        )
+        storage_locations = [
+            row
+            for row in self._load_rows(
+                "storage_locations",
+                order_column="name",
+                required=True,
+                select_expression=(
+                    "id,site_id,department_id,name,parent_location_id,"
+                    "location_type,code,is_active"
+                ),
+            )
+            if bool(row.get("is_active", True))
+        ]
         employees = self._load_rows(
             "employees",
             order_column="last_name",
@@ -174,7 +252,7 @@ class AssetRepository:
             "departments",
             order_column="name",
             required=False,
-            select_expression="id,name",
+            select_expression="id,name,site_id",
         )
         assets = self._load_rows(
             self.asset_table_name,
@@ -259,6 +337,26 @@ class AssetRepository:
             storage_location_id = payload.get("storage_location_id")
 
             if entry_type == "asset":
+                assignment = payload.get("assignment")
+                department_id = (
+                    assignment.get("department_id")
+                    if isinstance(assignment, dict)
+                    else None
+                )
+            else:
+                stock_data = payload.get("stock")
+                department_id = (
+                    stock_data.get("department_id")
+                    if isinstance(stock_data, dict)
+                    else None
+                )
+
+            self._validate_location_department(
+                storage_location_id=storage_location_id,
+                department_id=department_id,
+            )
+
+            if entry_type == "asset":
                 result = self._create_serialized_asset(
                     model_id=model_id,
                     condition=condition,
@@ -308,6 +406,66 @@ class AssetRepository:
                     f"Technischer Fehler: {error}"
                 ) from error
             raise
+
+    def _validate_location_department(
+        self,
+        *,
+        storage_location_id: Any | None,
+        department_id: Any | None,
+    ) -> None:
+        """Stellt die Hierarchie Standort -> Abteilung -> Lagerort sicher."""
+
+        if storage_location_id is None:
+            raise ValueError("Lagerort fehlt.")
+        if department_id is None:
+            raise ValueError("Abteilung fehlt.")
+
+        location_response = (
+            self.client.table("storage_locations")
+            .select("id,site_id,department_id,name")
+            .eq("id", storage_location_id)
+            .limit(1)
+            .execute()
+        )
+        locations = [
+            row
+            for row in (location_response.data or [])
+            if isinstance(row, dict)
+        ]
+        if not locations:
+            raise ValueError("Der ausgewählte Lagerort existiert nicht mehr.")
+
+        location = locations[0]
+        assigned_department_id = location.get("department_id")
+        if assigned_department_id is None:
+            raise ValueError(
+                "Der ausgewählte Lagerort ist noch keiner Abteilung zugeordnet. "
+                "Bitte zuerst unter Datei > Einstellungen die Hierarchie "
+                "Standort > Abteilung > Lagerort vervollständigen."
+            )
+        if assigned_department_id != department_id:
+            raise ValueError(
+                "Der ausgewählte Lagerort gehört nicht zur ausgewählten Abteilung."
+            )
+
+        department_response = (
+            self.client.table("departments")
+            .select("id,site_id,name")
+            .eq("id", department_id)
+            .limit(1)
+            .execute()
+        )
+        departments = [
+            row
+            for row in (department_response.data or [])
+            if isinstance(row, dict)
+        ]
+        if not departments:
+            raise ValueError("Die ausgewählte Abteilung existiert nicht mehr.")
+        if departments[0].get("site_id") != location.get("site_id"):
+            raise ValueError(
+                "Standort, Abteilung und Lagerort sind nicht konsistent zugeordnet."
+            )
 
     def _resolve_or_create_product_model(
         self,
@@ -537,6 +695,134 @@ class AssetRepository:
             raise RuntimeError("Supabase hat für die Lagerbewegung keine ID zurückgegeben.")
         return rows[0]
 
+    @staticmethod
+    def _validate_stock_delete(
+        entry: dict[str, Any],
+    ) -> None:
+        required = (
+            ("product_model_id", "Produktmodell"),
+            ("storage_location_id", "Lagerort"),
+            ("condition", "Zustand"),
+        )
+        for field_name, label in required:
+            value = entry.get(field_name)
+            if value is None or not str(value).strip():
+                raise ValueError(
+                    f"Mengenbestand kann nicht gelöscht werden: {label} fehlt."
+                )
+
+    def _delete_asset(
+        self,
+        asset_id: Any,
+    ) -> None:
+        """Entfernt ein serialisiertes Asset samt direkten Zuordnungen."""
+
+        # Alle aktuell vorhandenen RESTRICT-Fremdschlüssel werden vor dem
+        # eigentlichen Asset-Datensatz bereinigt. stock_movements.related_asset_id
+        # besitzt ON DELETE SET NULL und muss deshalb nicht gelöscht werden.
+        dependencies = (
+            ("asset_component_assignments", "child_asset_id"),
+            ("asset_component_assignments", "parent_asset_id"),
+            ("software_installations", "asset_id"),
+            ("asset_assignments", "asset_id"),
+            ("asset_locations", "asset_id"),
+        )
+
+        for table_name, column_name in dependencies:
+            (
+                self.client
+                .table(table_name)
+                .delete()
+                .eq(column_name, asset_id)
+                .execute()
+            )
+
+        (
+            self.client
+            .table(self.asset_table_name)
+            .delete()
+            .eq("id", asset_id)
+            .execute()
+        )
+
+    def _delete_stock_level(
+        self,
+        entry: dict[str, Any],
+    ) -> bool:
+        """Bucht den aktuellen Mengenbestand der ausgewählten Zeile auf 0."""
+
+        product_model_id = entry.get("product_model_id")
+        storage_location_id = entry.get("storage_location_id")
+        condition = str(entry.get("condition") or "").strip().casefold()
+
+        response = (
+            self.client
+            .table("stock_levels")
+            .select("quantity")
+            .eq("product_model_id", product_model_id)
+            .eq("storage_location_id", storage_location_id)
+            .eq("condition", condition)
+            .limit(1)
+            .execute()
+        )
+
+        rows = [
+            row
+            for row in (response.data or [])
+            if isinstance(row, dict)
+        ]
+        if not rows:
+            return False
+
+        try:
+            current_quantity = Decimal(
+                str(rows[0].get("quantity") or 0)
+            )
+        except (InvalidOperation, ValueError, TypeError) as exc:
+            raise ValueError(
+                "Der aktuelle Mengenbestand konnte nicht gelesen werden."
+            ) from exc
+
+        if current_quantity <= 0:
+            return False
+
+        location_response = (
+            self.client
+            .table("storage_locations")
+            .select("department_id")
+            .eq("id", storage_location_id)
+            .limit(1)
+            .execute()
+        )
+        location_rows = [
+            row
+            for row in (location_response.data or [])
+            if isinstance(row, dict)
+        ]
+        department_id = (
+            location_rows[0].get("department_id")
+            if location_rows
+            else None
+        )
+
+        movement = {
+            "product_model_id": product_model_id,
+            "from_storage_location_id": storage_location_id,
+            "to_storage_location_id": None,
+            "quantity": float(current_quantity),
+            "movement_type": "adjustment",
+            "from_condition": condition,
+            "to_condition": None,
+            "department_id": department_id,
+            "note": (
+                "Bestand über ITAssetFlow über "
+                "„Einträge löschen“ vollständig ausgebucht."
+            ),
+        }
+
+        self.client.table("stock_movements").insert(movement).execute()
+        return True
+
     def _cleanup_failed_create(
         self,
         *,
@@ -680,6 +966,7 @@ class AssetRepository:
         product_categories: list[dict[str, Any]],
         manufacturers: list[dict[str, Any]],
         storage_locations: list[dict[str, Any]],
+        sites: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Bereitet ``stock_levels`` wie normale Inventarzeilen für die UI auf.
 
@@ -692,6 +979,7 @@ class AssetRepository:
         categories_by_id = cls._index_by_id(product_categories)
         manufacturers_by_id = cls._index_by_id(manufacturers)
         locations_by_id = cls._index_by_id(storage_locations)
+        sites_by_id = cls._index_by_id(sites)
 
         result: list[dict[str, Any]] = []
 
@@ -744,6 +1032,7 @@ class AssetRepository:
                 "stock_quantity": quantity,
                 "current_usage_state": "stored",
                 "inventory_usage": USAGE_STATE_LABELS["stored"],
+                "site_name": "",
                 "department_name": "",
                 "connected_product": "",
             }
@@ -774,6 +1063,14 @@ class AssetRepository:
                 location,
                 storage_location_id,
             )
+
+            if isinstance(location, dict):
+                site_id = location.get("site_id")
+                row["site_id"] = site_id
+                row["site_name"] = cls._site_label(
+                    sites_by_id.get(site_id),
+                    site_id,
+                )
 
             result.append(row)
 
@@ -877,6 +1174,7 @@ class AssetRepository:
         assets: list[dict[str, Any]],
         *,
         storage_locations: list[dict[str, Any]] | None = None,
+        sites: list[dict[str, Any]] | None = None,
     ) -> None:
         """Ergänzt den aktuell abgeleiteten Nutzungszustand eines Assets.
 
@@ -897,6 +1195,7 @@ class AssetRepository:
         self._enrich_locations_and_assignments(
             assets,
             storage_locations=storage_locations,
+            sites=sites,
         )
         self._enrich_component_assignments(assets)
 
@@ -907,6 +1206,8 @@ class AssetRepository:
             asset["inventory_usage"] = USAGE_STATE_LABELS["unlocated"]
             asset["connected_product"] = ""
             asset["connected_product_id"] = None
+            asset["site_name"] = ""
+            asset["site_id"] = None
             asset["department_name"] = ""
             asset["assigned_to"] = ""  # intern für spätere Detailansichten
             asset["storage_location"] = ""
@@ -917,6 +1218,7 @@ class AssetRepository:
         assets: list[dict[str, Any]],
         *,
         storage_locations: list[dict[str, Any]] | None = None,
+        sites: list[dict[str, Any]] | None = None,
     ) -> None:
         asset_locations = self._load_rows(
             "asset_locations",
@@ -931,6 +1233,13 @@ class AssetRepository:
                 "storage_locations",
                 order_column="id",
                 required=False,
+            )
+        if sites is None:
+            sites = self._load_rows(
+                "sites",
+                order_column="name",
+                required=False,
+                select_expression="id,name",
             )
         asset_assignments = self._load_rows(
             "asset_assignments",
@@ -952,12 +1261,13 @@ class AssetRepository:
             "departments",
             order_column="id",
             required=False,
-            select_expression="id,name",
+            select_expression="id,name,site_id",
         )
 
         current_locations = self._latest_open_rows(asset_locations, "asset_id", "valid_from")
         current_assignments = self._latest_open_rows(asset_assignments, "asset_id", "valid_from")
         locations_by_id = self._index_by_id(storage_locations)
+        sites_by_id = self._index_by_id(sites)
         employees_by_id = self._index_by_id(employees)
         departments_by_id = self._index_by_id(departments)
 
@@ -970,6 +1280,15 @@ class AssetRepository:
                 location = locations_by_id.get(location_id)
                 asset["storage_location_id"] = location_id
                 asset["storage_location"] = self._location_label(location, location_id)
+
+                if isinstance(location, dict):
+                    site_id = location.get("site_id")
+                    asset["site_id"] = site_id
+                    asset["site_name"] = self._site_label(
+                        sites_by_id.get(site_id),
+                        site_id,
+                    )
+
                 asset["current_usage_state"] = "stored"
                 asset["inventory_usage"] = USAGE_STATE_LABELS["stored"]
 
@@ -1001,6 +1320,14 @@ class AssetRepository:
                         department,
                         department_id,
                     )
+
+                    if not asset.get("site_name") and isinstance(department, dict):
+                        site_id = department.get("site_id")
+                        asset["site_id"] = site_id
+                        asset["site_name"] = self._site_label(
+                            sites_by_id.get(site_id),
+                            site_id,
+                        )
 
                 asset["current_usage_state"] = "assigned"
                 asset["inventory_usage"] = USAGE_STATE_LABELS["assigned"]
@@ -1088,6 +1415,14 @@ class AssetRepository:
             if number:
                 return number
         return f"Mitarbeiter #{employee_id}"
+
+    @staticmethod
+    def _site_label(site: dict[str, Any] | None, site_id: Any) -> str:
+        if isinstance(site, dict):
+            name = str(site.get("name") or "").strip()
+            if name:
+                return name
+        return f"Standort #{site_id}" if site_id is not None else ""
 
     @staticmethod
     def _department_label(department: dict[str, Any] | None, department_id: Any) -> str:
