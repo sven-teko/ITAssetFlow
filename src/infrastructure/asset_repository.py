@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -289,6 +290,303 @@ class AssetRepository:
             "employees": employees,
             "departments": departments,
             "parent_assets": parent_assets,
+        }
+
+    def load_edit_form_data(
+        self,
+        entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Lädt Stammdaten und den aktuellen Datensatz für „Eintrag bearbeiten“."""
+
+        if not isinstance(entry, dict):
+            raise ValueError("Ungültiger Inventareintrag.")
+
+        data = self.load_create_form_data()
+        record_type = str(
+            entry.get("_record_type")
+            or "asset"
+        ).strip().casefold()
+
+        if record_type == "asset":
+            asset_id = entry.get("id")
+            if asset_id is None:
+                raise ValueError("Asset-ID fehlt.")
+
+            response = (
+                self.client.table(self.asset_table_name)
+                .select(
+                    "id,product_model_id,asset_tag,serial_number,purchase_date,"
+                    "new_price,warranty_until,note,retired_at,status,"
+                    "specifications,condition"
+                )
+                .eq("id", asset_id)
+                .limit(1)
+                .execute()
+            )
+            rows = [
+                row
+                for row in (response.data or [])
+                if isinstance(row, dict)
+            ]
+            if not rows:
+                raise ValueError(
+                    "Der ausgewählte Inventareintrag existiert nicht mehr."
+                )
+
+            current = rows[0]
+            current["_record_type"] = "asset"
+
+            location = self._latest_open_relation(
+                "asset_locations",
+                "asset_id",
+                asset_id,
+                "valid_from",
+            )
+            if location:
+                current["storage_location_id"] = location.get(
+                    "storage_location_id"
+                )
+
+            assignment = self._latest_open_relation(
+                "asset_assignments",
+                "asset_id",
+                asset_id,
+                "valid_from",
+            )
+            if assignment:
+                current["assigned_employee_id"] = assignment.get(
+                    "employee_id"
+                )
+                current["assigned_department_id"] = assignment.get(
+                    "department_id"
+                )
+
+            component_response = (
+                self.client.table("asset_component_assignments")
+                .select(
+                    "id,parent_asset_id,child_asset_id,installed_at,removed_at"
+                )
+                .eq("child_asset_id", asset_id)
+                .is_("removed_at", "null")
+                .order("installed_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            components = [
+                row
+                for row in (component_response.data or [])
+                if isinstance(row, dict)
+            ]
+            if components:
+                current["connected_product_id"] = components[0].get(
+                    "parent_asset_id"
+                )
+
+            self._add_site_context(
+                current,
+                data,
+            )
+            data["edit_entry"] = current
+            return data
+
+        if record_type != "stock":
+            raise ValueError(
+                f"Unbekannter Inventartyp: {record_type!r}."
+            )
+
+        product_model_id = entry.get("product_model_id")
+        storage_location_id = entry.get("storage_location_id")
+        condition = str(
+            entry.get("condition")
+            or ""
+        ).strip().casefold()
+
+        if (
+            product_model_id is None
+            or storage_location_id is None
+            or not condition
+        ):
+            raise ValueError(
+                "Der Mengenbestand enthält nicht genügend Daten zum Bearbeiten."
+            )
+
+        level_response = (
+            self.client.table("stock_levels")
+            .select("quantity")
+            .eq("product_model_id", product_model_id)
+            .eq("storage_location_id", storage_location_id)
+            .eq("condition", condition)
+            .limit(1)
+            .execute()
+        )
+        levels = [
+            row
+            for row in (level_response.data or [])
+            if isinstance(row, dict)
+        ]
+        if not levels:
+            raise ValueError(
+                "Der ausgewählte Mengenbestand existiert nicht mehr."
+            )
+
+        movement_response = (
+            self.client.table("stock_movements")
+            .select(
+                "id,product_model_id,to_storage_location_id,to_condition,"
+                "department_id,purchase_date,new_price,status,note,moved_at"
+            )
+            .eq("product_model_id", product_model_id)
+            .eq("to_storage_location_id", storage_location_id)
+            .eq("to_condition", condition)
+            .order("moved_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        movements = [
+            row
+            for row in (movement_response.data or [])
+            if isinstance(row, dict)
+        ]
+        movement = movements[0] if movements else {}
+
+        location = next(
+            (
+                row
+                for row in data.get("storage_locations", [])
+                if isinstance(row, dict)
+                and row.get("id") == storage_location_id
+            ),
+            {},
+        )
+
+        current = {
+            "_record_type": "stock",
+            "id": entry.get("id"),
+            "product_model_id": product_model_id,
+            "storage_location_id": storage_location_id,
+            "condition": condition,
+            "stock_quantity": levels[0].get("quantity"),
+            "department_id": (
+                movement.get("department_id")
+                or (
+                    location.get("department_id")
+                    if isinstance(location, dict)
+                    else None
+                )
+            ),
+            "purchase_date": movement.get("purchase_date"),
+            "new_price": movement.get("new_price") or 0,
+            "status": movement.get("status") or "available",
+            "note": movement.get("note"),
+            "source_movement_id": movement.get("id"),
+        }
+
+        self._add_site_context(
+            current,
+            data,
+        )
+        data["edit_entry"] = current
+        return data
+
+    def update_inventory_entry(
+        self,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Aktualisiert einen bestehenden Einzelartikel oder Mengenbestand."""
+
+        if not isinstance(payload, dict):
+            raise ValueError("Ungültige Daten für den Inventareintrag.")
+
+        edit = payload.get("edit")
+        if not isinstance(edit, dict):
+            raise ValueError("Bearbeitungsinformationen fehlen.")
+
+        record_type = str(
+            edit.get("record_type")
+            or ""
+        ).strip().casefold()
+
+        model_info = payload.get("model")
+        if not isinstance(model_info, dict):
+            raise ValueError("Produktmodell fehlt.")
+        if str(model_info.get("mode") or "").strip().casefold() != "existing":
+            raise ValueError(
+                "Beim Bearbeiten muss ein bestehendes Produktmodell verwendet werden."
+            )
+
+        model_id, tracking_mode, _created_model, _created_manufacturer = (
+            self._resolve_or_create_product_model(model_info)
+        )
+
+        if record_type == "asset":
+            if tracking_mode not in ("serialized", "hybrid"):
+                raise ValueError(
+                    "Ein Einzelartikel kann nur einem Einzelartikel- oder "
+                    "Hybrid-Produktmodell zugeordnet werden."
+                )
+        elif record_type == "stock":
+            if tracking_mode not in ("quantity", "hybrid"):
+                raise ValueError(
+                    "Mengenbestand kann nur einem Mengen- oder "
+                    "Hybrid-Produktmodell zugeordnet werden."
+                )
+        else:
+            raise ValueError("Unbekannte Eintragsart.")
+
+        condition = str(
+            payload.get("condition")
+            or ""
+        ).strip().casefold()
+        storage_location_id = payload.get(
+            "storage_location_id"
+        )
+
+        if record_type == "asset":
+            assignment = payload.get("assignment")
+            department_id = (
+                assignment.get("department_id")
+                if isinstance(assignment, dict)
+                else None
+            )
+        else:
+            stock = payload.get("stock")
+            department_id = (
+                stock.get("department_id")
+                if isinstance(stock, dict)
+                else None
+            )
+
+        self._validate_location_department(
+            storage_location_id=storage_location_id,
+            department_id=department_id,
+        )
+
+        if record_type == "asset":
+            result = self._update_serialized_asset(
+                asset_id=edit.get("id"),
+                model_id=model_id,
+                condition=condition,
+                storage_location_id=storage_location_id,
+                asset_data=payload.get("asset"),
+                assignment=payload.get("assignment"),
+                parent_asset_id=payload.get("parent_asset_id"),
+            )
+            return {
+                "entry_type": "asset",
+                "id": result.get("id"),
+                "asset_tag": result.get("asset_tag"),
+            }
+
+        result = self._update_stock_level(
+            original=edit,
+            model_id=model_id,
+            condition=condition,
+            storage_location_id=storage_location_id,
+            stock_data=payload.get("stock"),
+        )
+        return {
+            "entry_type": "stock",
+            **result,
         }
 
     def create_inventory_entry(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -694,6 +992,452 @@ class AssetRepository:
         if not rows or rows[0].get("id") is None:
             raise RuntimeError("Supabase hat für die Lagerbewegung keine ID zurückgegeben.")
         return rows[0]
+
+    def _update_serialized_asset(
+        self,
+        *,
+        asset_id: Any,
+        model_id: Any,
+        condition: str,
+        storage_location_id: Any,
+        asset_data: Any,
+        assignment: Any,
+        parent_asset_id: Any | None,
+    ) -> dict[str, Any]:
+        if asset_id is None:
+            raise ValueError("Asset-ID fehlt.")
+        if not isinstance(asset_data, dict):
+            raise ValueError("Assetdaten fehlen.")
+        if not isinstance(assignment, dict):
+            raise ValueError("Zuweisungsdaten fehlen.")
+
+        asset_tag = str(
+            asset_data.get("asset_tag")
+            or ""
+        ).strip()
+        if not asset_tag:
+            raise ValueError("Produkterkennung fehlt.")
+        if not asset_data.get("purchase_date"):
+            raise ValueError("Kaufdatum fehlt.")
+        if assignment.get("department_id") is None:
+            raise ValueError("Abteilung fehlt.")
+        if storage_location_id is None:
+            raise ValueError("Lagerort fehlt.")
+
+        duplicate_response = (
+            self.client.table(self.asset_table_name)
+            .select("id")
+            .eq("asset_tag", asset_tag)
+            .neq("id", asset_id)
+            .limit(1)
+            .execute()
+        )
+        if duplicate_response.data:
+            raise ValueError(
+                f"Die Produkterkennung „{asset_tag}“ wird bereits verwendet."
+            )
+
+        row = {
+            "product_model_id": model_id,
+            "asset_tag": asset_tag,
+            "serial_number": self._none_if_blank(
+                asset_data.get("serial_number")
+            ),
+            "purchase_date": asset_data.get("purchase_date"),
+            "new_price": asset_data.get("new_price") or 0,
+            "warranty_until": asset_data.get("warranty_until"),
+            "note": self._none_if_blank(
+                asset_data.get("note")
+            ),
+            "status": str(
+                asset_data.get("status")
+                or "available"
+            ).strip().casefold(),
+            "condition": condition,
+            "specifications": (
+                asset_data.get("specifications")
+                if isinstance(
+                    asset_data.get("specifications"),
+                    dict,
+                )
+                else {}
+            ),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        current_location = self._latest_open_relation(
+            "asset_locations",
+            "asset_id",
+            asset_id,
+            "valid_from",
+        )
+        current_location_id = (
+            current_location.get("storage_location_id")
+            if current_location
+            else None
+        )
+
+        current_assignment = self._latest_open_relation(
+            "asset_assignments",
+            "asset_id",
+            asset_id,
+            "valid_from",
+        )
+        current_employee_id = (
+            current_assignment.get("employee_id")
+            if current_assignment
+            else None
+        )
+        current_department_id = (
+            current_assignment.get("department_id")
+            if current_assignment
+            else None
+        )
+
+        component_response = (
+            self.client.table("asset_component_assignments")
+            .select("id,parent_asset_id")
+            .eq("child_asset_id", asset_id)
+            .is_("removed_at", "null")
+            .order("installed_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        components = [
+            item
+            for item in (component_response.data or [])
+            if isinstance(item, dict)
+        ]
+        current_parent_id = (
+            components[0].get("parent_asset_id")
+            if components
+            else None
+        )
+
+        if parent_asset_id == asset_id:
+            raise ValueError(
+                "Ein Asset kann nicht mit sich selbst verbunden werden."
+            )
+
+        # Erst den Hauptdatensatz aktualisieren; alle Pflichtdaten und
+        # Duplikate wurden vorher validiert.
+        response = (
+            self.client.table(self.asset_table_name)
+            .update(row)
+            .eq("id", asset_id)
+            .execute()
+        )
+        rows = [
+            item
+            for item in (response.data or [])
+            if isinstance(item, dict)
+        ]
+
+        if current_location_id != storage_location_id:
+            (
+                self.client.table("asset_locations")
+                .update({"valid_to": now})
+                .eq("asset_id", asset_id)
+                .is_("valid_to", "null")
+                .execute()
+            )
+            self.client.table("asset_locations").insert(
+                {
+                    "asset_id": asset_id,
+                    "storage_location_id": storage_location_id,
+                }
+            ).execute()
+
+        desired_employee_id = assignment.get("employee_id")
+        desired_department_id = assignment.get("department_id")
+
+        if (
+            current_employee_id != desired_employee_id
+            or current_department_id != desired_department_id
+        ):
+            (
+                self.client.table("asset_assignments")
+                .update({"valid_to": now})
+                .eq("asset_id", asset_id)
+                .is_("valid_to", "null")
+                .execute()
+            )
+            self.client.table("asset_assignments").insert(
+                {
+                    "asset_id": asset_id,
+                    "employee_id": desired_employee_id,
+                    "department_id": desired_department_id,
+                }
+            ).execute()
+
+        if current_parent_id != parent_asset_id:
+            (
+                self.client.table("asset_component_assignments")
+                .update({"removed_at": now})
+                .eq("child_asset_id", asset_id)
+                .is_("removed_at", "null")
+                .execute()
+            )
+            if parent_asset_id is not None:
+                self.client.table("asset_component_assignments").insert(
+                    {
+                        "parent_asset_id": parent_asset_id,
+                        "child_asset_id": asset_id,
+                    }
+                ).execute()
+
+        if rows:
+            return rows[0]
+
+        # PostgREST kann je nach Prefer-Header keine Zeile zurückliefern.
+        return {
+            "id": asset_id,
+            "asset_tag": asset_tag,
+        }
+
+    def _update_stock_level(
+        self,
+        *,
+        original: dict[str, Any],
+        model_id: Any,
+        condition: str,
+        storage_location_id: Any,
+        stock_data: Any,
+    ) -> dict[str, Any]:
+        if not isinstance(stock_data, dict):
+            raise ValueError("Bestandsdaten fehlen.")
+
+        try:
+            desired_quantity = Decimal(
+                str(stock_data.get("quantity"))
+            )
+        except (InvalidOperation, TypeError, ValueError) as error:
+            raise ValueError("Ungültige Bestandsmenge.") from error
+
+        if desired_quantity <= 0:
+            raise ValueError(
+                "Die Bestandsmenge muss grösser als 0 sein. "
+                "Zum vollständigen Entfernen bitte „Einträge löschen“ verwenden."
+            )
+
+        department_id = stock_data.get("department_id")
+        purchase_date = stock_data.get("purchase_date")
+        status = str(
+            stock_data.get("status")
+            or ""
+        ).strip().casefold()
+
+        if department_id is None:
+            raise ValueError("Abteilung fehlt.")
+        if not purchase_date:
+            raise ValueError("Kaufdatum fehlt.")
+        if not status:
+            raise ValueError("Status fehlt.")
+
+        old_model_id = original.get("product_model_id")
+        old_location_id = original.get("storage_location_id")
+        old_condition = str(
+            original.get("condition")
+            or ""
+        ).strip().casefold()
+
+        level_response = (
+            self.client.table("stock_levels")
+            .select("quantity")
+            .eq("product_model_id", old_model_id)
+            .eq("storage_location_id", old_location_id)
+            .eq("condition", old_condition)
+            .limit(1)
+            .execute()
+        )
+        levels = [
+            row
+            for row in (level_response.data or [])
+            if isinstance(row, dict)
+        ]
+        if not levels:
+            raise ValueError(
+                "Der ursprüngliche Mengenbestand existiert nicht mehr."
+            )
+
+        current_quantity = Decimal(
+            str(levels[0].get("quantity") or 0)
+        )
+        if current_quantity <= 0:
+            raise ValueError(
+                "Der ursprüngliche Mengenbestand ist bereits leer."
+            )
+
+        same_identity = (
+            old_model_id == model_id
+            and old_location_id == storage_location_id
+            and old_condition == condition
+        )
+
+        metadata = {
+            "department_id": department_id,
+            "purchase_date": purchase_date,
+            "new_price": stock_data.get("new_price") or 0,
+            "status": status,
+            "note": self._none_if_blank(
+                stock_data.get("note")
+            ),
+        }
+
+        if same_identity:
+            source_movement_id = original.get(
+                "source_movement_id"
+            )
+            if source_movement_id is not None:
+                (
+                    self.client.table("stock_movements")
+                    .update(metadata)
+                    .eq("id", source_movement_id)
+                    .execute()
+                )
+
+            difference = desired_quantity - current_quantity
+            if difference != 0:
+                movement = {
+                    "product_model_id": model_id,
+                    "from_storage_location_id": (
+                        storage_location_id
+                        if difference < 0
+                        else None
+                    ),
+                    "to_storage_location_id": (
+                        storage_location_id
+                        if difference > 0
+                        else None
+                    ),
+                    "quantity": float(abs(difference)),
+                    "movement_type": "adjustment",
+                    "from_condition": (
+                        condition
+                        if difference < 0
+                        else None
+                    ),
+                    "to_condition": (
+                        condition
+                        if difference > 0
+                        else None
+                    ),
+                    **metadata,
+                }
+                self.client.table("stock_movements").insert(
+                    movement
+                ).execute()
+
+            return {
+                "product_model_id": model_id,
+                "quantity": float(desired_quantity),
+            }
+
+        # Bei einer Änderung von Produktmodell, Lagerort oder Zustand wird
+        # der alte Bestand nachvollziehbar ausgebucht und am neuen Ziel
+        # wieder eingebucht. Historische Bewegungen bleiben unverändert.
+        self.client.table("stock_movements").insert(
+            {
+                "product_model_id": old_model_id,
+                "from_storage_location_id": old_location_id,
+                "to_storage_location_id": None,
+                "quantity": float(current_quantity),
+                "movement_type": "adjustment",
+                "from_condition": old_condition,
+                "to_condition": None,
+                "department_id": original.get("department_id"),
+                "new_price": 0,
+                "status": "available",
+                "note": (
+                    "Bestand durch Bearbeitung des Inventareintrags "
+                    "am bisherigen Ort ausgebucht."
+                ),
+            }
+        ).execute()
+
+        self.client.table("stock_movements").insert(
+            {
+                "product_model_id": model_id,
+                "from_storage_location_id": None,
+                "to_storage_location_id": storage_location_id,
+                "quantity": float(desired_quantity),
+                "movement_type": "receipt",
+                "from_condition": None,
+                "to_condition": condition,
+                **metadata,
+            }
+        ).execute()
+
+        return {
+            "product_model_id": model_id,
+            "quantity": float(desired_quantity),
+        }
+
+    def _latest_open_relation(
+        self,
+        table_name: str,
+        key_name: str,
+        key_value: Any,
+        order_column: str,
+    ) -> dict[str, Any] | None:
+        response = (
+            self.client.table(table_name)
+            .select("*")
+            .eq(key_name, key_value)
+            .is_("valid_to", "null")
+            .order(order_column, desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = [
+            row
+            for row in (response.data or [])
+            if isinstance(row, dict)
+        ]
+        return rows[0] if rows else None
+
+    @staticmethod
+    def _add_site_context(
+        entry: dict[str, Any],
+        form_data: dict[str, Any],
+    ) -> None:
+        location_id = entry.get("storage_location_id")
+        department_id = (
+            entry.get("assigned_department_id")
+            or entry.get("department_id")
+        )
+
+        location = next(
+            (
+                row
+                for row in form_data.get("storage_locations", [])
+                if isinstance(row, dict)
+                and row.get("id") == location_id
+            ),
+            None,
+        )
+        department = next(
+            (
+                row
+                for row in form_data.get("departments", [])
+                if isinstance(row, dict)
+                and row.get("id") == department_id
+            ),
+            None,
+        )
+
+        if isinstance(location, dict):
+            entry["site_id"] = location.get("site_id")
+            if entry.get("department_id") is None:
+                entry["department_id"] = location.get(
+                    "department_id"
+                )
+            return
+
+        if isinstance(department, dict):
+            entry["site_id"] = department.get("site_id")
 
     @staticmethod
     def _validate_stock_delete(

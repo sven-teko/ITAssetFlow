@@ -34,6 +34,7 @@ from inventory import (
 )
 
 
+__all__ = ["AssetCreateDialog"]
 
 def _forward_wheel_to_scroll_area(widget: QWidget, event) -> None:
     """Leitet Mausradbewegungen an den Dialog-Scrollbereich weiter.
@@ -250,9 +251,31 @@ class AssetCreateDialog(QDialog):
         self,
         form_data: dict[str, Any],
         parent: QWidget | None = None,
+        *,
+        edit_entry: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Neuer Inventareintrag")
+
+        self.edit_entry = (
+            dict(edit_entry)
+            if isinstance(edit_entry, dict)
+            else None
+        )
+        self.is_edit_mode = self.edit_entry is not None
+        self._edit_record_type = (
+            str(
+                (self.edit_entry or {}).get("_record_type")
+                or "asset"
+            )
+            .strip()
+            .casefold()
+        )
+
+        self.setWindowTitle(
+            "Inventareintrag bearbeiten"
+            if self.is_edit_mode
+            else "Neuer Inventareintrag"
+        )
         self.setObjectName("assetCreateDialog")
 
         # QDialog-Fenster erhalten unter Windows sonst je nach Plattform nur
@@ -313,6 +336,9 @@ class AssetCreateDialog(QDialog):
         self._populate_static_options()
         self._connect_signals()
         self._mode_changed()
+
+        if self.is_edit_mode:
+            self._apply_edit_entry()
 
     def _apply_content_palette(self) -> None:
         """Helle Widget-Palette nur für den Dialoginhalt.
@@ -551,7 +577,11 @@ class AssetCreateDialog(QDialog):
         self.cancel_button = self.button_box.button(
             QDialogButtonBox.StandardButton.Cancel
         )
-        self.save_button.setText("Eintrag speichern")
+        self.save_button.setText(
+            "Änderungen speichern"
+            if self.is_edit_mode
+            else "Eintrag speichern"
+        )
         self.cancel_button.setText("Abbrechen")
         self.save_button.setObjectName("primaryButton")
         outer.addWidget(self.button_box)
@@ -620,6 +650,13 @@ class AssetCreateDialog(QDialog):
             self.parent_assets,
             key=lambda row: str(row.get("label") or "").casefold(),
         ):
+            if (
+                self.is_edit_mode
+                and self._edit_record_type == "asset"
+                and asset.get("id") == (self.edit_entry or {}).get("id")
+            ):
+                continue
+
             self.parent_asset_combo.addItem(
                 str(asset.get("label") or f"Asset #{asset.get('id')}"),
                 asset.get("id"),
@@ -693,12 +730,37 @@ class AssetCreateDialog(QDialog):
         self.existing_model_combo.blockSignals(True)
         self.existing_model_combo.clear()
 
+        current_edit_model_id = (
+            (self.edit_entry or {}).get("product_model_id")
+            if self.is_edit_mode
+            else None
+        )
+
         active_models = [
             row
             for row in self.models
-            if row.get("is_active", True)
-            and row.get("category_id") == category_id
+            if row.get("category_id") == category_id
+            and (
+                row.get("is_active", True)
+                or row.get("id") == current_edit_model_id
+            )
         ]
+
+        if self.is_edit_mode:
+            compatible_tracking = (
+                {"serialized", "hybrid"}
+                if self._edit_record_type == "asset"
+                else {"quantity", "hybrid"}
+            )
+            active_models = [
+                row
+                for row in active_models
+                if str(
+                    row.get("tracking_mode")
+                    or ""
+                ).strip().casefold()
+                in compatible_tracking
+            ]
 
         restore_index = -1
         for model in sorted(active_models, key=self._model_sort_key):
@@ -1057,6 +1119,281 @@ class AssetCreateDialog(QDialog):
             self.spec_form.addRow(QLabel("Für diese Eintragsart sind keine zusätzlichen Spezifikationen nötig."))
 
     # ------------------------------------------------------------------
+    # Bearbeiten – bestehende Daten übernehmen
+    # ------------------------------------------------------------------
+
+    def _apply_edit_entry(self) -> None:
+        entry = self.edit_entry or {}
+
+        # Beim Bearbeiten wird kein neues Produktmodell angelegt.
+        existing_index = self.model_mode_combo.findData("existing")
+        if existing_index >= 0:
+            self.model_mode_combo.setCurrentIndex(existing_index)
+        self.model_mode_combo.setEnabled(False)
+
+        model_id = entry.get("product_model_id")
+        model = next(
+            (
+                row
+                for row in self.models
+                if row.get("id") == model_id
+            ),
+            None,
+        )
+
+        if isinstance(model, dict):
+            category_id = model.get("category_id")
+            category_index = self.category_combo.findData(
+                category_id
+            )
+            if category_index >= 0:
+                self.category_combo.setCurrentIndex(
+                    category_index
+                )
+
+            self._repopulate_existing_models()
+
+            for index in range(
+                self.existing_model_combo.count()
+            ):
+                candidate = self.existing_model_combo.itemData(
+                    index
+                )
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("id") == model_id
+                ):
+                    self.existing_model_combo.setCurrentIndex(
+                        index
+                    )
+                    break
+
+            self._model_changed()
+
+        # Die Eintragsart eines bestehenden Datensatzes darf nicht von
+        # Einzelartikel zu Mengenbestand (oder umgekehrt) wechseln.
+        entry_type_index = self.entry_type_combo.findData(
+            self._current_entry_type()
+        )
+        if entry_type_index >= 0:
+            self.entry_type_combo.setCurrentIndex(
+                entry_type_index
+            )
+        self.entry_type_combo.setEnabled(False)
+
+        self._set_combo_value(
+            self.status_combo,
+            entry.get("status"),
+        )
+        self._set_combo_value(
+            self.condition_combo,
+            entry.get("condition"),
+        )
+
+        self._set_date_value(
+            self.purchase_date_input,
+            entry.get("purchase_date"),
+            required=True,
+        )
+        self.new_price_input.setText(
+            format_chf(
+                Decimal(
+                    str(
+                        entry.get("new_price")
+                        or 0
+                    )
+                )
+            )
+        )
+
+        location_id = entry.get(
+            "storage_location_id"
+        )
+        department_id = (
+            entry.get("assigned_department_id")
+            if self._edit_record_type == "asset"
+            else entry.get("department_id")
+        )
+        if department_id is None:
+            department_id = entry.get("department_id")
+
+        location = next(
+            (
+                row
+                for row in self.locations
+                if row.get("id") == location_id
+            ),
+            None,
+        )
+        department = next(
+            (
+                row
+                for row in self.departments
+                if row.get("id") == department_id
+            ),
+            None,
+        )
+
+        site_id = entry.get("site_id")
+        if site_id is None and isinstance(location, dict):
+            site_id = location.get("site_id")
+        if site_id is None and isinstance(department, dict):
+            site_id = department.get("site_id")
+
+        self._set_combo_value(
+            self.site_combo,
+            site_id,
+        )
+        self._repopulate_departments(
+            preserve_selection=False,
+            preferred_department_id=department_id,
+        )
+        self._set_combo_value(
+            self.department_combo,
+            department_id,
+        )
+        self._repopulate_locations(
+            preserve_selection=False,
+        )
+        self._set_combo_value(
+            self.location_combo,
+            location_id,
+        )
+
+        if self._edit_record_type == "asset":
+            self.asset_tag_input.setText(
+                str(
+                    entry.get("asset_tag")
+                    or ""
+                )
+            )
+            self.serial_number_input.setText(
+                str(
+                    entry.get("serial_number")
+                    or ""
+                )
+            )
+            self._set_date_value(
+                self.warranty_input,
+                entry.get("warranty_until"),
+                required=False,
+            )
+            self.asset_note_input.setPlainText(
+                str(
+                    entry.get("note")
+                    or ""
+                )
+            )
+
+            self._repopulate_employees(
+                preserve_selection=False,
+                preferred_employee_id=entry.get(
+                    "assigned_employee_id"
+                ),
+            )
+            self._set_combo_value(
+                self.employee_combo,
+                entry.get("assigned_employee_id"),
+            )
+            self._set_combo_value(
+                self.parent_asset_combo,
+                entry.get("connected_product_id"),
+            )
+
+            # _model_changed() hat die asset-spezifischen Editoren erzeugt.
+            self._set_specification_values(
+                entry.get("specifications")
+            )
+        else:
+            quantity = entry.get(
+                "stock_quantity"
+            )
+            if quantity is None:
+                quantity = entry.get("quantity")
+
+            if quantity is not None:
+                try:
+                    number = Decimal(
+                        str(quantity)
+                    )
+                    self.quantity_input.setText(
+                        str(
+                            int(number)
+                            if number == number.to_integral_value()
+                            else number
+                        )
+                    )
+                except (InvalidOperation, ValueError, TypeError):
+                    self.quantity_input.setText(
+                        str(quantity)
+                    )
+
+            self.stock_note_input.setPlainText(
+                str(
+                    entry.get("note")
+                    or ""
+                )
+            )
+
+        self._clear_validation_errors()
+
+    @staticmethod
+    def _set_combo_value(
+        combo: QComboBox,
+        value: Any,
+    ) -> None:
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    @staticmethod
+    def _set_date_value(
+        editor: QDateEdit,
+        value: Any,
+        *,
+        required: bool,
+    ) -> None:
+        text = str(value or "").strip()
+        date = QDate.fromString(
+            text,
+            Qt.DateFormat.ISODate,
+        )
+
+        if date.isValid():
+            editor.setDate(date)
+            return
+
+        editor.setDate(
+            editor.minimumDate()
+            if required
+            else editor.minimumDate()
+        )
+
+    def _set_specification_values(
+        self,
+        raw_values: Any,
+    ) -> None:
+        values = normalize_specifications(
+            raw_values
+        )
+
+        for key, (_field, widget) in self._spec_widgets.items():
+            value = values.get(key)
+
+            if isinstance(widget, QComboBox):
+                index = widget.findData(value)
+                if index >= 0:
+                    widget.setCurrentIndex(index)
+                continue
+
+            if isinstance(widget, QLineEdit):
+                widget.setText(
+                    ""
+                    if value is None
+                    else str(value)
+                )
+
+    # ------------------------------------------------------------------
     # Speichern / Validierung
     # ------------------------------------------------------------------
 
@@ -1243,13 +1580,32 @@ class AssetCreateDialog(QDialog):
                 "note": self._none_if_blank(self.stock_note_input.toPlainText()),
             }
 
+        if self.is_edit_mode:
+            original = self.edit_entry or {}
+            payload["edit"] = {
+                "record_type": self._edit_record_type,
+                "id": original.get("id"),
+                "product_model_id": original.get("product_model_id"),
+                "storage_location_id": original.get("storage_location_id"),
+                "condition": original.get("condition"),
+                "stock_quantity": original.get("stock_quantity"),
+                "source_movement_id": original.get("source_movement_id"),
+            }
+
         return payload
 
     def set_saving(self, saving: bool) -> None:
         self._saving = saving
         self.save_button.setEnabled(not saving)
         self.cancel_button.setEnabled(not saving)
-        self.save_button.setText("Wird gespeichert ..." if saving else "Eintrag speichern")
+        if saving:
+            self.save_button.setText("Wird gespeichert ...")
+        else:
+            self.save_button.setText(
+                "Änderungen speichern"
+                if self.is_edit_mode
+                else "Eintrag speichern"
+            )
 
     def reject(self) -> None:
         if self._saving:
@@ -1277,6 +1633,13 @@ class AssetCreateDialog(QDialog):
         return str(self.tracking_combo.currentData() or "serialized")
 
     def _current_entry_type(self) -> str:
+        if self.is_edit_mode:
+            return (
+                "stock"
+                if self._edit_record_type == "stock"
+                else "asset"
+            )
+
         tracking = self._current_tracking_mode()
         if tracking == "quantity":
             return "stock"

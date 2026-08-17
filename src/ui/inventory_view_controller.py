@@ -89,6 +89,11 @@ class InventoryViewController(QObject):
     entry_created = Signal(object)
     entry_create_failed = Signal(str)
 
+    edit_form_loaded = Signal(object)
+    edit_form_failed = Signal(str)
+    entry_updated = Signal(object)
+    entry_update_failed = Signal(str)
+
     entries_deleted = Signal(object)
     entries_delete_failed = Signal(str)
 
@@ -126,6 +131,7 @@ class InventoryViewController(QObject):
         self._is_loading = False
         self._is_writing = False
         self._create_form_loading = False
+        self._edit_form_loading = False
         self._reload_pending = False
         self._started = False
 
@@ -298,6 +304,124 @@ class InventoryViewController(QObject):
         self._set_writing(False)
         self.status_message.emit("Inventareintrag konnte nicht gespeichert werden.", 6000)
         self.entry_create_failed.emit(message)
+
+    # ------------------------------------------------------------------
+    # Eintrag bearbeiten
+    # ------------------------------------------------------------------
+
+    @Slot(object)
+    def load_edit_form_data(
+        self,
+        entry: object,
+    ) -> None:
+        if self._edit_form_loading:
+            return
+        if not isinstance(entry, dict):
+            self.edit_form_failed.emit(
+                "Ungültiger Inventareintrag."
+            )
+            return
+
+        selected = dict(entry)
+        self._edit_form_loading = True
+        self.status_message.emit(
+            "Daten für den Inventareintrag werden geladen ...",
+            0,
+        )
+
+        worker = _RepositoryTaskWorker(
+            lambda: self.repository.load_edit_form_data(
+                selected
+            )
+        )
+        worker.signals.succeeded.connect(
+            self._edit_form_data_loaded
+        )
+        worker.signals.failed.connect(
+            self._edit_form_data_failed
+        )
+        self._thread_pool.start(worker)
+
+    @Slot(object)
+    def _edit_form_data_loaded(
+        self,
+        data: object,
+    ) -> None:
+        self._edit_form_loading = False
+        self.status_message.emit(
+            "Bearbeitungsfenster bereit.",
+            2500,
+        )
+        self.edit_form_loaded.emit(data)
+
+    @Slot(str)
+    def _edit_form_data_failed(
+        self,
+        message: str,
+    ) -> None:
+        self._edit_form_loading = False
+        self.status_message.emit(
+            "Daten zum Bearbeiten konnten nicht geladen werden.",
+            5000,
+        )
+        self.edit_form_failed.emit(message)
+
+    @Slot(object)
+    def update_inventory_entry(
+        self,
+        payload: object,
+    ) -> None:
+        if self._is_writing:
+            return
+        if not isinstance(payload, dict):
+            self.entry_update_failed.emit(
+                "Ungültige Formulardaten."
+            )
+            return
+
+        self._set_writing(True)
+        self.status_message.emit(
+            "Änderungen werden gespeichert ...",
+            0,
+        )
+
+        worker = _RepositoryTaskWorker(
+            lambda: self.repository.update_inventory_entry(
+                payload
+            )
+        )
+        worker.signals.succeeded.connect(
+            self._entry_updated
+        )
+        worker.signals.failed.connect(
+            self._entry_update_failed
+        )
+        self._thread_pool.start(worker)
+
+    @Slot(object)
+    def _entry_updated(
+        self,
+        result: object,
+    ) -> None:
+        self._set_writing(False)
+        self.entry_updated.emit(result)
+        self.status_message.emit(
+            "Inventareintrag wurde aktualisiert.",
+            4000,
+        )
+        self.notify_inventory_changed()
+
+    @Slot(str)
+    def _entry_update_failed(
+        self,
+        message: str,
+    ) -> None:
+        self._set_writing(False)
+        self.status_message.emit(
+            "Inventareintrag konnte nicht aktualisiert werden.",
+            6000,
+        )
+        self.entry_update_failed.emit(message)
 
     # ------------------------------------------------------------------
     # Einträge löschen
