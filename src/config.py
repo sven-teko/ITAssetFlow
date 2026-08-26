@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import os
 import sys
 from dataclasses import dataclass
@@ -48,6 +49,67 @@ def _find_env_file() -> Path | None:
     return None
 
 
+def _detect_env_encoding(path: Path) -> str:
+    """Erkennt gängige Windows-Kodierungen anhand des Byte-Order-Marks."""
+
+    try:
+        prefix = path.read_bytes()[:4]
+    except OSError as error:
+        raise RuntimeError(
+            "Die .env-Datei konnte nicht gelesen werden.\n\n"
+            f"Datei:\n{path}\n\n"
+            f"Technischer Fehler: {error}"
+        ) from error
+
+    if prefix.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+
+    if (
+        prefix.startswith(codecs.BOM_UTF32_LE)
+        or prefix.startswith(codecs.BOM_UTF32_BE)
+    ):
+        return "utf-32"
+
+    if (
+        prefix.startswith(codecs.BOM_UTF16_LE)
+        or prefix.startswith(codecs.BOM_UTF16_BE)
+    ):
+        return "utf-16"
+
+    return "utf-8"
+
+
+def _read_env_values(
+    env_file: Path | None,
+) -> Mapping[str, object]:
+    """Liest die .env mit automatisch erkannter Textkodierung."""
+
+    if env_file is None:
+        return {}
+
+    encoding = _detect_env_encoding(env_file)
+
+    try:
+        return dotenv_values(
+            env_file,
+            encoding=encoding,
+        )
+    except UnicodeError as error:
+        raise RuntimeError(
+            "Die .env-Datei besitzt eine nicht unterstützte "
+            "Textkodierung.\n\n"
+            f"Datei:\n{env_file}\n\n"
+            "Speichere die Datei wenn möglich als UTF-8.\n\n"
+            f"Technischer Fehler: {error}"
+        ) from error
+    except OSError as error:
+        raise RuntimeError(
+            "Die .env-Datei konnte nicht gelesen werden.\n\n"
+            f"Datei:\n{env_file}\n\n"
+            f"Technischer Fehler: {error}"
+        ) from error
+
+
 def _environment_value(
     name: str,
     file_values: Mapping[str, object],
@@ -66,7 +128,10 @@ def _environment_value(
 
 def _configuration_source_text(env_file: Path | None) -> str:
     if env_file is not None:
-        return f"Geladene Datei:\n{env_file}"
+        return (
+            f"Geladene Datei:\n{env_file}\n"
+            f"Erkannte Kodierung: {_detect_env_encoding(env_file)}"
+        )
 
     checked = "\n".join(
         f"- {path}"
@@ -88,7 +153,7 @@ def get_app_config() -> AppConfig:
     """
 
     env_file = _find_env_file()
-    file_values = dotenv_values(env_file) if env_file is not None else {}
+    file_values = _read_env_values(env_file)
 
     supabase_url = _environment_value("SUPABASE_URL", file_values)
     supabase_key = (

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from functools import lru_cache
+
+from httpx import TimeoutException, TransportError
 
 from supabase import Client, create_client
 
@@ -53,21 +56,51 @@ def login_development_user(client: Client) -> str:
 
     logger.info("Signing in development user: %s", email)
 
-    try:
-        response = client.auth.sign_in_with_password(
-            {
-                "email": email,
-                "password": password,
-            }
+    response = None
+    last_error: Exception | None = None
+
+    # Auf neuen Rechnern kann der erste TLS-/HTTP-Aufbau vereinzelt
+    # in einen ReadTimeout laufen. Nur echte Netzwerk-/Timeoutfehler
+    # werden automatisch wiederholt; falsche Zugangsdaten nicht.
+    for attempt in range(1, 4):
+        try:
+            response = client.auth.sign_in_with_password(
+                {
+                    "email": email,
+                    "password": password,
+                }
+            )
+            break
+        except (TimeoutException, TransportError) as error:
+            last_error = error
+            logger.warning(
+                "Supabase authentication network error on attempt %s/3: %s",
+                attempt,
+                error,
+            )
+            if attempt < 3:
+                time.sleep(attempt)
+        except Exception as error:
+            logger.exception("Supabase authentication failed.")
+            raise RuntimeError(
+                "Die Anmeldung bei Supabase ist fehlgeschlagen.\n\n"
+                "Prüfe E-Mail-Adresse, Passwort und den Benutzer unter "
+                "Supabase → Authentication → Users.\n\n"
+                f"Technischer Fehler: {error}"
+            ) from error
+
+    if response is None:
+        logger.exception(
+            "Supabase authentication failed after retries.",
+            exc_info=last_error,
         )
-    except Exception as error:
-        logger.exception("Supabase authentication failed.")
         raise RuntimeError(
-            "Die Anmeldung bei Supabase ist fehlgeschlagen.\n\n"
-            "Prüfe E-Mail-Adresse, Passwort und den Benutzer unter "
-            "Supabase → Authentication → Users.\n\n"
-            f"Technischer Fehler: {error}"
-        ) from error
+            "Supabase konnte nach mehreren Versuchen nicht erreicht werden.\n\n"
+            "Die Zugangsdaten sind grundsätzlich gültig, aber die "
+            "Netzwerkverbindung hat während der Anmeldung nicht rechtzeitig "
+            "geantwortet.\n\n"
+            f"Technischer Fehler: {last_error}"
+        ) from last_error
 
     if response.user is None:
         raise RuntimeError(
@@ -90,16 +123,34 @@ def login_development_user(client: Client) -> str:
 def test_authenticated_access(client: Client) -> bool:
     """Prüft, ob die aktuelle Sitzung ``public.assets`` lesen darf."""
 
-    try:
-        response = (
-            client
-            .table("assets")
-            .select("id")
-            .limit(1)
-            .execute()
+    response = None
+
+    for attempt in range(1, 4):
+        try:
+            response = (
+                client
+                .table("assets")
+                .select("id")
+                .limit(1)
+                .execute()
+            )
+            break
+        except (TimeoutException, TransportError) as error:
+            logger.warning(
+                "Authenticated assets access network error on attempt %s/3: %s",
+                attempt,
+                error,
+            )
+            if attempt < 3:
+                time.sleep(attempt)
+        except Exception:
+            logger.exception("Authenticated access to assets failed.")
+            return False
+
+    if response is None:
+        logger.error(
+            "Authenticated access to assets failed after retries."
         )
-    except Exception:
-        logger.exception("Authenticated access to assets failed.")
         return False
 
     logger.info(

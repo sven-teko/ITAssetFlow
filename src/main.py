@@ -1,7 +1,130 @@
 from __future__ import annotations
 
+import codecs
+from importlib import metadata
 import logging
+from pathlib import Path
+import subprocess
 import sys
+
+
+APP_NAME = "ITAssetFlow"
+ORGANIZATION_NAME = "DLC-Informatik GmbH"
+ORGANIZATION_DOMAIN = "dlc-informatik.ch"
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
+
+
+def _read_text_auto(path: Path) -> str:
+    """Liest UTF-8-, UTF-16- und UTF-32-Textdateien robust ein."""
+
+    prefix = path.read_bytes()[:4]
+
+    if prefix.startswith(codecs.BOM_UTF8):
+        encoding = "utf-8-sig"
+    elif (
+        prefix.startswith(codecs.BOM_UTF32_LE)
+        or prefix.startswith(codecs.BOM_UTF32_BE)
+    ):
+        encoding = "utf-32"
+    elif (
+        prefix.startswith(codecs.BOM_UTF16_LE)
+        or prefix.startswith(codecs.BOM_UTF16_BE)
+    ):
+        encoding = "utf-16"
+    else:
+        encoding = "utf-8"
+
+    return path.read_text(encoding=encoding)
+
+
+def _required_packages() -> list[str]:
+    """Liest nur die Paketnamen aus requirements.txt."""
+
+    if not REQUIREMENTS_FILE.is_file():
+        raise RuntimeError(
+            f"requirements.txt wurde nicht gefunden: {REQUIREMENTS_FILE}"
+        )
+
+    packages: list[str] = []
+
+    for raw_line in _read_text_auto(REQUIREMENTS_FILE).splitlines():
+        line = raw_line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        line = line.split("#", 1)[0].strip()
+
+        # Paketname vor Versionsoperatoren extrahieren.
+        for separator in ("==", ">=", "<=", "~=", "!=", ">", "<"):
+            if separator in line:
+                line = line.split(separator, 1)[0].strip()
+                break
+
+        if line:
+            packages.append(line)
+
+    return packages
+
+
+def _missing_packages() -> list[str]:
+    """Prüft nur, ob ein Paket installiert ist – nicht dessen Version."""
+
+    missing: list[str] = []
+
+    for package_name in _required_packages():
+        try:
+            metadata.version(package_name)
+        except metadata.PackageNotFoundError:
+            missing.append(package_name)
+
+    return missing
+
+
+def ensure_runtime_dependencies() -> None:
+    """Installiert fehlende Requirements still vor dem eigentlichen Start."""
+
+    if getattr(sys, "frozen", False):
+        return
+
+    missing = _missing_packages()
+    if not missing:
+        return
+
+    # Falls pip in der Python-Installation noch nicht eingerichtet ist.
+    pip_check = subprocess.run(
+        [sys.executable, "-m", "pip", "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    if pip_check.returncode != 0:
+        subprocess.run(
+            [sys.executable, "-m", "ensurepip", "--upgrade"],
+            check=True,
+        )
+
+    # Keine GUI-Meldung: fehlende Pakete werden einfach installiert.
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "-r",
+            str(REQUIREMENTS_FILE),
+        ],
+        check=True,
+    )
+
+
+# Muss vor PySide6, Supabase usw. ausgeführt werden.
+ensure_runtime_dependencies()
+
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from supabase import Client
@@ -18,10 +141,6 @@ from ui.theme import apply_light_theme
 
 
 logger = logging.getLogger(__name__)
-
-APP_NAME = "ITAssetFlow"
-ORGANIZATION_NAME = "DLC-Informatik GmbH"
-ORGANIZATION_DOMAIN = "dlc-informatik.ch"
 
 
 def create_application() -> QApplication:
