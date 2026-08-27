@@ -295,7 +295,13 @@ export default function InventoryTable({
 
 
   return (
-    <div className="table-wrapper">
+    <div
+      className={
+        draggedColumn
+          ? "table-wrapper column-dragging"
+          : "table-wrapper"
+      }
+    >
 
       <table className="inventory-table">
 
@@ -310,30 +316,54 @@ export default function InventoryTable({
                     key={column}
                     draggable
                     title="Klicken zum Sortieren · Ziehen zum Verschieben"
+                    onMouseDown={(event) => {
+                      if (
+                        event.button === 0
+                      ) {
+                        event.preventDefault();
+                      }
+                    }}
                     onClick={() =>
                       toggleSort(
                         column,
                       )
                     }
-                    onDragStart={() =>
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed =
+                        "move";
+
+                      event.dataTransfer.setData(
+                        "text/plain",
+                        column,
+                      );
+
                       setDraggedColumn(
                         column,
-                      )
-                    }
+                      );
+                    }}
                     onDragEnd={() =>
                       setDraggedColumn(
                         null,
                       )
                     }
-                    onDragOver={(event) =>
-                      event.preventDefault()
-                    }
-                    onDrop={() => {
-                      if (
+                    onDragOver={(event) => {
+                      event.preventDefault();
+
+                      event.dataTransfer.dropEffect =
+                        "move";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+
+                      const source =
                         draggedColumn
-                      ) {
+                        || event.dataTransfer.getData(
+                          "text/plain",
+                        );
+
+                      if (source) {
                         onMoveColumn(
-                          draggedColumn,
+                          source,
                           column,
                         );
                       }

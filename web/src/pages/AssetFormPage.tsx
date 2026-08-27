@@ -10,6 +10,7 @@ import type {
 
 import {
   useNavigate,
+  useParams,
 } from "react-router-dom";
 
 import "./AssetFormPage.css";
@@ -33,6 +34,7 @@ type FormDataResponse = {
   employees: GenericRow[];
   departments: GenericRow[];
   parent_assets: GenericRow[];
+  edit_entry?: GenericRow;
 };
 
 
@@ -53,6 +55,7 @@ type SpecificationField = {
 
 type SpecificationValue =
   string
+  | number
   | boolean
   | null;
 
@@ -460,6 +463,67 @@ function todayISO(): string {
 }
 
 
+function dateInputValue(
+  value: unknown,
+): string {
+  const text =
+    String(
+      value ?? "",
+    ).trim();
+
+  if (
+    /^\d{4}-\d{2}-\d{2}/.test(
+      text,
+    )
+  ) {
+    return text.slice(
+      0,
+      10,
+    );
+  }
+
+  return "";
+}
+
+
+function editableSpecifications(
+  value: unknown,
+): Record<string, SpecificationValue> {
+  if (
+    typeof value !== "object"
+    || value === null
+    || Array.isArray(value)
+  ) {
+    return {};
+  }
+
+  const result:
+    Record<string, SpecificationValue> = {};
+
+  for (
+    const [key, raw]
+    of Object.entries(
+      value as Record<string, unknown>,
+    )
+  ) {
+    if (
+      typeof raw === "string"
+      || typeof raw === "number"
+      || typeof raw === "boolean"
+      || raw === null
+    ) {
+      result[
+        key
+          .trim()
+          .toLocaleLowerCase()
+      ] = raw as SpecificationValue;
+    }
+  }
+
+  return result;
+}
+
+
 export default function AssetFormPage({
   onSessionExpired,
 }: AssetFormPageProps) {
@@ -467,10 +531,31 @@ export default function AssetFormPage({
     useNavigate();
 
 
+  const {
+    entryKey,
+  } = useParams<{
+    entryKey: string;
+  }>();
+
+
+  const isEditMode =
+    Boolean(
+      entryKey,
+    );
+
+
   const [
     formData,
     setFormData,
   ] = useState<FormDataResponse | null>(
+    null,
+  );
+
+
+  const [
+    editEntry,
+    setEditEntry,
+  ] = useState<GenericRow | null>(
     null,
   );
 
@@ -683,7 +768,12 @@ export default function AssetFormPage({
             metaResponse,
           ] = await Promise.all([
             fetch(
-              `${API_BASE}/api/inventory/form-data`,
+              isEditMode
+                ? (
+                  `${API_BASE}/api/inventory/edit-form-data`
+                  + `?entry_key=${encodeURIComponent(entryKey ?? "")}`
+                )
+                : `${API_BASE}/api/inventory/form-data`,
               {
                 credentials: "include",
               },
@@ -777,7 +867,255 @@ export default function AssetFormPage({
           );
 
 
+          const currentEdit =
+            (
+              typeof data.edit_entry === "object"
+              && data.edit_entry !== null
+              && !Array.isArray(
+                data.edit_entry,
+              )
+            )
+              ? data.edit_entry
+              : null;
+
+
+          setEditEntry(
+            currentEdit,
+          );
+
+
           if (
+            isEditMode
+            && !currentEdit
+          ) {
+            throw new Error(
+              "Der ausgewählte Inventareintrag "
+              + "konnte nicht geladen werden.",
+            );
+          }
+
+
+          if (currentEdit) {
+            const currentModel =
+              data.product_models.find(
+                (model) =>
+                  sameId(
+                    model.id,
+                    currentEdit.product_model_id,
+                  ),
+              )
+              ?? null;
+
+
+            setModelMode(
+              "existing",
+            );
+
+            setSelectedModelId(
+              idText(
+                currentEdit.product_model_id,
+              ),
+            );
+
+            setCategoryId(
+              currentModel
+                ? idText(
+                    currentModel.category_id,
+                  )
+                : "",
+            );
+
+
+            const recordType =
+              String(
+                currentEdit._record_type
+                ?? "asset",
+              )
+                .trim()
+                .toLocaleLowerCase();
+
+
+            setHybridEntryType(
+              recordType === "stock"
+                ? "stock"
+                : "asset",
+            );
+
+
+            setStatus(
+              String(
+                currentEdit.status
+                ?? "available",
+              )
+                .trim()
+                .toLocaleLowerCase(),
+            );
+
+            setCondition(
+              String(
+                currentEdit.condition
+                ?? "used",
+              )
+                .trim()
+                .toLocaleLowerCase(),
+            );
+
+            setPurchaseDate(
+              dateInputValue(
+                currentEdit.purchase_date,
+              )
+              || todayISO(),
+            );
+
+
+            const price =
+              Number(
+                currentEdit.new_price
+                ?? 0,
+              );
+
+            setNewPrice(
+              Number.isFinite(
+                price,
+              )
+                ? formatCHF(
+                    price,
+                  )
+                : "",
+            );
+
+
+            const nextLocationId =
+              idText(
+                currentEdit.storage_location_id,
+              );
+
+            const nextDepartmentId =
+              idText(
+                recordType === "asset"
+                  ? (
+                    currentEdit.assigned_department_id
+                    ?? currentEdit.department_id
+                  )
+                  : currentEdit.department_id,
+              );
+
+
+            const currentLocation =
+              rowById(
+                data.storage_locations,
+                nextLocationId,
+              );
+
+            const currentDepartment =
+              rowById(
+                data.departments,
+                nextDepartmentId,
+              );
+
+
+            const nextSiteId =
+              idText(
+                currentEdit.site_id
+                ?? currentLocation?.site_id
+                ?? currentDepartment?.site_id,
+              );
+
+
+            setSiteId(
+              nextSiteId,
+            );
+
+            setDepartmentId(
+              nextDepartmentId,
+            );
+
+            setLocationId(
+              nextLocationId,
+            );
+
+
+            if (
+              recordType === "asset"
+            ) {
+              setAssetTag(
+                String(
+                  currentEdit.asset_tag
+                  ?? "",
+                ),
+              );
+
+              setSerialNumber(
+                String(
+                  currentEdit.serial_number
+                  ?? "",
+                ),
+              );
+
+              setWarrantyUntil(
+                dateInputValue(
+                  currentEdit.warranty_until,
+                ),
+              );
+
+              setAssetNote(
+                String(
+                  currentEdit.note
+                  ?? "",
+                ),
+              );
+
+              setEmployeeId(
+                idText(
+                  currentEdit.assigned_employee_id,
+                ),
+              );
+
+              setParentAssetId(
+                idText(
+                  currentEdit.connected_product_id,
+                ),
+              );
+
+              setSpecValues(
+                editableSpecifications(
+                  currentEdit.specifications,
+                ),
+              );
+
+            } else {
+              const currentQuantity =
+                currentEdit.stock_quantity
+                ?? currentEdit.quantity
+                ?? "";
+
+              setQuantity(
+                String(
+                  currentQuantity,
+                ),
+              );
+
+              setStockNote(
+                String(
+                  currentEdit.note
+                  ?? "",
+                ),
+              );
+
+              setEmployeeId(
+                "",
+              );
+
+              setParentAssetId(
+                "",
+              );
+
+              setSpecValues(
+                {},
+              );
+            }
+
+          } else if (
             data.product_categories[0]
           ) {
             setCategoryId(
@@ -805,6 +1143,8 @@ export default function AssetFormPage({
       void loadForm();
     },
     [
+      entryKey,
+      isEditMode,
       navigate,
       onSessionExpired,
     ],
@@ -853,8 +1193,8 @@ export default function AssetFormPage({
           categoryId,
         ),
       [
-        formData,
         categoryId,
+        formData,
       ],
     );
 
@@ -881,6 +1221,15 @@ export default function AssetFormPage({
     );
 
 
+  const editRecordType =
+    String(
+      editEntry?._record_type
+      ?? "asset",
+    )
+      .trim()
+      .toLocaleLowerCase();
+
+
   const existingModels =
     useMemo(
       () =>
@@ -890,15 +1239,62 @@ export default function AssetFormPage({
           ?? []
         )
           .filter(
-            (model) =>
-              sameId(
-                model.category_id,
-                categoryId,
-              )
-              && Boolean(
-                model.is_active
-                ?? true,
-              ),
+            (model) => {
+              if (
+                !sameId(
+                  model.category_id,
+                  categoryId,
+                )
+              ) {
+                return false;
+              }
+
+
+              const isCurrentEditModel =
+                isEditMode
+                && sameId(
+                  model.id,
+                  editEntry?.product_model_id,
+                );
+
+
+              if (
+                !Boolean(
+                  model.is_active
+                  ?? true,
+                )
+                && !isCurrentEditModel
+              ) {
+                return false;
+              }
+
+
+              if (!isEditMode) {
+                return true;
+              }
+
+
+              const trackingMode =
+                String(
+                  model.tracking_mode
+                  ?? "",
+                )
+                  .trim()
+                  .toLocaleLowerCase();
+
+
+              return (
+                editRecordType === "stock"
+                  ? (
+                    trackingMode === "quantity"
+                    || trackingMode === "hybrid"
+                  )
+                  : (
+                    trackingMode === "serialized"
+                    || trackingMode === "hybrid"
+                  )
+              );
+            },
           )
           .sort(
             (
@@ -921,8 +1317,11 @@ export default function AssetFormPage({
               ),
           ),
       [
-        formData,
         categoryId,
+        editEntry,
+        editRecordType,
+        formData,
+        isEditMode,
       ],
     );
 
@@ -999,13 +1398,19 @@ export default function AssetFormPage({
 
   const currentEntryType:
     EntryType =
-      currentTrackingMode
-      === "quantity"
-        ? "stock"
+      isEditMode
+        ? (
+          editRecordType === "stock"
+            ? "stock"
+            : "asset"
+        )
         : currentTrackingMode
-          === "serialized"
-          ? "asset"
-          : hybridEntryType;
+          === "quantity"
+          ? "stock"
+          : currentTrackingMode
+            === "serialized"
+            ? "asset"
+            : hybridEntryType;
 
 
   const currentSpecificationFields =
@@ -2003,6 +2408,41 @@ export default function AssetFormPage({
     }
 
 
+    if (
+      isEditMode
+      && editEntry
+    ) {
+      payload.edit = {
+        record_type:
+          editRecordType,
+
+        id:
+          editEntry.id
+          ?? null,
+
+        product_model_id:
+          editEntry.product_model_id
+          ?? null,
+
+        storage_location_id:
+          editEntry.storage_location_id
+          ?? null,
+
+        condition:
+          editEntry.condition
+          ?? null,
+
+        stock_quantity:
+          editEntry.stock_quantity
+          ?? null,
+
+        source_movement_id:
+          editEntry.source_movement_id
+          ?? null,
+      };
+    }
+
+
     return payload;
   }
 
@@ -2054,7 +2494,10 @@ export default function AssetFormPage({
         await fetch(
           `${API_BASE}/api/inventory`,
           {
-            method: "POST",
+            method:
+              isEditMode
+                ? "PUT"
+                : "POST",
 
             credentials: "include",
 
@@ -2096,8 +2539,15 @@ export default function AssetFormPage({
         !response.ok
       ) {
         let message =
-          "Der Inventareintrag konnte "
-          + "nicht gespeichert werden.";
+          isEditMode
+            ? (
+              "Der Inventareintrag konnte "
+              + "nicht aktualisiert werden."
+            )
+            : (
+              "Der Inventareintrag konnte "
+              + "nicht gespeichert werden."
+            );
 
 
         if (
@@ -2139,8 +2589,15 @@ export default function AssetFormPage({
         error instanceof Error
           ? error.message
           : (
-            "Der Inventareintrag konnte "
-            + "nicht gespeichert werden."
+            isEditMode
+              ? (
+                "Der Inventareintrag konnte "
+                + "nicht aktualisiert werden."
+              )
+              : (
+                "Der Inventareintrag konnte "
+                + "nicht gespeichert werden."
+              )
           ),
       );
 
@@ -2175,8 +2632,17 @@ export default function AssetFormPage({
       <div className="asset-form-page">
 
         <div className="asset-form-loading">
-          Stammdaten für den neuen Eintrag
-          werden geladen ...
+          {
+            isEditMode
+              ? (
+                "Daten für den Inventareintrag "
+                + "werden geladen ..."
+              )
+              : (
+                "Stammdaten für den neuen Eintrag "
+                + "werden geladen ..."
+              )
+          }
         </div>
 
       </div>
@@ -2194,7 +2660,11 @@ export default function AssetFormPage({
         <div className="asset-form-error-page">
 
           <h1>
-            Neuer Inventareintrag
+            {
+              isEditMode
+                ? "Inventareintrag bearbeiten"
+                : "Neuer Inventareintrag"
+            }
           </h1>
 
           <p>
@@ -2280,12 +2750,25 @@ export default function AssetFormPage({
           <div>
 
             <h1>
-              Neuer Inventareintrag
+              {
+                isEditMode
+                  ? "Inventareintrag bearbeiten"
+                  : "Neuer Inventareintrag"
+              }
             </h1>
 
             <p>
-              Einzelartikel oder Mengenbestand
-              im IT-Inventar erfassen.
+              {
+                isEditMode
+                  ? (
+                    "Bestehenden Einzelartikel oder "
+                    + "Mengenbestand bearbeiten."
+                  )
+                  : (
+                    "Einzelartikel oder Mengenbestand "
+                    + "im IT-Inventar erfassen."
+                  )
+              }
             </p>
 
           </div>
@@ -2343,7 +2826,10 @@ export default function AssetFormPage({
                 <select
                   className="asset-form-control"
                   value={modelMode}
-                  disabled={saving}
+                  disabled={
+                    saving
+                    || isEditMode
+                  }
                   onChange={(event) =>
                     handleModelModeChange(
                       event.target.value as ModelMode,
@@ -2918,7 +3404,8 @@ export default function AssetFormPage({
             {/* Hybrid-Eintragsart */}
 
             {
-              currentTrackingMode
+              !isEditMode
+              && currentTrackingMode
                 === "hybrid"
               && (
                 <fieldset className="asset-form-group">
@@ -3732,7 +4219,9 @@ export default function AssetFormPage({
             {
               saving
                 ? "Wird gespeichert ..."
-                : "Eintrag speichern"
+                : isEditMode
+                  ? "Änderungen speichern"
+                  : "Eintrag speichern"
             }
           </button>
 

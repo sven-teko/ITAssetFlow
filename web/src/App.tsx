@@ -12,12 +12,12 @@ import {
   Navigate,
   Route,
   Routes,
-  useParams,
 } from "react-router-dom";
 
 import AssetFormPage from "./pages/AssetFormPage";
 import InventoryPage from "./pages/InventoryPage";
 import LoginPage from "./pages/LoginPage";
+import SettingsPage from "./pages/SettingsPage";
 
 
 const API_BASE =
@@ -84,23 +84,6 @@ function SimplePage({
       </div>
 
     </div>
-  );
-}
-
-
-function EditPage() {
-  const {
-    entryKey,
-  } = useParams();
-
-  return (
-    <SimplePage
-      title="Inventareintrag bearbeiten"
-      text={
-        `Die Bearbeitungsseite für ${entryKey ?? "den Eintrag"} `
-        + "wird im nächsten Schritt mit demselben Formular verbunden."
-      }
-    />
   );
 }
 
@@ -263,7 +246,11 @@ export default function App() {
           <ProtectedPage
             email={email}
           >
-            <EditPage />
+            <AssetFormPage
+              onSessionExpired={() =>
+                setEmail(null)
+              }
+            />
           </ProtectedPage>
         }
       />
@@ -275,11 +262,10 @@ export default function App() {
           <ProtectedPage
             email={email}
           >
-            <SimplePage
-              title="Einstellungen"
-              text={
-                "Die Einstellungen werden hier als eigene Webseite "
-                + "anstelle eines Windows-Dialogs dargestellt."
+            <SettingsPage
+              email={email ?? ""}
+              onSessionExpired={() =>
+                setEmail(null)
               }
             />
           </ProtectedPage>

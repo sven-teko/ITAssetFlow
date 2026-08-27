@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -31,6 +32,64 @@ import type {
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL
   ?? `${window.location.protocol}//${window.location.hostname}:8000`;
+
+
+function defaultColumnsStorageKey(
+  email: string,
+): string {
+  return (
+    "itassetflow.default_visible_columns:"
+    + email.trim().toLocaleLowerCase()
+  );
+}
+
+
+function configuredDefaultColumns(
+  email: string,
+  available: string[],
+  serverDefaults: string[],
+): string[] {
+  try {
+    const raw = localStorage.getItem(
+      defaultColumnsStorageKey(email),
+    );
+
+    if (raw) {
+      const parsed: unknown =
+        JSON.parse(raw);
+
+      if (Array.isArray(parsed)) {
+        const selected = parsed
+          .filter(
+            (value): value is string =>
+              typeof value === "string",
+          )
+          .filter(
+            (column) =>
+              available.includes(column),
+          );
+
+        if (selected.length > 0) {
+          return [
+            ...new Set(selected),
+          ];
+        }
+      }
+    }
+  } catch {
+    // Ungültige lokale Einstellung -> Server-Standard verwenden.
+  }
+
+  const defaults = serverDefaults
+    .filter(
+      (column) =>
+        available.includes(column),
+    );
+
+  return defaults.length > 0
+    ? defaults
+    : available.slice(0, 5);
+}
 
 
 type InventoryRow =
@@ -308,6 +367,18 @@ export default function InventoryPage({
   );
 
 
+  const [
+    transferBusy,
+    setTransferBusy,
+  ] = useState(false);
+
+
+  const csvFileInputRef =
+    useRef<HTMLInputElement | null>(
+      null,
+    );
+
+
   const loadData =
     useCallback(
       async (): Promise<void> => {
@@ -500,22 +571,15 @@ export default function InventoryPage({
               }
 
               const defaults =
-                metadata
-                  .default_visible_columns
-                  .filter(
-                    (column) =>
-                      available.includes(
-                        column,
-                      ),
-                  );
+                configuredDefaultColumns(
+                  email,
+                  available,
+                  metadata
+                    .default_visible_columns,
+                );
 
               return new Set(
-                defaults.length > 0
-                  ? defaults
-                  : available.slice(
-                      0,
-                      5,
-                    ),
+                defaults,
               );
             },
           );
@@ -1168,23 +1232,15 @@ export default function InventoryPage({
     }
 
     const defaults =
-      meta
-        .default_visible_columns
-        .filter(
-          (column) =>
-            availableColumns.includes(
-              column,
-            ),
-        );
+      configuredDefaultColumns(
+        email,
+        availableColumns,
+        meta.default_visible_columns,
+      );
 
     setVisibleColumns(
       new Set(
-        defaults.length > 0
-          ? defaults
-          : availableColumns.slice(
-              0,
-              5,
-            ),
+        defaults,
       ),
     );
   }
@@ -1214,24 +1270,513 @@ export default function InventoryPage({
   }
 
 
-  function deleteEntries(): void {
+  async function deleteEntries(): Promise<void> {
     if (
       selectedRows.length === 0
+      || loading
     ) {
       return;
     }
 
-    setStatus(
+
+    const identifiers =
+      selectedRows
+        .slice(
+          0,
+          8,
+        )
+        .map(
+          getIdentifier,
+        );
+
+
+    const preview =
+      identifiers
+        .map(
+          (identifier) =>
+            `• ${identifier}`,
+        )
+        .join(
+          "\n",
+        );
+
+
+    const moreCount =
+      Math.max(
+        0,
+        selectedRows.length
+        - identifiers.length,
+      );
+
+
+    const message =
       selectedRows.length === 1
         ? (
-          `Löschen von ${getIdentifier(selectedRows[0])} `
-          + "wird als nächster Schritt umgesetzt."
+          "Soll dieser Inventareintrag wirklich gelöscht werden?\n\n"
+          + preview
         )
         : (
-          `Löschen von ${selectedRows.length} Einträgen `
-          + "wird als nächster Schritt umgesetzt."
-        ),
+          `Sollen diese ${selectedRows.length} Inventareinträge `
+          + "wirklich gelöscht werden?\n\n"
+          + preview
+          + (
+            moreCount > 0
+              ? `\n• … und ${moreCount} weitere`
+              : ""
+          )
+        );
+
+
+    if (
+      !window.confirm(
+        message,
+      )
+    ) {
+      return;
+    }
+
+
+    setLoading(
+      true,
     );
+
+    setStatus(
+      selectedRows.length === 1
+        ? "Inventareintrag wird gelöscht ..."
+        : `${selectedRows.length} Inventareinträge werden gelöscht ...`,
+    );
+
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE}/api/inventory/delete`,
+          {
+            method: "POST",
+
+            credentials: "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify({
+                entry_keys:
+                  selectedRows.map(
+                    getRowKey,
+                  ),
+              }),
+          },
+        );
+
+
+      if (
+        response.status === 401
+      ) {
+        onLogout();
+
+        navigate(
+          "/login",
+          {
+            replace: true,
+          },
+        );
+
+        return;
+      }
+
+
+      const data: unknown =
+        await response.json();
+
+
+      if (!response.ok) {
+        let message =
+          "Inventareinträge konnten nicht gelöscht werden.";
+
+
+        if (
+          typeof data === "object"
+          && data !== null
+          && "detail" in data
+        ) {
+          const detail =
+            (
+              data as {
+                detail?: unknown;
+              }
+            ).detail;
+
+          if (
+            typeof detail === "string"
+            && detail.trim()
+          ) {
+            message =
+              detail;
+          }
+        }
+
+
+        throw new Error(
+          message,
+        );
+      }
+
+
+      const result =
+        data as {
+          deleted_count?: unknown;
+          asset_count?: unknown;
+          stock_count?: unknown;
+        };
+
+
+      const deletedCount =
+        Number(
+          result.deleted_count
+          ?? selectedRows.length,
+        );
+
+
+      setSelectedKeys(
+        new Set(),
+      );
+
+
+      await loadData();
+
+
+      setStatus(
+        deletedCount === 1
+          ? "Inventareintrag wurde gelöscht."
+          : `${deletedCount} Inventareinträge wurden gelöscht.`,
+      );
+
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "Inventareinträge konnten nicht gelöscht werden.",
+      );
+
+    } finally {
+      setLoading(
+        false,
+      );
+    }
+  }
+
+
+  function chooseCsvImport(): void {
+    if (
+      transferBusy
+      || loading
+    ) {
+      return;
+    }
+
+
+    csvFileInputRef.current
+      ?.click();
+  }
+
+
+  async function importCsvFile(
+    file: File,
+  ): Promise<void> {
+    const confirmed =
+      window.confirm(
+        "CSV-Import starten?\n\n"
+        + `${file.name}\n\n`
+        + "Vorhandene Datensätze mit denselben Primärschlüsseln "
+        + "werden aktualisiert.",
+      );
+
+
+    if (!confirmed) {
+      return;
+    }
+
+
+    setTransferBusy(
+      true,
+    );
+
+    setStatus(
+      "CSV-Datei wird importiert ...",
+    );
+
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE}/api/transfer/import/csv`,
+          {
+            method: "POST",
+
+            credentials: "include",
+
+            headers: {
+              "Content-Type":
+                "text/csv",
+            },
+
+            body: file,
+          },
+        );
+
+
+      if (
+        response.status === 401
+      ) {
+        onLogout();
+
+        navigate(
+          "/login",
+          {
+            replace: true,
+          },
+        );
+
+        return;
+      }
+
+
+      const data: unknown =
+        await response.json();
+
+
+      if (!response.ok) {
+        let message =
+          "CSV-Import ist fehlgeschlagen.";
+
+
+        if (
+          typeof data === "object"
+          && data !== null
+          && "detail" in data
+        ) {
+          const detail =
+            (
+              data as {
+                detail?: unknown;
+              }
+            ).detail;
+
+          if (
+            typeof detail === "string"
+            && detail.trim()
+          ) {
+            message =
+              detail;
+          }
+        }
+
+
+        throw new Error(
+          message,
+        );
+      }
+
+
+      const result =
+        data as {
+          imported_rows?: unknown;
+          table_count?: unknown;
+        };
+
+
+      const importedRows =
+        Number(
+          result.imported_rows
+          ?? 0,
+        );
+
+
+      await loadData();
+
+
+      setStatus(
+        `${importedRows} Datensätze wurden aus CSV importiert.`,
+      );
+
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "CSV-Import ist fehlgeschlagen.",
+      );
+
+    } finally {
+      setTransferBusy(
+        false,
+      );
+
+      if (
+        csvFileInputRef.current
+      ) {
+        csvFileInputRef.current.value =
+          "";
+      }
+    }
+  }
+
+
+  async function exportCsv(): Promise<void> {
+    if (
+      transferBusy
+      || loading
+    ) {
+      return;
+    }
+
+
+    setTransferBusy(
+      true,
+    );
+
+    setStatus(
+      "CSV-Export wird erstellt ...",
+    );
+
+
+    try {
+      const response =
+        await fetch(
+          `${API_BASE}/api/transfer/export/csv`,
+          {
+            method: "GET",
+            credentials: "include",
+          },
+        );
+
+
+      if (
+        response.status === 401
+      ) {
+        onLogout();
+
+        navigate(
+          "/login",
+          {
+            replace: true,
+          },
+        );
+
+        return;
+      }
+
+
+      if (!response.ok) {
+        let message =
+          "CSV-Export ist fehlgeschlagen.";
+
+        try {
+          const data: unknown =
+            await response.json();
+
+          if (
+            typeof data === "object"
+            && data !== null
+            && "detail" in data
+          ) {
+            const detail =
+              (
+                data as {
+                  detail?: unknown;
+                }
+              ).detail;
+
+            if (
+              typeof detail === "string"
+              && detail.trim()
+            ) {
+              message =
+                detail;
+            }
+          }
+        } catch {
+          // Kein JSON-Fehlertext vorhanden.
+        }
+
+
+        throw new Error(
+          message,
+        );
+      }
+
+
+      const blob =
+        await response.blob();
+
+
+      const disposition =
+        response.headers.get(
+          "Content-Disposition",
+        )
+        ?? "";
+
+
+      const filenameMatch =
+        /filename="?([^"]+)"?/i.exec(
+          disposition,
+        );
+
+
+      const filename =
+        filenameMatch?.[1]
+        ?? "ITAssetFlow.csv";
+
+
+      const objectUrl =
+        URL.createObjectURL(
+          blob,
+        );
+
+
+      const link =
+        document.createElement(
+          "a",
+        );
+
+      link.href =
+        objectUrl;
+
+      link.download =
+        filename;
+
+      document.body.appendChild(
+        link,
+      );
+
+      link.click();
+
+      link.remove();
+
+
+      URL.revokeObjectURL(
+        objectUrl,
+      );
+
+
+      setStatus(
+        "CSV-Export wurde erstellt.",
+      );
+
+    } catch (error) {
+      setStatus(
+        error instanceof Error
+          ? error.message
+          : "CSV-Export ist fehlgeschlagen.",
+      );
+
+    } finally {
+      setTransferBusy(
+        false,
+      );
+    }
   }
 
 
@@ -1281,8 +1826,8 @@ export default function InventoryPage({
           onEdit={
             editEntry
           }
-          onDelete={
-            deleteEntries
+          onDelete={() =>
+            void deleteEntries()
           }
         />
       )
@@ -1311,6 +1856,24 @@ export default function InventoryPage({
   return (
     <div className="main-window">
 
+      <input
+        ref={csvFileInputRef}
+        className="hidden-file-input"
+        type="file"
+        accept=".csv,text/csv"
+        onChange={(event) => {
+          const file =
+            event.target.files?.[0];
+
+          if (file) {
+            void importCsvFile(
+              file,
+            );
+          }
+        }}
+      />
+
+
       <MainMenu
         navigationVisible={
           navigationVisible
@@ -1330,11 +1893,20 @@ export default function InventoryPage({
         visibleColumns={
           visibleColumns
         }
+        transferBusy={
+          transferBusy
+        }
         getHeaderLabel={
           getHeaderLabel
         }
         onRefresh={() =>
           void loadData()
+        }
+        onImportCsv={
+          chooseCsvImport
+        }
+        onExportCsv={() =>
+          void exportCsv()
         }
         onSettings={() =>
           navigate(

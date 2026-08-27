@@ -20,11 +20,16 @@ type MainMenuProps = {
   columns: string[];
   visibleColumns: Set<string>;
 
+  transferBusy: boolean;
+
   getHeaderLabel: (
     column: string,
   ) => string;
 
   onRefresh: () => void;
+
+  onImportCsv: () => void;
+  onExportCsv: () => void;
 
   onSettings: () => void;
   onAbout: () => void;
@@ -74,8 +79,11 @@ export default function MainMenu({
   detailPosition,
   columns,
   visibleColumns,
+  transferBusy,
   getHeaderLabel,
   onRefresh,
+  onImportCsv,
+  onExportCsv,
   onSettings,
   onAbout,
   onLogout,
@@ -247,12 +255,10 @@ export default function MainMenu({
 
                   <button
                     type="button"
+                    disabled={transferBusy}
                     onClick={() =>
                       action(
-                        () =>
-                          onStatus(
-                            "CSV-Import wird später umgesetzt.",
-                          ),
+                        onImportCsv,
                       )
                     }
                   >
@@ -261,11 +267,12 @@ export default function MainMenu({
 
                   <button
                     type="button"
+                    disabled={transferBusy}
                     onClick={() =>
                       action(
                         () =>
                           onStatus(
-                            "PostgreSQL-Import wird später umgesetzt.",
+                            "PostgreSQL-Import ist in der WebApp noch nicht aktiviert.",
                           ),
                       )
                     }
@@ -295,12 +302,10 @@ export default function MainMenu({
 
                   <button
                     type="button"
+                    disabled={transferBusy}
                     onClick={() =>
                       action(
-                        () =>
-                          onStatus(
-                            "CSV-Export wird später umgesetzt.",
-                          ),
+                        onExportCsv,
                       )
                     }
                   >
@@ -309,11 +314,12 @@ export default function MainMenu({
 
                   <button
                     type="button"
+                    disabled={transferBusy}
                     onClick={() =>
                       action(
                         () =>
                           onStatus(
-                            "PostgreSQL-Export wird später umgesetzt.",
+                            "PostgreSQL-Export ist in der WebApp noch nicht aktiviert.",
                           ),
                       )
                     }

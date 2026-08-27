@@ -104,6 +104,15 @@ input:focus {
 
 
 /* =========================================================
+   Versteckte Browser-Controls
+   ========================================================= */
+
+.hidden-file-input {
+  display: none;
+}
+
+
+/* =========================================================
    Loading
    ========================================================= */
 
@@ -773,6 +782,18 @@ input:focus {
 }
 
 
+.table-wrapper.column-dragging,
+.table-wrapper.column-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+
+.table-wrapper.column-dragging .inventory-table th {
+  cursor: grabbing;
+}
+
+
 .inventory-table {
   min-width: 100%;
 
@@ -805,6 +826,9 @@ input:focus {
   font-weight: 600;
 
   cursor: pointer;
+
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 
