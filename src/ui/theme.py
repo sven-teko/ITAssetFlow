@@ -558,6 +558,142 @@ QLabel#userStatusLabel {
     padding-right: 8px;
     color: #5c6670;
 }
+/* ------------------------------------------------------------
+   Login
+   ------------------------------------------------------------ */
+QDialog#loginDialog {
+    background-color: #f4f6f8;
+    color: #111827;
+}
+
+QDialog#loginDialog QLabel#loginTitle {
+    background: transparent;
+    color: #111827;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QDialog#loginDialog QLabel#loginSubtitle {
+    background: transparent;
+    color: #66717c;
+    font-size: 10.5pt;
+}
+
+QDialog#loginDialog QGroupBox {
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #d8dde3;
+    border-radius: 7px;
+    margin-top: 12px;
+    padding-top: 8px;
+    font-weight: 600;
+}
+
+QDialog#loginDialog QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+    background-color: #ffffff;
+    color: #111827;
+}
+
+QDialog#loginDialog QLineEdit {
+    min-height: 36px;
+    background-color: #ffffff;
+    color: #111827;
+    border: 1px solid #c9d1d9;
+    border-radius: 5px;
+    selection-background-color: #cfe4ff;
+    selection-color: #111827;
+}
+
+QDialog#loginDialog QLineEdit:focus {
+    border: 1px solid #2f6fb7;
+}
+
+QDialog#loginDialog QLabel#loginEnvPath {
+    background: transparent;
+    color: #6b7280;
+    font-size: 9pt;
+}
+
+QDialog#loginDialog QLabel#loginStatus {
+    min-height: 22px;
+    background-color: transparent;
+    color: #4b5563;
+}
+
+QDialog#loginDialog QPushButton {
+    min-height: 35px;
+    text-align: center;
+}
+
+QDialog#loginDialog QPushButton#loginSaveConnectionButton {
+    min-width: 135px;
+}
+
+QDialog#loginDialog QPushButton#primaryButton {
+    min-width: 110px;
+}
+
+QDialog#loginDialog QLabel#loginLogo {
+    background: transparent;
+    min-height: 90px;
+}
+
+QDialog#loginDialog QLabel#loginLogoFallback {
+    background: transparent;
+    color: #111827;
+    font-size: 24px;
+    font-weight: 700;
+    min-height: 70px;
+}
+
+QDialog#loginDialog QComboBox#loginSelector {
+    min-height: 36px;
+}
+
+QDialog#loginDialog QPushButton#loginConnectionToggle {
+    min-height: 30px;
+    padding-left: 0;
+    padding-right: 0;
+    border: none;
+    background: transparent;
+    color: #2868ad;
+    font-weight: 600;
+    text-align: left;
+}
+
+QDialog#loginDialog QPushButton#loginConnectionToggle:hover {
+    color: #215b98;
+    text-decoration: underline;
+    background: transparent;
+}
+
+QDialog#loginDialog QLabel#loginConnectionStatus {
+    background: transparent;
+    color: #4b5563;
+}
+
+QDialog#loginDialog QPushButton#loginShowPasswordButton {
+    min-height: 28px;
+    border: none;
+    background: transparent;
+    color: #2868ad;
+    padding-left: 0;
+    text-align: left;
+}
+
+QDialog#loginDialog QPushButton#loginShowPasswordButton:hover {
+    color: #215b98;
+    background: transparent;
+}
+
+QDialog#loginDialog QPushButton#loginRemoveButton {
+    min-height: 30px;
+    color: #6b7280;
+}
+
 """
 
 

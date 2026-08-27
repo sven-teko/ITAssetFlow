@@ -1727,8 +1727,25 @@ class AssetCreateDialog(QDialog):
 
     @staticmethod
     def _category_label(category: dict[str, Any]) -> str:
+        """Zeigt immer den aktuellen Kategorienamen aus Supabase an.
+
+        ``code`` bleibt nur der technische, stabile Schlüssel. Frühere
+        CATEGORY_LABELS-Mappings dürfen einen in den Einstellungen geänderten
+        Anzeigenamen nicht überschreiben.
+        """
+
+        name = str(category.get("name") or "").strip()
+        if name:
+            return name
+
+        # Nur Fallback für alte/unvollständige Datensätze ohne Namen.
         code = str(category.get("code") or "").strip().casefold()
-        return CATEGORY_LABELS.get(code, str(category.get("name") or "Unbekannte Kategorie"))
+        return CATEGORY_LABELS.get(
+            code,
+            code.replace("_", " ").title()
+            if code
+            else "Unbekannte Kategorie",
+        )
 
     @staticmethod
     def _model_sort_key(model: dict[str, Any]) -> tuple[str, str]:

@@ -126,16 +126,12 @@ def ensure_runtime_dependencies() -> None:
 ensure_runtime_dependencies()
 
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 from supabase import Client
 
-from infrastructure.supabase_client import (
-    get_supabase_client,
-    login_development_user,
-    logout_user,
-    test_authenticated_access,
-)
+from infrastructure.supabase_client import get_session_tokens
 from logging_config import setup_logging
+from ui.login_dialog import AuthSessionStore, LoginDialog
 from ui.main_window import MainWindow
 from ui.theme import apply_light_theme
 
@@ -152,77 +148,65 @@ def create_application() -> QApplication:
     app.setOrganizationName(ORGANIZATION_NAME)
     app.setOrganizationDomain(ORGANIZATION_DOMAIN)
 
-    # Das Theme wird vor Supabase initialisiert, damit auch Startfehler-Dialoge
-    # unabhängig vom Windows-Hell/Dunkel-Modus lesbar bleiben.
+    # Theme vor dem Login anwenden, damit der Dialog unabhängig vom
+    # Windows-Hell/Dunkel-Modus lesbar bleibt.
     apply_light_theme(app)
     return app
 
 
 def show_startup_error(title: str, message: str) -> None:
-    """Zeigt einen Fehler an, bevor das Hauptfenster geöffnet wurde."""
-
     QMessageBox.critical(None, title, message)
 
 
-def initialize_supabase() -> tuple[Client, str]:
-    """Erstellt den gemeinsamen Client und meldet den Entwicklungsbenutzer an."""
-
-    logger.info("Initializing Supabase client.")
-    client = get_supabase_client()
-    authenticated_email = login_development_user(client)
-
-    logger.info(
-        "Authenticated Supabase user: %s",
-        authenticated_email,
-    )
-
-    if not test_authenticated_access(client):
-        raise RuntimeError(
-            "Der Benutzer wurde erfolgreich angemeldet, besitzt aber "
-            "keinen Zugriff auf die Tabelle „assets“.\n\n"
-            "Prüfe in Supabase:\n"
-            "• GRANT SELECT für authenticated\n"
-            "• aktivierte Row Level Security\n"
-            "• eine SELECT-Policy für authenticated"
-        )
-
-    return client, authenticated_email
-
-
 def run() -> int:
-    """Startet ITAssetFlow und gibt den Prozess-Exit-Code zurück."""
+    """Startet Login -> Hauptfenster -> Logout."""
 
     setup_logging()
     logger.info("Starting ITAssetFlow")
 
     app = create_application()
     supabase_client: Client | None = None
+    authenticated_email = ""
+    authenticated_profile_id = ""
+    connection_url = ""
+    connection_key = ""
 
     try:
-        supabase_client, authenticated_email = initialize_supabase()
-    except Exception as error:
-        logger.exception(
-            "Application startup failed during Supabase initialization."
-        )
-        show_startup_error(
-            "ITAssetFlow – Startfehler",
-            (
-                "ITAssetFlow konnte nicht gestartet werden.\n\n"
-                f"{error}\n\n"
-                "Prüfe zusätzlich die Supabase-Konfiguration."
-            ),
-        )
-        return 1
+        login_dialog = LoginDialog()
 
-    try:
+        if login_dialog.exec() != QDialog.DialogCode.Accepted:
+            logger.info(
+                "Login dialog was cancelled. Application stops."
+            )
+            return 0
+
+        supabase_client = login_dialog.authenticated_client
+        authenticated_email = login_dialog.authenticated_email
+        authenticated_profile_id = (
+            login_dialog.authenticated_profile_id
+        )
+        connection_url = login_dialog.connection_url
+        connection_key = login_dialog.connection_key
+
+        if supabase_client is None or not authenticated_email:
+            raise RuntimeError(
+                "Das Loginfenster wurde geschlossen, ohne eine gültige "
+                "Supabase-Sitzung bereitzustellen."
+            )
+
         window = MainWindow(
             supabase_client=supabase_client,
             authenticated_email=authenticated_email,
         )
         window.show()
-        logger.info("Main window opened.")
+
+        logger.info(
+            "Main window opened for %s.",
+            authenticated_email,
+        )
 
         exit_code = app.exec()
+
         logger.info(
             "Qt application stopped with exit code %s.",
             exit_code,
@@ -230,19 +214,44 @@ def run() -> int:
         return exit_code
 
     except Exception as error:
-        logger.exception("Unexpected error while running ITAssetFlow.")
+        logger.exception(
+            "Unexpected error while running ITAssetFlow."
+        )
         show_startup_error(
             "ITAssetFlow – Programmfehler",
             (
-                "Während der Ausführung ist ein Fehler aufgetreten.\n\n"
+                "ITAssetFlow konnte nicht vollständig gestartet werden.\n\n"
                 f"{error}"
             ),
         )
         return 1
 
     finally:
-        if supabase_client is not None:
-            logout_user(supabase_client)
+        # Beim normalen Programmende wird NICHT bei Supabase abgemeldet.
+        # Stattdessen wird die zuletzt gültige Sitzung lokal aktualisiert,
+        # damit der Benutzer sie beim nächsten Start nur noch auswählen muss.
+        if (
+            supabase_client is not None
+            and authenticated_email
+            and connection_url
+            and connection_key
+        ):
+            try:
+                tokens = get_session_tokens(
+                    supabase_client
+                )
+                if tokens is not None:
+                    AuthSessionStore().save_session(
+                        connection_url,
+                        connection_key,
+                        authenticated_email,
+                        tokens[0],
+                        tokens[1],
+                    )
+            except Exception:
+                logger.exception(
+                    "Persisting Supabase session on exit failed."
+                )
 
         logger.info("ITAssetFlow stopped.")
 
