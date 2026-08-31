@@ -197,6 +197,20 @@ Start the application with:
 python src/main.py
 ```
 
+Or for the Webapp run:
+
+cd web
+npm.cmd install
+npm.cmd run build
+
+first in powershell and then run 
+
+python src/web_main.py --dev
+
+for developer enviroment.
+in the real case, this project will run without the parameter --dev and works with IIS in the company local network
+
+
 ## Project Status
 
 AssetFlow IT is currently under active development.

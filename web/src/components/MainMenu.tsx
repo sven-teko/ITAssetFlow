@@ -193,6 +193,20 @@ export default function MainMenu({
       ref={rootRef}
     >
 
+      <div
+        className="menu-brand"
+        title="ITAssetFlow"
+        aria-label="ITAssetFlow"
+      >
+        <img
+          className="menu-brand-logo"
+          src="/logo.png"
+          alt="ITAssetFlow"
+          draggable={false}
+        />
+      </div>
+
+
       <div className="top-menu">
 
         <button
@@ -696,6 +710,22 @@ export default function MainMenu({
         }
 
       </div>
+
+
+      <div className="menu-bar-spacer" />
+
+
+      <button
+        type="button"
+        className="menu-logout-button"
+        onClick={() =>
+          action(
+            onLogout,
+          )
+        }
+      >
+        Abmelden
+      </button>
 
     </div>
   );

@@ -49,6 +49,13 @@ const FALLBACK_GROUP_LABELS: Record<string, string> = {
 
 type RowId = string | number | null | undefined;
 
+type MessageTone =
+  | "info"
+  | "success"
+  | "warning"
+  | "error";
+
+
 type SettingsTab =
   | "structure"
   | "categories"
@@ -505,6 +512,13 @@ export default function SettingsPage({
   );
 
   const [
+    messageTone,
+    setMessageTone,
+  ] = useState<MessageTone>(
+    "info",
+  );
+
+  const [
     sites,
     setSites,
   ] = useState<SiteRow[]>([]);
@@ -613,6 +627,15 @@ export default function SettingsPage({
   );
 
 
+  function showMessage(
+    value: string,
+    tone: MessageTone = "info",
+  ): void {
+    setMessage(value);
+    setMessageTone(tone);
+  }
+
+
   function nextKey(
     prefix: string,
   ): string {
@@ -623,10 +646,12 @@ export default function SettingsPage({
 
   function startEditing(
     key: string | null,
+    label = "Eintrag",
   ): void {
     if (!key) {
-      setMessage(
+      showMessage(
         "Bitte zuerst einen Eintrag auswählen.",
+        "warning",
       );
       return;
     }
@@ -640,11 +665,17 @@ export default function SettingsPage({
         return next;
       },
     );
+
+    showMessage(
+      `${label}: Bearbeitungsmodus aktiv. Änderungen werden erst mit „Übernehmen“ gespeichert.`,
+      "info",
+    );
   }
 
 
   function stopEditing(
     key: string,
+    label = "Eintrag",
   ): void {
     setEditingRows(
       (current) => {
@@ -655,6 +686,31 @@ export default function SettingsPage({
         return next;
       },
     );
+
+    showMessage(
+      `${label}: Bearbeitung beendet. Noch nicht gespeicherte Änderungen bleiben erhalten.`,
+      "warning",
+    );
+  }
+
+
+  function toggleEditing(
+    key: string | null,
+    label: string,
+  ): void {
+    if (!key) {
+      showMessage(
+        `Bitte zuerst ${label.toLocaleLowerCase()} auswählen.`,
+        "warning",
+      );
+      return;
+    }
+
+    if (editingRows.has(key)) {
+      stopEditing(key, label);
+    } else {
+      startEditing(key, label);
+    }
   }
 
 
@@ -688,8 +744,9 @@ export default function SettingsPage({
 
       async function load(): Promise<void> {
         setLoading(true);
-        setMessage(
+        showMessage(
           "Einstellungen werden geladen ...",
+          "info",
         );
 
         try {
@@ -901,16 +958,18 @@ export default function SettingsPage({
             ?? "",
           );
 
-          setMessage(
-            "Einstellungen bereit.",
+          showMessage(
+            "Einstellungen bereit. Zeile anklicken zum Auswählen, doppelklicken zum Bearbeiten.",
+            "success",
           );
 
         } catch (error) {
           if (!cancelled) {
-            setMessage(
+            showMessage(
               error instanceof Error
                 ? error.message
                 : "Einstellungen konnten nicht geladen werden.",
+              "error",
             );
           }
 
@@ -1056,14 +1115,15 @@ export default function SettingsPage({
     );
 
     setSelectedSite(clientKey);
-    startEditing(clientKey);
+    startEditing(clientKey, "Neuer Standort");
   }
 
 
   function addDepartment(): void {
     if (sites.length === 0) {
-      setMessage(
+      showMessage(
         "Bitte zuerst einen Standort anlegen.",
+        "warning",
       );
       return;
     }
@@ -1090,14 +1150,15 @@ export default function SettingsPage({
     setSelectedDepartment(
       clientKey,
     );
-    startEditing(clientKey);
+    startEditing(clientKey, "Neue Abteilung");
   }
 
 
   function addLocation(): void {
     if (departments.length === 0) {
-      setMessage(
+      showMessage(
         "Bitte zuerst eine Abteilung anlegen.",
+        "warning",
       );
       return;
     }
@@ -1127,7 +1188,7 @@ export default function SettingsPage({
     setSelectedLocation(
       clientKey,
     );
-    startEditing(clientKey);
+    startEditing(clientKey, "Neuer Lagerort");
   }
 
 
@@ -1157,7 +1218,7 @@ export default function SettingsPage({
     setSpecCategoryKey(
       clientKey,
     );
-    startEditing(clientKey);
+    startEditing(clientKey, "Neue Kategorie");
   }
 
 
@@ -1179,14 +1240,15 @@ export default function SettingsPage({
     setSelectedManufacturer(
       clientKey,
     );
-    startEditing(clientKey);
+    startEditing(clientKey, "Neuer Hersteller");
   }
 
 
   function addSpecification(): void {
     if (!currentSpecCategory) {
-      setMessage(
+      showMessage(
         "Bitte zuerst eine Kategorie auswählen.",
+        "warning",
       );
       return;
     }
@@ -1227,6 +1289,11 @@ export default function SettingsPage({
     setEditingSpecIndex(
       nextIndex,
     );
+
+    showMessage(
+      "Neue Spezifikation angelegt. Felder ausfüllen und anschließend „Übernehmen“ wählen.",
+      "info",
+    );
   }
 
 
@@ -1238,8 +1305,9 @@ export default function SettingsPage({
     );
 
     if (!row) {
-      setMessage(
+      showMessage(
         "Bitte zuerst einen Standort auswählen.",
+        "warning",
       );
       return;
     }
@@ -1251,8 +1319,9 @@ export default function SettingsPage({
           === row.client_key,
       )
     ) {
-      setMessage(
+      showMessage(
         "Der Standort wird noch von einer Abteilung verwendet.",
+        "warning",
       );
       return;
     }
@@ -1283,6 +1352,11 @@ export default function SettingsPage({
       row.client_key,
     );
     setSelectedSite(null);
+
+    showMessage(
+      `Standort „${row.name || "ohne Name"}“ zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.`,
+      "warning",
+    );
   }
 
 
@@ -1294,8 +1368,9 @@ export default function SettingsPage({
     );
 
     if (!row) {
-      setMessage(
+      showMessage(
         "Bitte zuerst eine Abteilung auswählen.",
+        "warning",
       );
       return;
     }
@@ -1307,8 +1382,9 @@ export default function SettingsPage({
           === row.client_key,
       )
     ) {
-      setMessage(
+      showMessage(
         "Die Abteilung wird noch von einem Lagerort verwendet.",
+        "warning",
       );
       return;
     }
@@ -1339,6 +1415,11 @@ export default function SettingsPage({
       row.client_key,
     );
     setSelectedDepartment(null);
+
+    showMessage(
+      `Abteilung „${row.name || "ohne Name"}“ zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.`,
+      "warning",
+    );
   }
 
 
@@ -1350,8 +1431,9 @@ export default function SettingsPage({
     );
 
     if (!row) {
-      setMessage(
+      showMessage(
         "Bitte zuerst einen Lagerort auswählen.",
+        "warning",
       );
       return;
     }
@@ -1382,6 +1464,11 @@ export default function SettingsPage({
       row.client_key,
     );
     setSelectedLocation(null);
+
+    showMessage(
+      `Lagerort „${row.name || "ohne Name"}“ zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.`,
+      "warning",
+    );
   }
 
 
@@ -1393,8 +1480,9 @@ export default function SettingsPage({
     );
 
     if (!row) {
-      setMessage(
+      showMessage(
         "Bitte zuerst eine Kategorie auswählen.",
+        "warning",
       );
       return;
     }
@@ -1439,6 +1527,11 @@ export default function SettingsPage({
       );
       setSelectedSpecIndex(null);
     }
+
+    showMessage(
+      `Kategorie „${row.name || "ohne Name"}“ zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.`,
+      "warning",
+    );
   }
 
 
@@ -1450,8 +1543,9 @@ export default function SettingsPage({
     );
 
     if (!row) {
-      setMessage(
+      showMessage(
         "Bitte zuerst einen Hersteller auswählen.",
+        "warning",
       );
       return;
     }
@@ -1462,8 +1556,9 @@ export default function SettingsPage({
       && row.name.trim().toLocaleLowerCase()
         === "keiner"
     ) {
-      setMessage(
+      showMessage(
         "Der technische Eintrag „Keiner“ kann nicht gelöscht werden.",
+        "warning",
       );
       return;
     }
@@ -1494,6 +1589,11 @@ export default function SettingsPage({
       row.client_key,
     );
     setSelectedManufacturer(null);
+
+    showMessage(
+      `Hersteller „${row.name || "ohne Name"}“ zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.`,
+      "warning",
+    );
   }
 
 
@@ -1502,8 +1602,9 @@ export default function SettingsPage({
       !currentSpecCategory
       || selectedSpecIndex === null
     ) {
-      setMessage(
+      showMessage(
         "Bitte zuerst eine Spezifikation auswählen.",
+        "warning",
       );
       return;
     }
@@ -1535,6 +1636,11 @@ export default function SettingsPage({
 
     setSelectedSpecIndex(null);
     setEditingSpecIndex(null);
+
+    showMessage(
+      "Spezifikation entfernt. Die Änderung wird erst mit „Übernehmen“ gespeichert.",
+      "warning",
+    );
   }
 
 
@@ -1574,18 +1680,82 @@ export default function SettingsPage({
       }
     }
 
+
+    function validateScopedUniqueNames<T extends {
+      name: string;
+    }>(
+      rows: T[],
+      label: string,
+      scopeKey: (row: T) => string,
+      scopeDescription: (row: T) => string,
+    ): void {
+      const seen =
+        new Set<string>();
+
+      for (const row of rows) {
+        const name =
+          row.name.trim();
+
+        if (!name) {
+          errors.push(
+            `${label}: Name fehlt.`,
+          );
+          continue;
+        }
+
+        const key =
+          `${scopeKey(row)}\u0000${name.toLocaleLowerCase()}`;
+
+        if (seen.has(key)) {
+          errors.push(
+            `${label} „${name}“ ist ${scopeDescription(row)} doppelt vorhanden.`,
+          );
+        }
+
+        seen.add(key);
+      }
+    }
+
+
     validateUniqueNames(
       sites,
       "Standort",
     );
-    validateUniqueNames(
+
+    validateScopedUniqueNames<DepartmentRow>(
       departments,
       "Abteilung",
+      (row) =>
+        row.site_ref
+        ?? "__without_site__",
+      (row) =>
+        `am Standort „${siteName(row.site_ref)}“`,
     );
-    validateUniqueNames(
+
+    validateScopedUniqueNames<LocationRow>(
       locations,
       "Lagerort",
+      (row) =>
+        row.department_ref
+        ?? "__without_department__",
+      (row) => {
+        const department =
+          departmentByKey.get(
+            row.department_ref
+            ?? "",
+          );
+
+        const departmentName =
+          department?.name
+          || "Nicht zugeordnet";
+
+        return (
+          `in der Abteilung „${departmentName}“ `
+          + `am Standort „${siteName(department?.site_ref ?? null)}“`
+        );
+      },
     );
+
     validateUniqueNames(
       categories,
       "Kategorie",
@@ -1823,16 +1993,18 @@ export default function SettingsPage({
       validate();
 
     if (errors.length > 0) {
-      setMessage(
+      showMessage(
         "Bitte korrigiere folgende Punkte:\n• "
         + errors.join("\n• "),
+        "error",
       );
       return;
     }
 
     setSaving(true);
-    setMessage(
+    showMessage(
       "Einstellungen werden gespeichert ...",
+      "info",
     );
 
     try {
@@ -1882,6 +2054,20 @@ export default function SettingsPage({
         ),
       );
 
+      showMessage(
+        "Einstellungen erfolgreich gespeichert. Rückkehr zum Inventar ...",
+        "success",
+      );
+
+      await new Promise<void>(
+        (resolve) => {
+          window.setTimeout(
+            resolve,
+            650,
+          );
+        },
+      );
+
       navigate(
         "/inventory",
         {
@@ -1890,10 +2076,11 @@ export default function SettingsPage({
       );
 
     } catch (error) {
-      setMessage(
+      showMessage(
         error instanceof Error
           ? error.message
           : "Einstellungen konnten nicht gespeichert werden.",
+        "error",
       );
 
     } finally {
@@ -1930,6 +2117,7 @@ export default function SettingsPage({
     options?: {
       readOnly?: boolean;
       placeholder?: string;
+      autoFocus?: boolean;
     },
   ) {
     if (
@@ -1952,12 +2140,43 @@ export default function SettingsPage({
           options?.placeholder
         }
         disabled={saving}
+        autoFocus={options?.autoFocus}
+        onClick={(event) =>
+          event.stopPropagation()
+        }
+        onDoubleClick={(event) =>
+          event.stopPropagation()
+        }
         onChange={(event) =>
           onChange(
             event.target.value,
           )
         }
       />
+    );
+  }
+
+
+  function rowClass(
+    selected: boolean,
+    editing: boolean,
+  ): string {
+    return [
+      selected ? "selected" : "",
+      editing ? "editing" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+
+  function selectionHint(
+    label: string,
+    name: string,
+  ): void {
+    showMessage(
+      `${label} „${name || "ohne Name"}“ ausgewählt. Doppelklick oder „Bearbeiten“ aktiviert die Eingabefelder.`,
+      "info",
     );
   }
 
@@ -1971,8 +2190,8 @@ export default function SettingsPage({
             <h2>Standorte</h2>
             <div className="settings-actions">
               <button type="button" onClick={addSite} disabled={saving}>Hinzufügen</button>
-              <button type="button" onClick={() => startEditing(selectedSite)} disabled={saving}>Bearbeiten</button>
-              <button type="button" onClick={deleteSite} disabled={saving}>Löschen</button>
+              <button type="button" onClick={() => toggleEditing(selectedSite, "Standort")} disabled={saving || !selectedSite}>{selectedSite && editingRows.has(selectedSite) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+              <button type="button" onClick={deleteSite} disabled={saving || !selectedSite}>Löschen</button>
             </div>
           </div>
 
@@ -1992,11 +2211,12 @@ export default function SettingsPage({
                 {sites.map((row) => (
                   <tr
                     key={row.client_key}
-                    className={selectedSite === row.client_key ? "selected" : ""}
-                    onClick={() => setSelectedSite(row.client_key)}
-                    onDoubleClick={() => startEditing(row.client_key)}
+                    className={rowClass(selectedSite === row.client_key, editingRows.has(row.client_key))}
+                    title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
+                    onClick={() => { setSelectedSite(row.client_key); if (!editingRows.has(row.client_key)) selectionHint("Standort", row.name); }}
+                    onDoubleClick={() => startEditing(row.client_key, "Standort")}
                   >
-                    <td>{renderTextCell(row.client_key, row.name, (value) => setSites((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)))}</td>
+                    <td>{renderTextCell(row.client_key, row.name, (value) => setSites((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {autoFocus: true})}</td>
                     <td>{renderTextCell(row.client_key, row.street, (value) => setSites((current) => current.map((item) => item.client_key === row.client_key ? {...item, street: value} : item)))}</td>
                     <td>{renderTextCell(row.client_key, row.street_number, (value) => setSites((current) => current.map((item) => item.client_key === row.client_key ? {...item, street_number: value} : item)))}</td>
                     <td>{renderTextCell(row.client_key, row.postal_code, (value) => setSites((current) => current.map((item) => item.client_key === row.client_key ? {...item, postal_code: value} : item)))}</td>
@@ -2016,8 +2236,8 @@ export default function SettingsPage({
             <h2>Abteilungen</h2>
             <div className="settings-actions">
               <button type="button" onClick={addDepartment} disabled={saving}>Hinzufügen</button>
-              <button type="button" onClick={() => startEditing(selectedDepartment)} disabled={saving}>Bearbeiten</button>
-              <button type="button" onClick={deleteDepartment} disabled={saving}>Löschen</button>
+              <button type="button" onClick={() => toggleEditing(selectedDepartment, "Abteilung")} disabled={saving || !selectedDepartment}>{selectedDepartment && editingRows.has(selectedDepartment) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+              <button type="button" onClick={deleteDepartment} disabled={saving || !selectedDepartment}>Löschen</button>
             </div>
           </div>
 
@@ -2035,11 +2255,12 @@ export default function SettingsPage({
                   return (
                     <tr
                       key={row.client_key}
-                      className={selectedDepartment === row.client_key ? "selected" : ""}
-                      onClick={() => setSelectedDepartment(row.client_key)}
-                      onDoubleClick={() => startEditing(row.client_key)}
+                      className={rowClass(selectedDepartment === row.client_key, editing)}
+                      title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
+                      onClick={() => { setSelectedDepartment(row.client_key); if (!editing) selectionHint("Abteilung", row.name); }}
+                      onDoubleClick={() => startEditing(row.client_key, "Abteilung")}
                     >
-                      <td>{renderTextCell(row.client_key, row.name, (value) => setDepartments((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)))}</td>
+                      <td>{renderTextCell(row.client_key, row.name, (value) => setDepartments((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {autoFocus: true})}</td>
                       <td>
                         {editing ? (
                           <select
@@ -2072,8 +2293,8 @@ export default function SettingsPage({
             <h2>Lagerorte</h2>
             <div className="settings-actions">
               <button type="button" onClick={addLocation} disabled={saving}>Hinzufügen</button>
-              <button type="button" onClick={() => startEditing(selectedLocation)} disabled={saving}>Bearbeiten</button>
-              <button type="button" onClick={deleteLocation} disabled={saving}>Löschen</button>
+              <button type="button" onClick={() => toggleEditing(selectedLocation, "Lagerort")} disabled={saving || !selectedLocation}>{selectedLocation && editingRows.has(selectedLocation) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+              <button type="button" onClick={deleteLocation} disabled={saving || !selectedLocation}>Löschen</button>
             </div>
           </div>
 
@@ -2093,11 +2314,12 @@ export default function SettingsPage({
                   return (
                     <tr
                       key={row.client_key}
-                      className={selectedLocation === row.client_key ? "selected" : ""}
-                      onClick={() => setSelectedLocation(row.client_key)}
-                      onDoubleClick={() => startEditing(row.client_key)}
+                      className={rowClass(selectedLocation === row.client_key, editing)}
+                      title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
+                      onClick={() => { setSelectedLocation(row.client_key); if (!editing) selectionHint("Lagerort", row.name); }}
+                      onDoubleClick={() => startEditing(row.client_key, "Lagerort")}
                     >
-                      <td>{renderTextCell(row.client_key, row.name, (value) => setLocations((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)))}</td>
+                      <td>{renderTextCell(row.client_key, row.name, (value) => setLocations((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {autoFocus: true})}</td>
                       <td>
                         {editing ? (
                           <select
@@ -2150,8 +2372,8 @@ export default function SettingsPage({
       <div className="settings-single-page">
         <div className="settings-actions settings-actions-left">
           <button type="button" onClick={addCategory} disabled={saving}>Hinzufügen</button>
-          <button type="button" onClick={() => startEditing(selectedCategory)} disabled={saving}>Bearbeiten</button>
-          <button type="button" onClick={deleteCategory} disabled={saving}>Löschen</button>
+          <button type="button" onClick={() => toggleEditing(selectedCategory, "Kategorie")} disabled={saving || !selectedCategory}>{selectedCategory && editingRows.has(selectedCategory) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+          <button type="button" onClick={deleteCategory} disabled={saving || !selectedCategory}>Löschen</button>
         </div>
 
         <div className="settings-table-wrap settings-table-grow">
@@ -2168,11 +2390,12 @@ export default function SettingsPage({
                 return (
                   <tr
                     key={row.client_key}
-                    className={selectedCategory === row.client_key ? "selected" : ""}
-                    onClick={() => setSelectedCategory(row.client_key)}
-                    onDoubleClick={() => startEditing(row.client_key)}
+                    className={rowClass(selectedCategory === row.client_key, editing)}
+                    title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
+                    onClick={() => { setSelectedCategory(row.client_key); if (!editing) selectionHint("Kategorie", row.name); }}
+                    onDoubleClick={() => startEditing(row.client_key, "Kategorie")}
                   >
-                    <td>{renderTextCell(row.client_key, row.name, (value) => setCategories((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)))}</td>
+                    <td>{renderTextCell(row.client_key, row.name, (value) => setCategories((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {autoFocus: true})}</td>
                     <td>
                       {editing ? (
                         <select
@@ -2233,12 +2456,28 @@ export default function SettingsPage({
           <button type="button" onClick={addSpecification} disabled={saving}>Hinzufügen</button>
           <button type="button" onClick={() => {
             if (selectedSpecIndex === null) {
-              setMessage("Bitte zuerst eine Spezifikation auswählen.");
+              showMessage(
+                "Bitte zuerst eine Spezifikation auswählen.",
+                "warning",
+              );
               return;
             }
-            setEditingSpecIndex(selectedSpecIndex);
-          }} disabled={saving}>Bearbeiten</button>
-          <button type="button" onClick={deleteSpecification} disabled={saving}>Löschen</button>
+
+            if (editingSpecIndex === selectedSpecIndex) {
+              setEditingSpecIndex(null);
+              showMessage(
+                "Bearbeitung der Spezifikation beendet. Änderungen bleiben bis „Übernehmen“ erhalten.",
+                "warning",
+              );
+            } else {
+              setEditingSpecIndex(selectedSpecIndex);
+              showMessage(
+                "Spezifikation wird bearbeitet. Änderungen werden erst mit „Übernehmen“ gespeichert.",
+                "info",
+              );
+            }
+          }} disabled={saving || selectedSpecIndex === null}>{editingSpecIndex === selectedSpecIndex && selectedSpecIndex !== null ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+          <button type="button" onClick={deleteSpecification} disabled={saving || selectedSpecIndex === null}>Löschen</button>
         </div>
 
         <div className="settings-table-wrap settings-table-grow">
@@ -2259,9 +2498,10 @@ export default function SettingsPage({
                 return (
                   <tr
                     key={`${currentSpecCategory?.client_key ?? "category"}:${field.key || index}`}
-                    className={selectedSpecIndex === index ? "selected" : ""}
-                    onClick={() => setSelectedSpecIndex(index)}
-                    onDoubleClick={() => setEditingSpecIndex(index)}
+                    className={rowClass(selectedSpecIndex === index, editing)}
+                    title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
+                    onClick={() => { setSelectedSpecIndex(index); if (!editing) selectionHint("Spezifikation", field.label); }}
+                    onDoubleClick={() => { setEditingSpecIndex(index); showMessage("Spezifikation wird bearbeitet. Änderungen werden erst mit „Übernehmen“ gespeichert.", "info"); }}
                   >
                     <td>
                       {editing ? (
@@ -2270,6 +2510,7 @@ export default function SettingsPage({
                           type="text"
                           value={field.label}
                           disabled={saving}
+                          autoFocus
                           onChange={(event) => setCategories((current) => current.map((category) => category.client_key === currentSpecCategory?.client_key ? {...category, specification_schema: {fields: category.specification_schema.fields.map((item, itemIndex) => itemIndex === index ? {...item, label: event.target.value} : item)}} : category))}
                         />
                       ) : (
@@ -2333,12 +2574,25 @@ export default function SettingsPage({
 
 
   function renderManufacturers() {
+    const selectedRow =
+      manufacturers.find(
+        (row) =>
+          row.client_key === selectedManufacturer,
+      )
+      ?? null;
+
+    const selectedProtected =
+      selectedRow !== null
+      && selectedRow.id !== null
+      && selectedRow.id !== undefined
+      && selectedRow.name.trim().toLocaleLowerCase() === "keiner";
+
     return (
       <div className="settings-single-page">
         <div className="settings-actions settings-actions-left">
           <button type="button" onClick={addManufacturer} disabled={saving}>Hinzufügen</button>
-          <button type="button" onClick={() => startEditing(selectedManufacturer)} disabled={saving}>Bearbeiten</button>
-          <button type="button" onClick={deleteManufacturer} disabled={saving}>Löschen</button>
+          <button type="button" onClick={() => toggleEditing(selectedManufacturer, "Hersteller")} disabled={saving || !selectedManufacturer || selectedProtected}>{selectedManufacturer && editingRows.has(selectedManufacturer) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
+          <button type="button" onClick={deleteManufacturer} disabled={saving || !selectedManufacturer || selectedProtected}>Löschen</button>
         </div>
 
         <div className="settings-table-wrap settings-table-grow">
@@ -2357,11 +2611,12 @@ export default function SettingsPage({
                 return (
                   <tr
                     key={row.client_key}
-                    className={selectedManufacturer === row.client_key ? "selected" : ""}
-                    onClick={() => setSelectedManufacturer(row.client_key)}
-                    onDoubleClick={() => !protectedRow && startEditing(row.client_key)}
+                    className={rowClass(selectedManufacturer === row.client_key, editingRows.has(row.client_key))}
+                    title={protectedRow ? "Technischer Eintrag – nicht bearbeitbar" : "Klicken zum Auswählen · Doppelklick zum Bearbeiten"}
+                    onClick={() => { setSelectedManufacturer(row.client_key); if (!editingRows.has(row.client_key)) selectionHint("Hersteller", row.name); }}
+                    onDoubleClick={() => !protectedRow && startEditing(row.client_key, "Hersteller")}
                   >
-                    <td>{renderTextCell(row.client_key, row.name, (value) => setManufacturers((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {readOnly: protectedRow})}</td>
+                    <td>{renderTextCell(row.client_key, row.name, (value) => setManufacturers((current) => current.map((item) => item.client_key === row.client_key ? {...item, name: value} : item)), {readOnly: protectedRow, autoFocus: true})}</td>
                   </tr>
                 );
               })}
@@ -2439,6 +2694,18 @@ export default function SettingsPage({
           ))}
         </nav>
 
+        <div className="settings-interaction-hint">
+          <span>
+            <strong>Bedienung:</strong> Zeile anklicken = auswählen · Doppelklick = bearbeiten · Änderungen werden erst mit „Übernehmen“ gespeichert.
+          </span>
+
+          {(editingRows.size > 0 || editingSpecIndex !== null) && (
+            <span className="settings-editing-badge">
+              Bearbeitungsmodus aktiv
+            </span>
+          )}
+        </div>
+
         <main className="settings-content">
           {activeTab === "structure" && renderStructure()}
           {activeTab === "categories" && renderCategories()}
@@ -2447,7 +2714,7 @@ export default function SettingsPage({
           {activeTab === "columns" && renderColumns()}
         </main>
 
-        <div className={`settings-message${message.includes("konnte") || message.includes("Bitte") || message.includes("fehlt") ? " error" : ""}`}>
+        <div className={`settings-message ${messageTone}`}>
           {message}
         </div>
 

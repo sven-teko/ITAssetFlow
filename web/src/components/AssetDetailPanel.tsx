@@ -20,7 +20,7 @@ type AssetDetailPanelProps = {
 };
 
 
-const GENERAL_FIELDS = [
+const GENERAL_DETAIL_FIELDS = [
   "asset_tag",
   "serial_number",
   "product_model_name",
@@ -41,6 +41,10 @@ const GENERAL_FIELDS = [
 ];
 
 
+const SPECIFICATION_PREFIX =
+  "spec_";
+
+
 function isEmpty(
   value: unknown,
 ): boolean {
@@ -57,11 +61,29 @@ function isEmpty(
     return !value.trim();
   }
 
+  if (
+    Array.isArray(
+      value,
+    )
+  ) {
+    return value.length === 0;
+  }
+
+  if (
+    typeof value === "object"
+  ) {
+    return (
+      Object.keys(
+        value,
+      ).length === 0
+    );
+  }
+
   return false;
 }
 
 
-function normalizeValue(
+function normalizedValue(
   value: unknown,
 ): string {
   if (
@@ -79,19 +101,24 @@ function normalizeValue(
     try {
       return JSON.stringify(
         value,
+        Object.keys(
+          value,
+        ).sort(),
       );
     } catch {
-      return String(value);
+      return String(
+        value,
+      );
     }
   }
 
   return String(
-    value ?? "",
+    value,
   );
 }
 
 
-function commonValue(
+function commonNonEmptyValue(
   rows: InventoryRow[],
   field: string,
 ): unknown | null {
@@ -116,22 +143,281 @@ function commonValue(
   }
 
   const first =
-    normalizeValue(
-      values[0],
+    values[0];
+
+  const normalized =
+    normalizedValue(
+      first,
     );
 
   if (
-    values.every(
-      (value) =>
-        normalizeValue(
-          value,
-        ) === first,
-    )
+    values
+      .slice(1)
+      .every(
+        (value) =>
+          normalizedValue(
+            value,
+          ) === normalized,
+      )
   ) {
-    return values[0];
+    return first;
   }
 
   return null;
+}
+
+
+function sumNewPrices(
+  rows: InventoryRow[],
+): number | null {
+  let total = 0;
+  let found = false;
+
+  for (
+    const row
+    of rows
+  ) {
+    const value =
+      row.new_price;
+
+    if (
+      isEmpty(
+        value,
+      )
+    ) {
+      continue;
+    }
+
+    const amount =
+      Number(
+        value,
+      );
+
+    if (
+      !Number.isFinite(
+        amount,
+      )
+    ) {
+      return null;
+    }
+
+    total +=
+      amount;
+
+    found = true;
+  }
+
+  return found
+    ? total
+    : null;
+}
+
+
+function formatChf(
+  value: unknown,
+): string {
+  const amount =
+    Number(
+      value,
+    );
+
+  if (
+    !Number.isFinite(
+      amount,
+    )
+  ) {
+    return String(
+      value ?? "",
+    );
+  }
+
+  const negative =
+    amount < 0;
+
+  const rounded =
+    Math.round(
+      Math.abs(amount) * 100,
+    );
+
+  const integer =
+    Math.floor(
+      rounded / 100,
+    );
+
+  const cents =
+    rounded % 100;
+
+  const integerText =
+    String(
+      integer,
+    ).replace(
+      /\B(?=(\d{3})+(?!\d))/g,
+      "'",
+    );
+
+  const prefix =
+    negative
+      ? "-"
+      : "";
+
+  if (
+    cents === 0
+  ) {
+    return (
+      `CHF ${prefix}${integerText}.-`
+    );
+  }
+
+  return (
+    `CHF ${prefix}${integerText}.`
+    + String(
+      cents,
+    ).padStart(
+      2,
+      "0",
+    )
+  );
+}
+
+
+function formatDate(
+  value: unknown,
+): string {
+  const text =
+    String(
+      value ?? "",
+    ).trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const datePart =
+    text.slice(
+      0,
+      10,
+    );
+
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})$/
+      .exec(
+        datePart,
+      );
+
+  if (!match) {
+    return text;
+  }
+
+  return (
+    `${match[3]}-${match[2]}-${match[1]}`
+  );
+}
+
+
+function specificationLabel(
+  row: InventoryRow,
+  field: string,
+): string {
+  const labels =
+    row._specification_labels;
+
+  if (
+    typeof labels === "object"
+    && labels !== null
+    && !Array.isArray(
+      labels,
+    )
+  ) {
+    const value =
+      (
+        labels as Record<
+          string,
+          unknown
+        >
+      )[field];
+
+    if (
+      value !== null
+      && value !== undefined
+      && String(value).trim()
+    ) {
+      return String(
+        value,
+      ).trim();
+    }
+  }
+
+  return field
+    .slice(
+      SPECIFICATION_PREFIX.length,
+    )
+    .replaceAll(
+      "_",
+      " ",
+    )
+    .replace(
+      /\b\w/g,
+      (letter) =>
+        letter.toUpperCase(),
+    );
+}
+
+
+function DetailRows({
+  rows,
+}: {
+  rows: Array<{
+    label: string;
+    value: string;
+    emphasized?: boolean;
+  }>;
+}) {
+  if (
+    rows.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="detail-card">
+
+      <h3>
+        Allgemein
+      </h3>
+
+
+      {
+        rows.map(
+          (
+            row,
+            index,
+          ) => (
+            <div
+              className={
+                row.emphasized
+                  ? "detail-row detail-row-emphasized"
+                  : "detail-row"
+              }
+              key={
+                `${row.label}:${index}`
+              }
+            >
+
+              <span>
+                {row.label}
+              </span>
+
+              <strong>
+                {row.value}
+              </strong>
+
+            </div>
+          ),
+        )
+      }
+
+    </div>
+  );
 }
 
 
@@ -151,20 +437,21 @@ export default function AssetDetailPanel({
           Detailansicht
         </div>
 
-
         <div className="details-content">
 
           <h2>
-            Kein Asset ausgewählt
+            Kein Eintrag ausgewählt
           </h2>
 
           <p>
-            Wähle ein Asset in der Tabelle aus,
+            Wähle einen oder mehrere Einträge in der Tabelle aus,
             um Details anzuzeigen.
           </p>
 
           <div className="detail-card">
-            Keine Details verfügbar.
+            <div className="detail-info">
+              Keine Details verfügbar.
+            </div>
           </div>
 
         </div>
@@ -174,217 +461,220 @@ export default function AssetDetailPanel({
   }
 
 
-  if (
-    rows.length === 1
-  ) {
-    const row =
-      rows[0];
+  const multiple =
+    rows.length > 1;
 
-    const details =
-      GENERAL_FIELDS
-        .filter(
+
+  const generalRows:
+    Array<{
+      label: string;
+      value: string;
+      emphasized?: boolean;
+    }> = [];
+
+
+  for (
+    const field
+    of GENERAL_DETAIL_FIELDS
+  ) {
+    if (
+      multiple
+      && field === "new_price"
+    ) {
+      const total =
+        sumNewPrices(
+          rows,
+        );
+
+      if (
+        total !== null
+      ) {
+        generalRows.push({
+          label:
+            getHeaderLabel(
+              field,
+            ),
+          value:
+            formatChf(
+              total,
+            ),
+          emphasized:
+            true,
+        });
+      }
+
+      continue;
+    }
+
+
+    const value =
+      multiple
+        ? commonNonEmptyValue(
+            rows,
+            field,
+          )
+        : rows[0][field];
+
+
+    if (
+      isEmpty(
+        value,
+      )
+    ) {
+      continue;
+    }
+
+
+    let formatted =
+      "";
+
+    if (
+      field === "new_price"
+    ) {
+      formatted =
+        formatChf(
+          value,
+        );
+    } else if (
+      field === "purchase_date"
+      || field === "warranty_until"
+    ) {
+      formatted =
+        formatDate(
+          value,
+        );
+    } else {
+      formatted =
+        formatValue(
+          field,
+          value,
+        );
+    }
+
+
+    generalRows.push({
+      label:
+        getHeaderLabel(
+          field,
+        ),
+      value:
+        formatted,
+      emphasized:
+        field === "new_price",
+    });
+  }
+
+
+  const specificationFields =
+    multiple
+      ? (
+        rows[0]
+          ? Object.keys(
+              rows[0],
+            ).filter(
+              (field) =>
+                field.startsWith(
+                  SPECIFICATION_PREFIX,
+                )
+                && rows.every(
+                  (row) =>
+                    field in row,
+                ),
+            )
+          : []
+      )
+      : Object.keys(
+          rows[0],
+        ).filter(
           (field) =>
-            !isEmpty(
-              row[field],
+            field.startsWith(
+              SPECIFICATION_PREFIX,
             ),
         );
 
-    const specificationFields =
-      Object.keys(
-        row,
-      ).filter(
-        (field) =>
-          field.startsWith(
-            "spec_",
-          ),
-      );
 
-    const labelsValue =
-      row[
-        "_specification_labels"
-      ];
-
-    const specificationLabels =
-      (
-        typeof labelsValue === "object"
-        && labelsValue !== null
-        && !Array.isArray(
-          labelsValue,
-        )
-      )
-        ? labelsValue as Record<
-            string,
-            unknown
-          >
-        : {};
-
-
-    return (
-      <aside className="details">
-
-        <div className="dock-title">
-          Detailansicht
-        </div>
-
-
-        <div className="details-content">
-
-          <h2>
-            {
-              getIdentifier(
-                row,
-              )
-            }
-          </h2>
-
-
-          <p>
-            {
-              [
-                row.product_model_name,
-                row.product_category_name,
-              ]
-                .filter(
-                  (value) =>
-                    !isEmpty(
-                      value,
-                    ),
-                )
-                .map(
-                  String,
-                )
-                .join(" · ")
-            }
-          </p>
-
-
-          <div className="detail-card">
-
-            <h3>
-              Allgemein
-            </h3>
-
-
-            {
-              details.map(
-                (field) => (
-                  <div
-                    className="detail-row"
-                    key={field}
-                  >
-
-                    <span>
-                      {
-                        getHeaderLabel(
-                          field,
-                        )
-                      }
-                    </span>
-
-                    <strong>
-                      {
-                        formatValue(
-                          field,
-                          row[field],
-                        )
-                      }
-                    </strong>
-
-                  </div>
-                ),
-              )
-            }
-
-          </div>
-
-
-          <div className="detail-card">
-
-            <h3>
-              Spezifikationen
-            </h3>
-
-
-            {
-              specificationFields.length === 0
-                ? (
-                  <div className="detail-info">
-                    Für diese Produktkategorie
-                    sind keine Spezifikationen vorhanden.
-                  </div>
-                )
-                : specificationFields.map(
-                    (field) => {
-                      const configuredLabel =
-                        specificationLabels[
-                          field
-                        ];
-
-                      const label =
-                        typeof configuredLabel === "string"
-                        && configuredLabel.trim()
-                          ? configuredLabel
-                          : field
-                              .slice(5)
-                              .replaceAll(
-                                "_",
-                                " ",
-                              );
-
-                      return (
-                        <div
-                          className="detail-row"
-                          key={field}
-                        >
-
-                          <span>
-                            {label}
-                          </span>
-
-                          <strong>
-                            {
-                              isEmpty(
-                                row[field],
-                              )
-                                ? "Keine"
-                                : formatValue(
-                                    field,
-                                    row[field],
-                                  )
-                            }
-                          </strong>
-
-                        </div>
-                      );
-                    },
-                  )
-            }
-
-          </div>
-
-        </div>
-
-      </aside>
-    );
-  }
-
-
-  const commonFields =
-    GENERAL_FIELDS
+  const specificationRows =
+    specificationFields
       .map(
-        (field) => ({
-          field,
-          value:
-            commonValue(
-              rows,
-              field,
-            ),
-        }),
+        (field) => {
+          const value =
+            multiple
+              ? commonNonEmptyValue(
+                  rows,
+                  field,
+                )
+              : rows[0][field];
+
+          if (
+            multiple
+            && value === null
+          ) {
+            return null;
+          }
+
+          return {
+            field,
+            label:
+              specificationLabel(
+                rows[0],
+                field,
+              ),
+            value:
+              isEmpty(
+                value,
+              )
+                ? "Keine"
+                : formatValue(
+                    field,
+                    value,
+                  ),
+          };
+        },
       )
       .filter(
-        (entry) =>
-          entry.value !== null,
+        (
+          row,
+        ): row is {
+          field: string;
+          label: string;
+          value: string;
+        } =>
+          row !== null,
       );
+
+
+  const title =
+    multiple
+      ? `${rows.length} Einträge ausgewählt`
+      : getIdentifier(
+          rows[0],
+        );
+
+
+  const hint =
+    multiple
+      ? (
+        "Gemeinsame Werte werden angezeigt; "
+        + "der Neupreis wird über die gesamte Auswahl summiert."
+      )
+      : [
+          String(
+            rows[0].product_model_name
+            ?? "",
+          ).trim(),
+
+          String(
+            rows[0].product_category_name
+            ?? "",
+          ).trim(),
+        ]
+          .filter(
+            Boolean,
+          )
+          .join(
+            " · ",
+          )
+          || "1 Eintrag ausgewählt";
 
 
   return (
@@ -398,56 +688,67 @@ export default function AssetDetailPanel({
       <div className="details-content">
 
         <h2>
-          {rows.length} Einträge ausgewählt
+          {title}
         </h2>
 
-
         <p>
-          Gemeinsame Werte werden angezeigt.
+          {hint}
         </p>
+
+
+        <DetailRows
+          rows={
+            generalRows
+          }
+        />
 
 
         <div className="detail-card">
 
           <h3>
-            Allgemein
+            Spezifikationen
           </h3>
 
 
           {
-            commonFields.length === 0
+            specificationRows.length > 0
               ? (
-                <div className="detail-info">
-                  Keine gemeinsamen Werte vorhanden.
-                </div>
-              )
-              : commonFields.map(
-                  (entry) => (
+                specificationRows.map(
+                  (row) => (
                     <div
                       className="detail-row"
-                      key={entry.field}
+                      key={
+                        row.field
+                      }
                     >
 
                       <span>
-                        {
-                          getHeaderLabel(
-                            entry.field,
-                          )
-                        }
+                        {row.label}
                       </span>
 
                       <strong>
-                        {
-                          formatValue(
-                            entry.field,
-                            entry.value,
-                          )
-                        }
+                        {row.value}
                       </strong>
 
                     </div>
                   ),
                 )
+              )
+              : (
+                <div className="detail-info">
+                  {
+                    multiple
+                      ? (
+                        "Keine identischen Spezifikationswerte "
+                        + "bei allen ausgewählten Einträgen vorhanden."
+                      )
+                      : (
+                        "Für diese Produktkategorie ist noch kein "
+                        + "Spezifikationsschema definiert."
+                      )
+                  }
+                </div>
+              )
           }
 
         </div>

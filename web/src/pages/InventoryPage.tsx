@@ -1,9 +1,15 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+} from "react";
+
+import type {
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
 } from "react";
 
 import {
@@ -119,6 +125,26 @@ type InventoryPageProps = {
   email: string;
 
   onLogout: () => void;
+};
+
+
+type DockPanelKind =
+  "navigation"
+  | "detail";
+
+
+type DockDropTarget =
+  "left-edge"
+  | "right-edge"
+  | "before-navigation"
+  | "after-navigation"
+  | "before-detail"
+  | "after-detail";
+
+
+type DockDragState = {
+  panel: DockPanelKind;
+  target: DockDropTarget | null;
 };
 
 
@@ -368,6 +394,29 @@ export default function InventoryPage({
 
 
   const [
+    dockOrder,
+    setDockOrder,
+  ] = useState<DockPanelKind[]>([
+    "navigation",
+    "detail",
+  ]);
+
+
+  const [
+    aboutOpen,
+    setAboutOpen,
+  ] = useState(false);
+
+
+  const [
+    dockDrag,
+    setDockDrag,
+  ] = useState<DockDragState | null>(
+    null,
+  );
+
+
+  const [
     transferBusy,
     setTransferBusy,
   ] = useState(false);
@@ -375,6 +424,35 @@ export default function InventoryPage({
 
   const csvFileInputRef =
     useRef<HTMLInputElement | null>(
+      null,
+    );
+
+
+  const workspaceRef =
+    useRef<HTMLDivElement | null>(
+      null,
+    );
+
+
+  const dockShellRefs =
+    useRef<
+      Record<
+        DockPanelKind,
+        HTMLDivElement | null
+      >
+    >({
+      navigation: null,
+      detail: null,
+    });
+
+
+  const dockPointerRef =
+    useRef<{
+      panel: DockPanelKind;
+      startX: number;
+      startY: number;
+      dragging: boolean;
+    } | null>(
       null,
     );
 
@@ -655,6 +733,522 @@ export default function InventoryPage({
     },
     [
       loadData,
+    ],
+  );
+
+
+  useEffect(
+    () => {
+      if (!aboutOpen) {
+        return;
+      }
+
+      function closeAboutWithEscape(
+        event: KeyboardEvent,
+      ): void {
+        if (
+          event.key === "Escape"
+        ) {
+          setAboutOpen(
+            false,
+          );
+        }
+      }
+
+      window.addEventListener(
+        "keydown",
+        closeAboutWithEscape,
+      );
+
+      return () => {
+        window.removeEventListener(
+          "keydown",
+          closeAboutWithEscape,
+        );
+      };
+    },
+    [
+      aboutOpen,
+    ],
+  );
+
+
+  useEffect(
+    () => {
+      function panelPosition(
+        panel: DockPanelKind,
+      ): DockPosition {
+        return (
+          panel === "navigation"
+            ? navigationPosition
+            : detailPosition
+        );
+      }
+
+
+      function dockTargetAt(
+        clientX: number,
+        clientY: number,
+        draggedPanel: DockPanelKind,
+      ): DockDropTarget | null {
+        const workspace =
+          workspaceRef.current;
+
+        if (!workspace) {
+          return null;
+        }
+
+        const otherPanel: DockPanelKind =
+          draggedPanel === "navigation"
+            ? "detail"
+            : "navigation";
+
+        const otherElement =
+          dockShellRefs.current[
+            otherPanel
+          ];
+
+
+        // Befindet sich die Maus über der anderen Sidebar,
+        // entscheidet deren linke/rechte Hälfte, ob davor
+        // oder danach angedockt wird.
+        if (otherElement) {
+          const otherRect =
+            otherElement.getBoundingClientRect();
+
+          if (
+            clientX >= otherRect.left
+            && clientX <= otherRect.right
+            && clientY >= otherRect.top
+            && clientY <= otherRect.bottom
+          ) {
+            const before =
+              clientX
+              < (
+                otherRect.left
+                + otherRect.width / 2
+              );
+
+            return (
+              before
+                ? (
+                  otherPanel === "navigation"
+                    ? "before-navigation"
+                    : "before-detail"
+                )
+                : (
+                  otherPanel === "navigation"
+                    ? "after-navigation"
+                    : "after-detail"
+                )
+            );
+          }
+        }
+
+
+        const rect =
+          workspace.getBoundingClientRect();
+
+        const edgeZone =
+          Math.min(
+            190,
+            Math.max(
+              110,
+              rect.width * 0.18,
+            ),
+          );
+
+        if (
+          clientX
+          >= rect.left
+          && clientX
+          <= rect.left + edgeZone
+        ) {
+          return "left-edge";
+        }
+
+        if (
+          clientX
+          <= rect.right
+          && clientX
+          >= rect.right - edgeZone
+        ) {
+          return "right-edge";
+        }
+
+        return null;
+      }
+
+
+      function setPanelPosition(
+        panel: DockPanelKind,
+        position: DockPosition,
+      ): void {
+        if (
+          panel === "navigation"
+        ) {
+          setNavigationPosition(
+            position,
+          );
+
+          setNavigationVisible(
+            true,
+          );
+
+          return;
+        }
+
+        setDetailPosition(
+          position,
+        );
+
+        setDetailVisible(
+          true,
+        );
+      }
+
+
+      function insertBefore(
+        panel: DockPanelKind,
+        reference: DockPanelKind,
+      ): void {
+        setDockOrder(
+          (current) => {
+            const next =
+              current.filter(
+                (item) =>
+                  item !== panel,
+              );
+
+            const index =
+              next.indexOf(
+                reference,
+              );
+
+            if (
+              index < 0
+            ) {
+              return [
+                panel,
+                ...next,
+              ];
+            }
+
+            next.splice(
+              index,
+              0,
+              panel,
+            );
+
+            return next;
+          },
+        );
+      }
+
+
+      function insertAfter(
+        panel: DockPanelKind,
+        reference: DockPanelKind,
+      ): void {
+        setDockOrder(
+          (current) => {
+            const next =
+              current.filter(
+                (item) =>
+                  item !== panel,
+              );
+
+            const index =
+              next.indexOf(
+                reference,
+              );
+
+            if (
+              index < 0
+            ) {
+              return [
+                ...next,
+                panel,
+              ];
+            }
+
+            next.splice(
+              index + 1,
+              0,
+              panel,
+            );
+
+            return next;
+          },
+        );
+      }
+
+
+      function applyDockTarget(
+        panel: DockPanelKind,
+        target: DockDropTarget,
+      ): void {
+        if (
+          target === "left-edge"
+        ) {
+          setPanelPosition(
+            panel,
+            "left",
+          );
+
+          setDockOrder(
+            (current) => [
+              panel,
+              ...current.filter(
+                (item) =>
+                  item !== panel,
+              ),
+            ],
+          );
+
+          setStatus(
+            panel === "navigation"
+              ? "Navigation ganz links angedockt."
+              : "Detailansicht ganz links angedockt.",
+          );
+
+          return;
+        }
+
+
+        if (
+          target === "right-edge"
+        ) {
+          setPanelPosition(
+            panel,
+            "right",
+          );
+
+          setDockOrder(
+            (current) => [
+              ...current.filter(
+                (item) =>
+                  item !== panel,
+              ),
+              panel,
+            ],
+          );
+
+          setStatus(
+            panel === "navigation"
+              ? "Navigation ganz rechts angedockt."
+              : "Detailansicht ganz rechts angedockt.",
+          );
+
+          return;
+        }
+
+
+        const reference: DockPanelKind =
+          (
+            target.endsWith(
+              "navigation",
+            )
+              ? "navigation"
+              : "detail"
+          );
+
+        const targetPosition =
+          panelPosition(
+            reference,
+          );
+
+        setPanelPosition(
+          panel,
+          targetPosition,
+        );
+
+
+        if (
+          target.startsWith(
+            "before-",
+          )
+        ) {
+          insertBefore(
+            panel,
+            reference,
+          );
+
+          setStatus(
+            panel === "navigation"
+              ? (
+                reference === "detail"
+                  ? "Navigation vor der Detailansicht angedockt."
+                  : "Navigation neu angeordnet."
+              )
+              : (
+                reference === "navigation"
+                  ? "Detailansicht vor der Navigation angedockt."
+                  : "Detailansicht neu angeordnet."
+              ),
+          );
+
+          return;
+        }
+
+
+        insertAfter(
+          panel,
+          reference,
+        );
+
+        setStatus(
+          panel === "navigation"
+            ? (
+              reference === "detail"
+                ? "Navigation hinter der Detailansicht angedockt."
+                : "Navigation neu angeordnet."
+            )
+            : (
+              reference === "navigation"
+                ? "Detailansicht hinter der Navigation angedockt."
+                : "Detailansicht neu angeordnet."
+            ),
+        );
+      }
+
+
+      function pointerMove(
+        event: PointerEvent,
+      ): void {
+        const pending =
+          dockPointerRef.current;
+
+        if (!pending) {
+          return;
+        }
+
+        if (!pending.dragging) {
+          const distance =
+            Math.abs(
+              event.clientX
+              - pending.startX,
+            )
+            + Math.abs(
+              event.clientY
+              - pending.startY,
+            );
+
+          if (
+            distance < 7
+          ) {
+            return;
+          }
+
+          pending.dragging =
+            true;
+
+          document.body.classList.add(
+            "dock-panel-dragging",
+          );
+        }
+
+        event.preventDefault();
+
+        setDockDrag({
+          panel:
+            pending.panel,
+          target:
+            dockTargetAt(
+              event.clientX,
+              event.clientY,
+              pending.panel,
+            ),
+        });
+      }
+
+
+      function finishDockDrag(): void {
+        const pending =
+          dockPointerRef.current;
+
+        if (!pending) {
+          return;
+        }
+
+        dockPointerRef.current =
+          null;
+
+        document.body.classList.remove(
+          "dock-panel-dragging",
+        );
+
+        setDockDrag(
+          (current) => {
+            if (
+              pending.dragging
+              && current?.target
+            ) {
+              applyDockTarget(
+                pending.panel,
+                current.target,
+              );
+            }
+
+            return null;
+          },
+        );
+      }
+
+
+      window.addEventListener(
+        "pointermove",
+        pointerMove,
+        {
+          passive: false,
+        },
+      );
+
+      window.addEventListener(
+        "pointerup",
+        finishDockDrag,
+      );
+
+      window.addEventListener(
+        "pointercancel",
+        finishDockDrag,
+      );
+
+      window.addEventListener(
+        "blur",
+        finishDockDrag,
+      );
+
+
+      return () => {
+        window.removeEventListener(
+          "pointermove",
+          pointerMove,
+        );
+
+        window.removeEventListener(
+          "pointerup",
+          finishDockDrag,
+        );
+
+        window.removeEventListener(
+          "pointercancel",
+          finishDockDrag,
+        );
+
+        window.removeEventListener(
+          "blur",
+          finishDockDrag,
+        );
+
+        document.body.classList.remove(
+          "dock-panel-dragging",
+        );
+      };
+    },
+    [
+      detailPosition,
+      navigationPosition,
     ],
   );
 
@@ -1780,6 +2374,172 @@ export default function InventoryPage({
   }
 
 
+  function dockPanelAtEdge(
+    panel: DockPanelKind,
+    position: DockPosition,
+  ): void {
+    if (
+      panel === "navigation"
+    ) {
+      setNavigationPosition(
+        position,
+      );
+
+      setNavigationVisible(
+        true,
+      );
+    } else {
+      setDetailPosition(
+        position,
+      );
+
+      setDetailVisible(
+        true,
+      );
+    }
+
+
+    setDockOrder(
+      (current) => {
+        const next =
+          current.filter(
+            (item) =>
+              item !== panel,
+          );
+
+        return (
+          position === "left"
+            ? [
+              panel,
+              ...next,
+            ]
+            : [
+              ...next,
+              panel,
+            ]
+        );
+      },
+    );
+  }
+
+
+  function panelPosition(
+    panel: DockPanelKind,
+  ): DockPosition {
+    return (
+      panel === "navigation"
+        ? navigationPosition
+        : detailPosition
+    );
+  }
+
+
+  function panelContent(
+    panel: DockPanelKind,
+  ): ReactNode {
+    return (
+      panel === "navigation"
+        ? navigationPanel
+        : detailPanel
+    );
+  }
+
+
+  function beginDockPointer(
+    panel: DockPanelKind,
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
+    if (
+      event.button !== 0
+      || !event.isPrimary
+    ) {
+      return;
+    }
+
+    const target =
+      event.target as HTMLElement;
+
+    if (
+      !target.closest(
+        ".dock-title",
+      )
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+
+    dockPointerRef.current = {
+      panel,
+      startX:
+        event.clientX,
+      startY:
+        event.clientY,
+      dragging:
+        false,
+    };
+  }
+
+
+  function dockShell(
+    panel: DockPanelKind,
+    content: ReactNode,
+  ): ReactNode {
+    if (!content) {
+      return null;
+    }
+
+    const dragging =
+      dockDrag?.panel
+      === panel;
+
+    return (
+      <div
+        ref={(element) => {
+          dockShellRefs.current[
+            panel
+          ] = element;
+        }}
+        data-dock-panel={
+          panel
+        }
+        className={[
+          "dock-shell",
+          panel
+            === "navigation"
+            ? "dock-navigation-shell"
+            : "dock-detail-shell",
+          dragging
+            ? "dock-shell-dragging"
+            : "",
+          dockDrag?.target
+            === `before-${panel}`
+            ? "dock-shell-drop-before"
+            : "",
+          dockDrag?.target
+            === `after-${panel}`
+            ? "dock-shell-drop-after"
+            : "",
+        ]
+          .filter(
+            Boolean,
+          )
+          .join(
+            " ",
+          )}
+        onPointerDown={(event) =>
+          beginDockPointer(
+            panel,
+            event,
+          )
+        }
+      >
+        {content}
+      </div>
+    );
+  }
+
+
   async function logout(): Promise<void> {
     try {
       await fetch(
@@ -1914,8 +2674,8 @@ export default function InventoryPage({
           )
         }
         onAbout={() =>
-          navigate(
-            "/about",
+          setAboutOpen(
+            true,
           )
         }
         onLogout={() =>
@@ -1930,11 +2690,17 @@ export default function InventoryPage({
         onDetailVisible={
           setDetailVisible
         }
-        onNavigationPosition={
-          setNavigationPosition
+        onNavigationPosition={(position) =>
+          dockPanelAtEdge(
+            "navigation",
+            position,
+          )
         }
-        onDetailPosition={
-          setDetailPosition
+        onDetailPosition={(position) =>
+          dockPanelAtEdge(
+            "detail",
+            position,
+          )
         }
         onColumnVisible={
           setColumnVisible
@@ -1948,17 +2714,81 @@ export default function InventoryPage({
       />
 
 
-      <div className="workspace">
+      <div
+        className="workspace"
+        ref={workspaceRef}
+      >
 
         {
-          navigationPosition === "left"
-          && navigationPanel
+          dockDrag
+          && (
+            <>
+              <div
+                className={[
+                  "dock-drop-zone",
+                  "dock-drop-zone-left",
+                  dockDrag.target === "left-edge"
+                    ? "active"
+                    : "",
+                ]
+                  .filter(
+                    Boolean,
+                  )
+                  .join(
+                    " ",
+                  )}
+              >
+                Ganz links andocken
+              </div>
+
+              <div
+                className={[
+                  "dock-drop-zone",
+                  "dock-drop-zone-right",
+                  dockDrag.target === "right-edge"
+                    ? "active"
+                    : "",
+                ]
+                  .filter(
+                    Boolean,
+                  )
+                  .join(
+                    " ",
+                  )}
+              >
+                Ganz rechts andocken
+              </div>
+            </>
+          )
         }
 
 
         {
-          detailPosition === "left"
-          && detailPanel
+          dockOrder
+            .filter(
+              (panel) =>
+                panelPosition(
+                  panel,
+                ) === "left",
+            )
+            .map(
+              (panel) => (
+                <Fragment
+                  key={
+                    `left-${panel}`
+                  }
+                >
+                  {
+                    dockShell(
+                      panel,
+                      panelContent(
+                        panel,
+                      ),
+                    )
+                  }
+                </Fragment>
+              ),
+            )
         }
 
 
@@ -1983,6 +2813,12 @@ export default function InventoryPage({
             columns={
               displayedColumns
             }
+            allColumns={
+              availableColumns
+            }
+            visibleColumns={
+              visibleColumns
+            }
             selectedKeys={
               selectedKeys
             }
@@ -2004,23 +2840,141 @@ export default function InventoryPage({
             onMoveColumn={
               moveColumn
             }
+            onColumnVisible={
+              setColumnVisible
+            }
+            onShowAllColumns={
+              showAllColumns
+            }
+            onResetColumns={
+              resetColumns
+            }
           />
 
         </main>
 
 
         {
-          detailPosition === "right"
-          && detailPanel
-        }
-
-
-        {
-          navigationPosition === "right"
-          && navigationPanel
+          dockOrder
+            .filter(
+              (panel) =>
+                panelPosition(
+                  panel,
+                ) === "right",
+            )
+            .map(
+              (panel) => (
+                <Fragment
+                  key={
+                    `right-${panel}`
+                  }
+                >
+                  {
+                    dockShell(
+                      panel,
+                      panelContent(
+                        panel,
+                      ),
+                    )
+                  }
+                </Fragment>
+              ),
+            )
         }
 
       </div>
+
+
+      {
+        aboutOpen
+        && (
+          <div
+            className="about-overlay"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (
+                event.target
+                === event.currentTarget
+              ) {
+                setAboutOpen(
+                  false,
+                );
+              }
+            }}
+          >
+
+            <div
+              className="about-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="about-dialog-title"
+            >
+
+              <button
+                type="button"
+                className="about-close-button"
+                aria-label="Über-Fenster schliessen"
+                title="Schliessen"
+                onClick={() =>
+                  setAboutOpen(
+                    false,
+                  )
+                }
+              >
+                ×
+              </button>
+
+
+              <div className="about-icon">
+                i
+              </div>
+
+
+              <div className="about-dialog-content">
+
+                <h2
+                  id="about-dialog-title"
+                >
+                  ITAssetFlow
+                </h2>
+
+                <p>
+                  Inventarverwaltung für IT-Materialien.
+                </p>
+
+                <p>
+                  Datenbank und Authentifizierung über Supabase.
+                </p>
+
+                <p className="about-company">
+                  DLC-Informatik GmbH
+                </p>
+
+              </div>
+
+
+              <div className="about-dialog-actions">
+
+                <button
+                  type="button"
+                  className="primary-button"
+                  autoFocus
+                  onClick={() =>
+                    setAboutOpen(
+                      false,
+                    )
+                  }
+                >
+                  OK
+                </button>
+
+              </div>
+
+            </div>
+
+          </div>
+        )
+      }
 
 
       <div className="status-bar">
