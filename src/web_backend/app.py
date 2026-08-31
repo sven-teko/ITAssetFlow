@@ -15,7 +15,9 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from dotenv import load_dotenv
 from supabase import Client
 
 from config import get_app_config
@@ -49,15 +51,93 @@ app = FastAPI(
 
 
 # =========================================================
+# React-Produktionsbuild
+# =========================================================
+
+PROJECT_ROOT = Path(
+    __file__
+).resolve().parents[2]
+
+# .env muss bereits vor der CORS- und Cookie-Konfiguration
+# geladen werden. get_app_config() wird erst später innerhalb
+# der API-Routen aufgerufen und wäre dafür zu spät.
+load_dotenv(
+    PROJECT_ROOT / ".env",
+    override=False,
+)
+
+WEB_DIST_DIR = (
+    PROJECT_ROOT
+    / "web"
+    / "dist"
+)
+
+WEB_INDEX_FILE = (
+    WEB_DIST_DIR
+    / "index.html"
+)
+
+WEB_ASSETS_DIR = (
+    WEB_DIST_DIR
+    / "assets"
+)
+
+
+# =========================================================
 # CORS
 # =========================================================
 
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://itassetflow.firma.local",
+]
+
+configured_cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "ITASSETFLOW_CORS_ORIGINS",
+        "",
+    ).split(",")
+    if origin.strip()
+]
+
+ALLOWED_CORS_ORIGINS = list(
+    dict.fromkeys(
+        [
+            *DEFAULT_CORS_ORIGINS,
+            *configured_cors_origins,
+        ]
+    )
+)
+
+# Zusätzlich dürfen bei Bedarf Ports am internen Hostnamen vorkommen.
+# Der Browser-Origin der IIS-Seite ist normalerweise
+# http://itassetflow.firma.local, aber diese Regex macht lokale
+# Testvarianten wie :80 oder :8080 ebenfalls unproblematisch.
+CORS_ORIGIN_REGEX = os.getenv(
+    "ITASSETFLOW_CORS_ORIGIN_REGEX",
+    r"^https?://itassetflow\.firma\.local(?::\d+)?$",
+).strip()
+
+print(
+    "ITAssetFlow CORS origins:",
+    ", ".join(
+        ALLOWED_CORS_ORIGINS
+    ),
+)
+print(
+    "ITAssetFlow CORS regex:",
+    CORS_ORIGIN_REGEX,
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=ALLOWED_CORS_ORIGINS,
+    allow_origin_regex=(
+        CORS_ORIGIN_REGEX
+        or None
+    ),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -401,13 +481,6 @@ def get_web_session(
 # =========================================================
 # Allgemein
 # =========================================================
-
-@app.get("/")
-def root() -> dict[str, str]:
-    return {
-        "message": "ITAssetFlow Web API läuft.",
-    }
-
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
@@ -911,4 +984,148 @@ app.include_router(
         get_web_session
     )
 )
+# =========================================================
+# React-WebApp / SPA
+# =========================================================
 
+WEB_MEDIA_TYPES: dict[str, str] = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript",
+    ".mjs": "application/javascript",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".wasm": "application/wasm",
+}
+
+
+def _web_file_response(
+    path: Path,
+) -> FileResponse:
+    media_type = WEB_MEDIA_TYPES.get(
+        path.suffix.casefold()
+    )
+
+    return FileResponse(
+        path,
+        media_type=media_type,
+    )
+
+
+def _require_web_build() -> None:
+    if not WEB_INDEX_FILE.is_file():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Der React-Produktionsbuild wurde nicht gefunden. "
+                "Bitte im Ordner 'web' zuerst "
+                "'npm run build' ausführen."
+            ),
+        )
+
+
+def _safe_dist_file(
+    relative_path: str,
+) -> Path | None:
+    try:
+        dist_root = (
+            WEB_DIST_DIR.resolve()
+        )
+
+        candidate = (
+            WEB_DIST_DIR
+            / relative_path
+        ).resolve()
+
+        candidate.relative_to(
+            dist_root
+        )
+
+    except (
+        OSError,
+        ValueError,
+    ):
+        return None
+
+    if candidate.is_file():
+        return candidate
+
+    return None
+
+
+@app.get(
+    "/",
+    include_in_schema=False,
+)
+def web_root() -> FileResponse:
+    _require_web_build()
+
+    return _web_file_response(
+        WEB_INDEX_FILE
+    )
+
+
+@app.get(
+    "/{full_path:path}",
+    include_in_schema=False,
+)
+def web_spa(
+    full_path: str,
+) -> FileResponse:
+    _require_web_build()
+
+    normalized_path = str(
+        full_path or ""
+    ).lstrip("/")
+
+    # Nicht vorhandene API-Routen dürfen niemals auf index.html
+    # fallen, sonst würde ein API-Fehler wie eine HTML-Seite aussehen.
+    if (
+        normalized_path == "api"
+        or normalized_path.startswith(
+            "api/"
+        )
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="API-Endpunkt nicht gefunden.",
+        )
+
+    static_file = _safe_dist_file(
+        normalized_path
+    )
+
+    if static_file is not None:
+        return _web_file_response(
+            static_file
+        )
+
+    # Requests auf konkrete Dateien wie .png/.css/.js nicht auf
+    # React zurückfallen lassen, wenn die Datei nicht existiert.
+    if Path(
+        normalized_path
+    ).suffix:
+        raise HTTPException(
+            status_code=404,
+            detail="Datei nicht gefunden.",
+        )
+
+    # React Router übernimmt Client-Routen wie:
+    # /login
+    # /inventory
+    # /inventory/new
+    # /inventory/<key>/edit
+    # /settings
+    return _web_file_response(
+        WEB_INDEX_FILE
+    )

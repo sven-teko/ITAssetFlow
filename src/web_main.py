@@ -18,8 +18,8 @@ REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 
 BACKEND_HOST = os.getenv(
     "ITASSETFLOW_WEB_HOST",
-    "127.0.0.1",
-).strip() or "127.0.0.1"
+    "0.0.0.0",
+).strip() or "0.0.0.0"
 
 BACKEND_PORT = int(
     os.getenv(
