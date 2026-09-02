@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +18,7 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from supabase import Client
@@ -170,6 +173,146 @@ MAX_CSV_IMPORT_BYTES = 50 * 1024 * 1024
 
 
 # =========================================================
+# Ereignisgesteuerte Multiuser-Synchronisation
+# =========================================================
+
+class InventoryChangeBroker:
+    """Verteilt kleine Änderungsereignisse an verbundene Webclients.
+
+    Der Broker hält keine Inventardaten im Speicher. Er signalisiert lediglich,
+    dass sich der zentrale Datenbestand geändert hat. Die betroffenen Browser
+    laden daraufhin den aktuellen Stand über die bereits authentifizierte
+    Inventar-API neu.
+
+    Die Queues sind bewusst klein. Falls in kurzer Zeit mehrere Änderungen
+    erfolgen, wird nur das neueste Ereignis benötigt, weil der Client danach
+    ohnehin den aktuellen Gesamtstand lädt.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._revision = 0
+        self._subscribers: dict[
+            int,
+            tuple[
+                str,
+                asyncio.AbstractEventLoop,
+                asyncio.Queue[str],
+            ],
+        ] = {}
+
+    def subscribe(
+        self,
+        client_id: str,
+    ) -> tuple[int, asyncio.Queue[str], int]:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[str] = asyncio.Queue(
+            maxsize=4,
+        )
+        token = id(queue)
+
+        with self._lock:
+            self._subscribers[token] = (
+                client_id,
+                loop,
+                queue,
+            )
+            revision = self._revision
+
+        return token, queue, revision
+
+    def unsubscribe(
+        self,
+        token: int,
+    ) -> None:
+        with self._lock:
+            self._subscribers.pop(
+                token,
+                None,
+            )
+
+    @staticmethod
+    def _enqueue_latest(
+        queue: asyncio.Queue[str],
+        event: str,
+    ) -> None:
+        while queue.full():
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+        try:
+            queue.put_nowait(
+                event
+            )
+        except asyncio.QueueFull:
+            # Falls zwischen Prüfung und Einfügen doch wieder gefüllt wurde,
+            # genügt das bereits wartende Änderungsereignis.
+            pass
+
+    def publish(
+        self,
+        source_client_id: str | None = None,
+    ) -> None:
+        normalized_source = str(
+            source_client_id
+            or ""
+        ).strip()
+
+        with self._lock:
+            self._revision += 1
+            revision = self._revision
+
+            subscribers = list(
+                self._subscribers.values()
+            )
+
+        data = json.dumps(
+            {
+                "revision": revision,
+            },
+            separators=(",", ":"),
+        )
+
+        event = (
+            f"id: {revision}\n"
+            "event: inventory-changed\n"
+            f"data: {data}\n\n"
+        )
+
+        for (
+            client_id,
+            loop,
+            queue,
+        ) in subscribers:
+            if (
+                normalized_source
+                and client_id
+                and client_id
+                == normalized_source
+            ):
+                # Der auslösende Client lädt nach seiner eigenen Änderung
+                # bereits gezielt neu. Dadurch vermeiden wir eine doppelte
+                # Datenbankabfrage auf diesem Browser.
+                continue
+
+            try:
+                loop.call_soon_threadsafe(
+                    self._enqueue_latest,
+                    queue,
+                    event,
+                )
+            except RuntimeError:
+                # Event-Loop wurde bereits beendet. Der Subscriber wird beim
+                # Schliessen der Streaming-Verbindung entfernt.
+                continue
+
+
+INVENTORY_CHANGES = InventoryChangeBroker()
+
+
+# =========================================================
 # Modelle
 # =========================================================
 
@@ -198,6 +341,26 @@ def _normalize_text(
     return str(
         value or ""
     ).strip().casefold()
+
+
+
+def _request_client_id(
+    request: Request,
+) -> str | None:
+    value = str(
+        request.headers.get(
+            "X-ITAssetFlow-Client-ID",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not value:
+        return None
+
+    # Begrenzung verhindert, dass beliebig grosse Headerwerte im Broker
+    # gespeichert oder weiterverarbeitet werden.
+    return value[:128]
 
 
 def _inventory_row_key(
@@ -625,6 +788,85 @@ def inventory(
     ]
 
 
+@app.get(
+    "/api/inventory/events",
+    include_in_schema=False,
+)
+async def inventory_events(
+    request: Request,
+    client_id: str = "",
+    web_session: WebSession = Depends(
+        get_web_session
+    ),
+) -> StreamingResponse:
+    # Die Dependency dient der Authentifizierung. Die eigentliche
+    # Streaming-Verbindung benötigt danach keinen direkten Supabase-Zugriff.
+    del web_session
+
+    normalized_client_id = str(
+        client_id
+        or ""
+    ).strip()[:128]
+
+    async def event_stream():
+        (
+            token,
+            queue,
+            revision,
+        ) = INVENTORY_CHANGES.subscribe(
+            normalized_client_id
+        )
+
+        ready_data = json.dumps(
+            {
+                "revision": revision,
+            },
+            separators=(",", ":"),
+        )
+
+        try:
+            # "ready" bestätigt nur die Verbindung. Der Client führt dadurch
+            # keinen zusätzlichen Reload beim normalen Seitenstart aus.
+            yield (
+                "event: ready\n"
+                f"data: {ready_data}\n\n"
+            )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=20.0,
+                    )
+
+                except asyncio.TimeoutError:
+                    # Ein Kommentar hält die HTTP-Verbindung durch Proxies,
+                    # Firewalls und Browser hinweg aktiv, ohne Datenbankarbeit
+                    # auszulösen.
+                    yield ": keep-alive\n\n"
+                    continue
+
+                yield event
+
+        finally:
+            INVENTORY_CHANGES.unsubscribe(
+                token
+            )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # =========================================================
 # Formular-Stammdaten
 # =========================================================
@@ -690,6 +932,7 @@ def inventory_edit_form_data(
 
 @app.post("/api/inventory")
 def create_inventory_entry(
+    request: Request,
     payload: dict[str, Any],
     web_session: WebSession = Depends(
         get_web_session
@@ -700,9 +943,17 @@ def create_inventory_entry(
     )
 
     try:
-        return repository.create_inventory_entry(
+        result = repository.create_inventory_entry(
             payload
         )
+
+        INVENTORY_CHANGES.publish(
+            _request_client_id(
+                request
+            )
+        )
+
+        return result
 
     except Exception as error:
         raise _repository_http_exception(
@@ -712,6 +963,7 @@ def create_inventory_entry(
 
 @app.put("/api/inventory")
 def update_inventory_entry(
+    request: Request,
     payload: dict[str, Any],
     web_session: WebSession = Depends(
         get_web_session
@@ -722,9 +974,17 @@ def update_inventory_entry(
     )
 
     try:
-        return repository.update_inventory_entry(
+        result = repository.update_inventory_entry(
             payload
         )
+
+        INVENTORY_CHANGES.publish(
+            _request_client_id(
+                request
+            )
+        )
+
+        return result
 
     except Exception as error:
         raise _repository_http_exception(
@@ -734,6 +994,7 @@ def update_inventory_entry(
 
 @app.post("/api/inventory/delete")
 def delete_inventory_entries(
+    request: Request,
     payload: DeleteInventoryPayload,
     web_session: WebSession = Depends(
         get_web_session
@@ -798,9 +1059,17 @@ def delete_inventory_entries(
                 "Bitte die Tabelle aktualisieren."
             )
 
-        return repository.delete_inventory_entries(
+        result = repository.delete_inventory_entries(
             selected
         )
+
+        INVENTORY_CHANGES.publish(
+            _request_client_id(
+                request
+            )
+        )
+
+        return result
 
     except Exception as error:
         raise _repository_http_exception(
@@ -924,9 +1193,17 @@ async def import_csv(
                 handle.name
             )
 
-        return service.import_csv(
+        result = service.import_csv(
             temporary_path
         )
+
+        INVENTORY_CHANGES.publish(
+            _request_client_id(
+                request
+            )
+        )
+
+        return result
 
     except Exception as error:
         raise _repository_http_exception(
@@ -981,7 +1258,8 @@ def inventory_meta(
 
 app.include_router(
     create_settings_router(
-        get_web_session
+        get_web_session,
+        INVENTORY_CHANGES.publish,
     )
 )
 # =========================================================

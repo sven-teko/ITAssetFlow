@@ -22,7 +22,7 @@ type InventoryPageProps = {
 
 export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
   const navigate = useNavigate();
-  const [status, setStatus] = useState("Inventardaten werden geladen ...");
+  const [, setStatus] = useState("Inventardaten werden geladen ...");
   const [aboutOpen, setAboutOpen] = useState(false);
 
   const handleUnauthorized = useCallback((): void => {
@@ -239,8 +239,7 @@ export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       <div className="status-bar">
-        <span>{status}</span>
-        <div className="status-user">Angemeldet: {email}</div>
+        <span>{view.countText}</span>
       </div>
     </div>
   );

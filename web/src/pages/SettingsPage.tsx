@@ -487,6 +487,14 @@ export default function SettingsPage({
   const counter =
     useRef(0);
 
+  const afterSaveRef =
+    useRef(false);
+
+  const [
+    reloadSequence,
+    setReloadSequence,
+  ] = useState(0);
+
   const [
     activeTab,
     setActiveTab,
@@ -744,10 +752,13 @@ export default function SettingsPage({
 
       async function load(): Promise<void> {
         setLoading(true);
-        showMessage(
-          "Einstellungen werden geladen ...",
-          "info",
-        );
+
+        if (!afterSaveRef.current) {
+          showMessage(
+            "Einstellungen werden geladen ...",
+            "info",
+          );
+        }
 
         try {
           const response = await fetch(
@@ -958,10 +969,18 @@ export default function SettingsPage({
             ?? "",
           );
 
-          showMessage(
-            "Einstellungen bereit. Zeile anklicken zum Auswählen, doppelklicken zum Bearbeiten.",
-            "success",
-          );
+          if (afterSaveRef.current) {
+            showMessage(
+              "Einstellungen erfolgreich gespeichert.",
+              "success",
+            );
+            afterSaveRef.current = false;
+          } else {
+            showMessage(
+              "Einstellungen bereit.",
+              "success",
+            );
+          }
 
         } catch (error) {
           if (!cancelled) {
@@ -990,6 +1009,7 @@ export default function SettingsPage({
       email,
       navigate,
       onSessionExpired,
+      reloadSequence,
     ],
   );
 
@@ -2054,25 +2074,20 @@ export default function SettingsPage({
         ),
       );
 
-      showMessage(
-        "Einstellungen erfolgreich gespeichert. Rückkehr zum Inventar ...",
-        "success",
+      setDeleted(
+        emptyDeleted(),
+      );
+      setEditingRows(
+        new Set(),
+      );
+      setEditingSpecIndex(
+        null,
       );
 
-      await new Promise<void>(
-        (resolve) => {
-          window.setTimeout(
-            resolve,
-            650,
-          );
-        },
-      );
-
-      navigate(
-        "/inventory",
-        {
-          replace: true,
-        },
+      afterSaveRef.current = true;
+      setReloadSequence(
+        (current) =>
+          current + 1,
       );
 
     } catch (error) {
@@ -2693,18 +2708,6 @@ export default function SettingsPage({
             </button>
           ))}
         </nav>
-
-        <div className="settings-interaction-hint">
-          <span>
-            <strong>Bedienung:</strong> Zeile anklicken = auswählen · Doppelklick = bearbeiten · Änderungen werden erst mit „Übernehmen“ gespeichert.
-          </span>
-
-          {(editingRows.size > 0 || editingSpecIndex !== null) && (
-            <span className="settings-editing-badge">
-              Bearbeitungsmodus aktiv
-            </span>
-          )}
-        </div>
 
         <main className="settings-content">
           {activeTab === "structure" && renderStructure()}

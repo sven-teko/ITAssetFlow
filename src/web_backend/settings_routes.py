@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from supabase import Client
 
 from inventory import (
@@ -725,6 +725,7 @@ class SettingsService:
 
 def create_settings_router(
     get_web_session: Callable[..., Any],
+    publish_inventory_change: Callable[[str | None], None] | None = None,
 ) -> APIRouter:
     """Erzeugt die Web-Routen für Datei > Einstellungen.
 
@@ -771,6 +772,7 @@ def create_settings_router(
 
     @router.put("")
     def save_settings(
+        request: Request,
         payload: dict[str, Any],
         web_session: Any = Depends(get_web_session),
     ) -> dict[str, bool]:
@@ -786,11 +788,28 @@ def create_settings_router(
         )
 
         try:
-            return SettingsService(
+            result = SettingsService(
                 web_session.client
             ).save(
                 database_payload
             )
+
+            if publish_inventory_change is not None:
+                source_client_id = str(
+                    request.headers.get(
+                        "X-ITAssetFlow-Client-ID",
+                        "",
+                    )
+                    or ""
+                ).strip()[:128]
+
+                publish_inventory_change(
+                    source_client_id
+                    or None
+                )
+
+            return result
+
         except ValueError as error:
             raise HTTPException(
                 status_code=400,

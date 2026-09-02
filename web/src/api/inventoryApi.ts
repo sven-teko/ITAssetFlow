@@ -9,6 +9,69 @@ const API_BASE =
   import.meta.env.VITE_API_BASE_URL
   ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
+
+const CLIENT_ID_STORAGE_KEY =
+  "itassetflow.web_client_id";
+
+function createClientId(): string {
+  if (
+    typeof crypto !== "undefined"
+    && typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return [
+    Date.now().toString(36),
+    Math.random().toString(36).slice(2),
+    Math.random().toString(36).slice(2),
+  ].join("-");
+}
+
+export function getInventoryClientId(): string {
+  try {
+    const existing =
+      sessionStorage.getItem(
+        CLIENT_ID_STORAGE_KEY,
+      );
+
+    if (existing?.trim()) {
+      return existing.trim();
+    }
+
+    const created =
+      createClientId();
+
+    sessionStorage.setItem(
+      CLIENT_ID_STORAGE_KEY,
+      created,
+    );
+
+    return created;
+
+  } catch {
+    // Fallback für Browsermodi, in denen sessionStorage deaktiviert ist.
+    return createClientId();
+  }
+}
+
+export function inventoryEventsUrl(): string {
+  return (
+    `${API_BASE}/api/inventory/events`
+    + `?client_id=${encodeURIComponent(getInventoryClientId())}`
+  );
+}
+
+function mutationHeaders(
+  headers: Record<string, string> = {},
+): Record<string, string> {
+  return {
+    ...headers,
+    "X-ITAssetFlow-Client-ID":
+      getInventoryClientId(),
+  };
+}
+
 export class UnauthorizedError extends Error {
   constructor() {
     super("Nicht angemeldet.");
@@ -97,9 +160,9 @@ export async function deleteInventoryEntries(
   const response = await fetch(`${API_BASE}/api/inventory/delete`, {
     method: "POST",
     credentials: "include",
-    headers: {
+    headers: mutationHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({ entry_keys: entryKeys }),
   });
 
@@ -119,9 +182,9 @@ export async function importInventoryCsv(file: File): Promise<CsvImportResult> {
   const response = await fetch(`${API_BASE}/api/transfer/import/csv`, {
     method: "POST",
     credentials: "include",
-    headers: {
+    headers: mutationHeaders({
       "Content-Type": "text/csv",
-    },
+    }),
     body: file,
   });
 

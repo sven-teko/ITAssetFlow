@@ -51,10 +51,18 @@ export default function AboutDialog({ open, onClose }: AboutDialogProps) {
           ×
         </button>
 
-        <div className="about-icon">i</div>
+        <div className="about-logo-wrap">
+          <img
+            className="about-logo"
+            src="/logo.png"
+            alt="ITAssetFlow"
+            draggable={false}
+          />
+        </div>
 
         <div className="about-dialog-content">
           <h2 id="about-dialog-title">ITAssetFlow</h2>
+          <p>Version 0.3.5</p>
           <p>Inventarverwaltung für IT-Materialien.</p>
           <p>Datenbank und Authentifizierung über Supabase.</p>
           <p className="about-company">DLC-Informatik GmbH</p>

@@ -407,9 +407,9 @@ function DetailRows({
                 {row.label}
               </span>
 
-              <strong>
+              <span className="detail-value">
                 {row.value}
-              </strong>
+              </span>
 
             </div>
           ),
@@ -726,9 +726,9 @@ export default function AssetDetailPanel({
                         {row.label}
                       </span>
 
-                      <strong>
+                      <span className="detail-value">
                         {row.value}
-                      </strong>
+                      </span>
 
                     </div>
                   ),
