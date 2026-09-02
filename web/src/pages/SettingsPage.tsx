@@ -61,6 +61,7 @@ type SettingsTab =
   | "categories"
   | "specifications"
   | "manufacturers"
+  | "permissions"
   | "columns";
 
 
@@ -135,12 +136,33 @@ type ManufacturerRow = {
 };
 
 
+type AppRole =
+  | "admin"
+  | "user"
+  | "viewer";
+
+
+type EmployeeRow = {
+  id: RowId;
+  client_key: string;
+  employee_number: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  department_ref: string | null;
+  is_active: boolean;
+  auth_user_id: string | null;
+  app_role: AppRole;
+};
+
+
 type SettingsResponse = {
   sites: Array<Record<string, unknown>>;
   departments: Array<Record<string, unknown>>;
   storage_locations: Array<Record<string, unknown>>;
   product_categories: Array<Record<string, unknown>>;
   manufacturers: Array<Record<string, unknown>>;
+  employees: Array<Record<string, unknown>>;
   column_order: string[];
   headers: Record<string, string>;
   factory_default_visible_columns: string[];
@@ -408,6 +430,7 @@ function normalizeResponse(
     storage_locations: rows("storage_locations"),
     product_categories: rows("product_categories"),
     manufacturers: rows("manufacturers"),
+    employees: rows("employees"),
     column_order: columnOrder,
     headers: isRecord(data.headers)
       ? Object.fromEntries(
@@ -550,6 +573,11 @@ export default function SettingsPage({
     manufacturers,
     setManufacturers,
   ] = useState<ManufacturerRow[]>([]);
+
+  const [
+    employees,
+    setEmployees,
+  ] = useState<EmployeeRow[]>([]);
 
   const [
     deleted,
@@ -916,6 +944,61 @@ export default function SettingsPage({
               }),
             );
 
+          const normalizedEmployees =
+            normalized.employees.map(
+              (row): EmployeeRow => {
+                const rawRole =
+                  text(
+                    row.app_role,
+                  ).toLocaleLowerCase();
+
+                const appRole: AppRole =
+                  rawRole === "admin"
+                  || rawRole === "user"
+                  || rawRole === "viewer"
+                    ? rawRole
+                    : "viewer";
+
+                return {
+                  id: row.id as RowId,
+                  client_key:
+                    idRef(row.id as RowId)
+                    ?? nextKey("employee"),
+                  employee_number:
+                    text(
+                      row.employee_number,
+                    ),
+                  first_name:
+                    text(
+                      row.first_name,
+                    ),
+                  last_name:
+                    text(
+                      row.last_name,
+                    ),
+                  email:
+                    text(
+                      row.email,
+                    ),
+                  department_ref:
+                    idRef(
+                      row.department_id as RowId,
+                    ),
+                  is_active:
+                    Boolean(
+                      row.is_active,
+                    ),
+                  auth_user_id:
+                    text(
+                      row.auth_user_id,
+                    )
+                    || null,
+                  app_role:
+                    appRole,
+                };
+              },
+            );
+
           setSites(normalizedSites);
           setDepartments(
             normalizedDepartments,
@@ -928,6 +1011,9 @@ export default function SettingsPage({
           );
           setManufacturers(
             normalizedManufacturers,
+          );
+          setEmployees(
+            normalizedEmployees,
           );
           setDeleted(
             emptyDeleted(),
@@ -1990,6 +2076,31 @@ export default function SettingsPage({
       product_categories:
         categoryPayload,
 
+      employees:
+        employees.map(
+          (row) => ({
+            id: row.id,
+            client_key:
+              row.client_key,
+            employee_number:
+              row.employee_number.trim()
+              || null,
+            first_name:
+              row.first_name.trim(),
+            last_name:
+              row.last_name.trim(),
+            email:
+              row.email.trim()
+              || null,
+            department_ref:
+              row.department_ref,
+            is_active:
+              row.is_active,
+            app_role:
+              row.app_role,
+          }),
+        ),
+
       manufacturers:
         manufacturers.map(
           (row) => ({
@@ -2643,6 +2754,158 @@ export default function SettingsPage({
   }
 
 
+  function renderPermissions() {
+    const linkedUsers =
+      employees
+        .filter(
+          (row) =>
+            Boolean(
+              row.auth_user_id,
+            ),
+        )
+        .sort(
+          (left, right) =>
+            compareLabel(
+              left.email,
+              right.email,
+            ),
+        );
+
+    return (
+      <div className="settings-single-page">
+        <div className="settings-permissions-intro">
+          <strong>Benutzerberechtigungen</strong>
+          <span>
+            Administrator: vollständiger Zugriff · Bearbeiter: Inventar lesen und bearbeiten · Betrachter: nur lesen.
+          </span>
+        </div>
+
+        <div className="settings-table-wrap settings-table-grow">
+          <table className="settings-table">
+            <thead>
+              <tr>
+                <th>Benutzer</th>
+                <th>E-Mail</th>
+                <th>Rolle</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {linkedUsers.map(
+                (row) => {
+                  const isCurrentUser =
+                    row.email
+                      .trim()
+                      .toLocaleLowerCase()
+                    === email
+                      .trim()
+                      .toLocaleLowerCase();
+
+                  const displayName =
+                    [
+                      row.first_name,
+                      row.last_name,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                    || row.email;
+
+                  return (
+                    <tr
+                      key={
+                        row.client_key
+                      }
+                    >
+                      <td>
+                        <div className="settings-cell-text">
+                          {displayName}
+                        </div>
+                      </td>
+
+                      <td>
+                        <div className="settings-cell-text">
+                          {row.email}
+                          {isCurrentUser
+                            ? " (angemeldet)"
+                            : ""}
+                        </div>
+                      </td>
+
+                      <td>
+                        <select
+                          className="settings-role-select"
+                          value={
+                            row.app_role
+                          }
+                          disabled={
+                            saving
+                            || isCurrentUser
+                          }
+                          title={
+                            isCurrentUser
+                              ? "Die eigene Administratorrolle kann hier nicht geändert werden."
+                              : "Berechtigungsrolle auswählen"
+                          }
+                          onChange={
+                            (event) => {
+                              const nextRole =
+                                event.target.value as AppRole;
+
+                              setEmployees(
+                                (current) =>
+                                  current.map(
+                                    (item) =>
+                                      item.client_key
+                                      === row.client_key
+                                        ? {
+                                            ...item,
+                                            app_role:
+                                              nextRole,
+                                          }
+                                        : item,
+                                  ),
+                              );
+
+                              showMessage(
+                                `Rolle für ${row.email} geändert. Mit „Übernehmen“ speichern.`,
+                                "info",
+                              );
+                            }
+                          }
+                        >
+                          <option value="admin">
+                            Administrator
+                          </option>
+                          <option value="user">
+                            Bearbeiter
+                          </option>
+                          <option value="viewer">
+                            Betrachter
+                          </option>
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                },
+              )}
+
+              {linkedUsers.length === 0 && (
+                <tr>
+                  <td colSpan={3}>
+                    <div className="settings-cell-text">
+                      Keine mit Supabase Auth verknüpften Benutzer vorhanden.
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+
   function renderColumns() {
     return (
       <div className="settings-columns-page">
@@ -2695,6 +2958,7 @@ export default function SettingsPage({
             ["categories", "Kategorien"],
             ["specifications", "Spezifikationen"],
             ["manufacturers", "Hersteller"],
+            ["permissions", "Berechtigungen"],
             ["columns", "Standardspalten"],
           ] as Array<[SettingsTab, string]>).map(([key, label]) => (
             <button
@@ -2714,6 +2978,7 @@ export default function SettingsPage({
           {activeTab === "categories" && renderCategories()}
           {activeTab === "specifications" && renderSpecifications()}
           {activeTab === "manufacturers" && renderManufacturers()}
+          {activeTab === "permissions" && renderPermissions()}
           {activeTab === "columns" && renderColumns()}
         </main>
 

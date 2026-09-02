@@ -133,6 +133,60 @@ export async function loadInventoryRows(): Promise<InventoryRow[]> {
   );
 }
 
+export async function loadInventoryRevision(): Promise<number> {
+  const response = await fetch(
+    `${API_BASE}/api/inventory/revision`,
+    {
+      credentials: "include",
+      cache: "no-store",
+    },
+  );
+
+  ensureAuthorized(response);
+
+  const data =
+    await readJson(
+      response,
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      errorDetail(
+        data,
+        "Änderungsstand des Inventars konnte nicht geprüft werden.",
+      ),
+    );
+  }
+
+  if (
+    !isRecord(
+      data,
+    )
+  ) {
+    throw new Error(
+      "Der Webserver hat keinen gültigen Inventar-Änderungsstand zurückgegeben.",
+    );
+  }
+
+  const revision =
+    Number(
+      data.revision,
+    );
+
+  if (
+    !Number.isFinite(
+      revision,
+    )
+  ) {
+    throw new Error(
+      "Der Inventar-Änderungsstand des Webservers ist ungültig.",
+    );
+  }
+
+  return revision;
+}
+
+
 export async function loadInventoryMeta(): Promise<InventoryMeta> {
   const response = await fetch(`${API_BASE}/api/inventory/meta`, {
     credentials: "include",

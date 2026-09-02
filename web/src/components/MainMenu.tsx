@@ -22,6 +22,8 @@ type MainMenuProps = {
 
   transferBusy: boolean;
 
+  canManageSettings: boolean;
+
   getHeaderLabel: (
     column: string,
   ) => string;
@@ -80,6 +82,7 @@ export default function MainMenu({
   columns,
   visibleColumns,
   transferBusy,
+  canManageSettings,
   getHeaderLabel,
   onRefresh,
   onImportCsv,
@@ -269,7 +272,7 @@ export default function MainMenu({
 
                   <button
                     type="button"
-                    disabled={transferBusy}
+                    disabled={transferBusy || !canManageSettings}
                     onClick={() =>
                       action(
                         onImportCsv,
@@ -281,7 +284,7 @@ export default function MainMenu({
 
                   <button
                     type="button"
-                    disabled={transferBusy}
+                    disabled={transferBusy || !canManageSettings}
                     onClick={() =>
                       action(
                         () =>
@@ -346,19 +349,25 @@ export default function MainMenu({
               </div>
 
 
-              <div className="menu-separator" />
+              {
+                canManageSettings
+                && (
+                  <>
+                    <div className="menu-separator" />
 
-
-              <button
-                type="button"
-                onClick={() =>
-                  action(
-                    onSettings,
-                  )
-                }
-              >
-                Einstellungen
-              </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        action(
+                          onSettings,
+                        )
+                      }
+                    >
+                      Einstellungen
+                    </button>
+                  </>
+                )
+              }
 
 
               <div className="menu-separator" />

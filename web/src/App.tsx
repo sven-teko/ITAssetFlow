@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useState,
 } from "react";
@@ -25,26 +26,51 @@ const API_BASE =
   ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 
+export type AppRole =
+  | "admin"
+  | "user"
+  | "viewer";
+
+
 type SessionResponse = {
   authenticated: boolean;
   email: string | null;
+  role: AppRole | null;
 };
 
 
 type ProtectedPageProps = {
   email: string | null;
+  role: AppRole | null;
+  allowedRoles?: AppRole[];
   children: ReactNode;
 };
 
 
 function ProtectedPage({
   email,
+  role,
+  allowedRoles,
   children,
 }: ProtectedPageProps) {
-  if (!email) {
+  if (!email || !role) {
     return (
       <Navigate
         to="/login"
+        replace
+      />
+    );
+  }
+
+  if (
+    allowedRoles
+    && !allowedRoles.includes(
+      role,
+    )
+  ) {
+    return (
+      <Navigate
+        to="/inventory"
         replace
       />
     );
@@ -63,9 +89,7 @@ function SimplePage({
 }) {
   return (
     <div className="content-page">
-
       <div className="content-page-card">
-
         <h1>
           {title}
         </h1>
@@ -80,9 +104,7 @@ function SimplePage({
         >
           ← Zurück zum Inventar
         </Link>
-
       </div>
-
     </div>
   );
 }
@@ -92,7 +114,9 @@ export default function App() {
   const [
     checkingSession,
     setCheckingSession,
-  ] = useState(true);
+  ] = useState(
+    true,
+  );
 
   const [
     email,
@@ -101,24 +125,44 @@ export default function App() {
     null,
   );
 
+  const [
+    role,
+    setRole,
+  ] = useState<AppRole | null>(
+    null,
+  );
 
-  useEffect(
-    () => {
-      async function checkSession(): Promise<void> {
+
+  const clearSession =
+    useCallback(
+      (): void => {
+        setEmail(
+          null,
+        );
+
+        setRole(
+          null,
+        );
+      },
+      [],
+    );
+
+
+  const checkSession =
+    useCallback(
+      async (): Promise<void> => {
         try {
           const response =
             await fetch(
               `${API_BASE}/api/auth/session`,
               {
-                credentials: "include",
+                credentials:
+                  "include",
               },
             );
 
           if (!response.ok) {
-            setEmail(
-              null,
-            );
-
+            clearSession();
             return;
           }
 
@@ -129,11 +173,16 @@ export default function App() {
           if (
             !data.authenticated
             || !data.email
+            || !data.role
+            || ![
+              "admin",
+              "user",
+              "viewer",
+            ].includes(
+              data.role,
+            )
           ) {
-            setEmail(
-              null,
-            );
-
+            clearSession();
             return;
           }
 
@@ -141,22 +190,54 @@ export default function App() {
             data.email,
           );
 
-        } catch {
-          setEmail(
-            null,
+          setRole(
+            data.role,
           );
+
+        } catch {
+          clearSession();
 
         } finally {
           setCheckingSession(
             false,
           );
         }
-      }
+      },
+      [
+        clearSession,
+      ],
+    );
 
+
+  useEffect(
+    () => {
       void checkSession();
     },
-    [],
+    [
+      checkSession,
+    ],
   );
+
+
+  function handleLogin(
+    loggedInEmail: string,
+  ): void {
+    // LoginPage setzt zuerst die HttpOnly-Cookies. Danach wird die
+    // serverseitig ermittelte Rolle über /api/auth/session geladen.
+    setEmail(
+      loggedInEmail,
+    );
+
+    setRole(
+      null,
+    );
+
+    setCheckingSession(
+      true,
+    );
+
+    void checkSession();
+  }
 
 
   if (checkingSession) {
@@ -170,13 +251,12 @@ export default function App() {
 
   return (
     <Routes>
-
       <Route
         path="/"
         element={
           <Navigate
             to={
-              email
+              email && role
                 ? "/inventory"
                 : "/login"
             }
@@ -185,11 +265,10 @@ export default function App() {
         }
       />
 
-
       <Route
         path="/login"
         element={
-          email
+          email && role
             ? (
               <Navigate
                 to="/inventory"
@@ -199,85 +278,97 @@ export default function App() {
             : (
               <LoginPage
                 onLogin={
-                  setEmail
+                  handleLogin
                 }
               />
             )
         }
       />
 
-
       <Route
         path="/inventory"
         element={
           <ProtectedPage
             email={email}
+            role={role}
           >
             <InventoryPage
               email={email ?? ""}
-              onLogout={() =>
-                setEmail(null)
+              role={role ?? "viewer"}
+              onLogout={
+                clearSession
               }
             />
           </ProtectedPage>
         }
       />
-
 
       <Route
         path="/inventory/new"
         element={
           <ProtectedPage
             email={email}
+            role={role}
+            allowedRoles={[
+              "admin",
+              "user",
+            ]}
           >
             <AssetFormPage
-              onSessionExpired={() =>
-                setEmail(null)
+              onSessionExpired={
+                clearSession
               }
             />
           </ProtectedPage>
         }
       />
-
 
       <Route
         path="/inventory/:entryKey/edit"
         element={
           <ProtectedPage
             email={email}
+            role={role}
+            allowedRoles={[
+              "admin",
+              "user",
+            ]}
           >
             <AssetFormPage
-              onSessionExpired={() =>
-                setEmail(null)
+              onSessionExpired={
+                clearSession
               }
             />
           </ProtectedPage>
         }
       />
-
 
       <Route
         path="/settings"
         element={
           <ProtectedPage
             email={email}
+            role={role}
+            allowedRoles={[
+              "admin",
+            ]}
           >
             <SettingsPage
               email={email ?? ""}
-              onSessionExpired={() =>
-                setEmail(null)
+              onSessionExpired={
+                clearSession
               }
             />
           </ProtectedPage>
         }
       />
 
-
       <Route
         path="/about"
         element={
           <ProtectedPage
             email={email}
+            role={role}
           >
             <SimplePage
               title="Über ITAssetFlow"
@@ -287,13 +378,12 @@ export default function App() {
         }
       />
 
-
       <Route
         path="*"
         element={
           <Navigate
             to={
-              email
+              email && role
                 ? "/inventory"
                 : "/login"
             }
@@ -301,7 +391,6 @@ export default function App() {
           />
         }
       />
-
     </Routes>
   );
 }

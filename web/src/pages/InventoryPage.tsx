@@ -15,12 +15,22 @@ import useInventoryView from "../hooks/useInventoryView";
 import type { DockPanelKind } from "../types/inventory";
 import { getIdentifier, getRowKey } from "../utils/inventory";
 
+type AppRole =
+  | "admin"
+  | "user"
+  | "viewer";
+
 type InventoryPageProps = {
   email: string;
+  role: AppRole;
   onLogout: () => void;
 };
 
-export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
+export default function InventoryPage({
+  email,
+  role,
+  onLogout,
+}: InventoryPageProps) {
   const navigate = useNavigate();
   const [, setStatus] = useState("Inventardaten werden geladen ...");
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -67,11 +77,33 @@ export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
   const docking = useDocking({ onStatus: setStatus });
   const loading = data.loading || actions.deleteBusy;
 
+  const canEdit =
+    role === "admin"
+    || role === "user";
+
+  const canManageSettings =
+    role === "admin";
+
+  function readOnlyNotice(): void {
+    window.alert(
+      "Dieses Benutzerkonto besitzt nur Leserechte.",
+    );
+  }
+
   function createEntry(): void {
+    if (!canEdit) {
+      readOnlyNotice();
+      return;
+    }
     navigate("/inventory/new");
   }
 
   function editEntry(): void {
+    if (!canEdit) {
+      readOnlyNotice();
+      return;
+    }
+
     if (view.selectedRows.length !== 1) {
       return;
     }
@@ -93,7 +125,14 @@ export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
       onFiltersChange={view.setFilters}
       onCreate={createEntry}
       onEdit={editEntry}
-      onDelete={() => void actions.deleteEntries()}
+      onDelete={() => {
+        if (!canEdit) {
+          readOnlyNotice();
+          return;
+        }
+
+        void actions.deleteEntries();
+      }}
     />
   ) : null;
 
@@ -153,11 +192,20 @@ export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
         columns={columns.availableColumns}
         visibleColumns={columns.visibleColumns}
         transferBusy={actions.transferBusy}
+        canManageSettings={canManageSettings}
         getHeaderLabel={columns.getHeaderLabel}
         onRefresh={() => void data.loadData()}
-        onImportCsv={actions.chooseCsvImport}
+        onImportCsv={
+          canManageSettings
+            ? actions.chooseCsvImport
+            : readOnlyNotice
+        }
         onExportCsv={() => void actions.exportCsv()}
-        onSettings={() => navigate("/settings")}
+        onSettings={() => {
+          if (canManageSettings) {
+            navigate("/settings");
+          }
+        }}
         onAbout={() => setAboutOpen(true)}
         onLogout={() => void actions.logout()}
         onStatus={setStatus}
@@ -240,6 +288,13 @@ export default function InventoryPage({ email, onLogout }: InventoryPageProps) {
 
       <div className="status-bar">
         <span>{view.countText}</span>
+
+        <span
+          className="status-user"
+          title={`Angemeldet als ${email}`}
+        >
+          Angemeldet: {email}
+        </span>
       </div>
     </div>
   );

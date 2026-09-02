@@ -1834,11 +1834,24 @@ input:focus {
    ========================================================= */
 
 .status-bar {
-  justify-content: flex-start;
+  justify-content: space-between;
 }
 
-.status-bar > span {
+.status-bar > span:first-child {
+  min-width: 0;
   max-width: 100%;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-user {
+  flex: 0 0 auto;
+
+  margin-left: auto;
+
+  white-space: nowrap;
 }
 
 .page-header {

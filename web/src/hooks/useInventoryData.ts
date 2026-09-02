@@ -8,6 +8,7 @@ import {
 import {
   inventoryEventsUrl,
   loadInventoryMeta,
+  loadInventoryRevision,
   loadInventoryRows,
   UnauthorizedError,
 } from "../api/inventoryApi";
@@ -29,6 +30,9 @@ type UseInventoryDataOptions = {
 
 const BACKGROUND_REFRESH_DEBOUNCE_MS =
   250;
+
+const REVISION_CHECK_INTERVAL_MS =
+  5_000;
 
 
 export default function useInventoryData({
@@ -67,6 +71,59 @@ export default function useInventoryData({
       false,
     );
 
+  const lastRevisionRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const revisionCheckRunningRef =
+    useRef(
+      false,
+    );
+
+
+  const updateRevisionBaseline =
+    useCallback(
+      async (): Promise<void> => {
+        if (
+          revisionCheckRunningRef.current
+        ) {
+          return;
+        }
+
+        revisionCheckRunningRef.current =
+          true;
+
+        try {
+          lastRevisionRef.current =
+            await loadInventoryRevision();
+
+        } catch (error) {
+          if (
+            error
+            instanceof UnauthorizedError
+          ) {
+            onUnauthorized();
+            return;
+          }
+
+          // Der Hauptdatenbestand bleibt sichtbar. Die nächste 5-Sekunden-
+          // Prüfung versucht die kleine Revisionsabfrage erneut.
+          console.warn(
+            "Inventar-Revisionsstand konnte nicht aktualisiert werden:",
+            error,
+          );
+
+        } finally {
+          revisionCheckRunningRef.current =
+            false;
+        }
+      },
+      [
+        onUnauthorized,
+      ],
+    );
+
 
   const executeLoad =
     useCallback(
@@ -78,10 +135,9 @@ export default function useInventoryData({
           inFlightRef.current
         ) {
           if (!interactive) {
-            // Falls während eines bereits laufenden Requests ein
-            // Änderungsereignis eintrifft, führen wir danach genau einen
-            // weiteren stillen Reload aus. So kann keine Änderung durch ein
-            // ungünstiges Timing verloren gehen.
+            // Falls während eines bereits laufenden Requests eine weitere
+            // Änderung erkannt wird, reicht danach genau ein zusätzlicher
+            // stiller Reload.
             queuedSilentRefreshRef.current =
               true;
           }
@@ -127,16 +183,21 @@ export default function useInventoryData({
                   );
                 }
 
-                return;
+              } else {
+                const rows =
+                  await loadInventoryRows();
+
+                setInventory(
+                  rows,
+                );
               }
 
 
-              const rows =
-                await loadInventoryRows();
-
-              setInventory(
-                rows,
-              );
+              // Nach jedem erfolgreichen vollständigen Inventar-Reload den
+              // aktuellen Revisionswert übernehmen. Dadurch löst dieselbe
+              // Änderung beim nächsten 5-Sekunden-Check keinen zweiten,
+              // unnötigen Tabellen-Reload aus.
+              await updateRevisionBaseline();
 
             } catch (error) {
               if (
@@ -157,10 +218,11 @@ export default function useInventoryData({
                     ? error.message
                     : "Inventar konnte nicht geladen werden.",
                 );
+
               } else {
                 // Bei einer kurzzeitigen Netzwerkstörung bleibt der zuletzt
-                // bekannte Datenbestand sichtbar. Beim nächsten SSE-Ereignis,
-                // Reconnect oder Tab-Wechsel wird erneut synchronisiert.
+                // bekannte Tabellenstand sichtbar. SSE, Revisionsprüfung oder
+                // Tab-Rückkehr versuchen später erneut zu synchronisieren.
                 console.warn(
                   "Automatische Inventarsynchronisation fehlgeschlagen:",
                   error,
@@ -208,6 +270,7 @@ export default function useInventoryData({
       [
         onStatus,
         onUnauthorized,
+        updateRevisionBaseline,
       ],
     );
 
@@ -234,6 +297,78 @@ export default function useInventoryData({
         ),
       [
         executeLoad,
+      ],
+    );
+
+
+  const checkRevision =
+    useCallback(
+      async (): Promise<void> => {
+        if (
+          document.visibilityState
+          !== "visible"
+          || revisionCheckRunningRef.current
+        ) {
+          return;
+        }
+
+        revisionCheckRunningRef.current =
+          true;
+
+        try {
+          const currentRevision =
+            await loadInventoryRevision();
+
+          const previousRevision =
+            lastRevisionRef.current;
+
+          if (
+            previousRevision
+            === null
+          ) {
+            lastRevisionRef.current =
+              currentRevision;
+
+            return;
+          }
+
+          if (
+            currentRevision
+            === previousRevision
+          ) {
+            return;
+          }
+
+          // Vor dem Reload bereits auf die neue Revision setzen. Sollte
+          // während des Reloads eine weitere Änderung erfolgen, setzt
+          // executeLoad nach dem Laden den dann aktuellen Wert erneut.
+          lastRevisionRef.current =
+            currentRevision;
+
+          await refreshInventory();
+
+        } catch (error) {
+          if (
+            error
+            instanceof UnauthorizedError
+          ) {
+            onUnauthorized();
+            return;
+          }
+
+          console.warn(
+            "5-Sekunden-Inventarprüfung fehlgeschlagen:",
+            error,
+          );
+
+        } finally {
+          revisionCheckRunningRef.current =
+            false;
+        }
+      },
+      [
+        onUnauthorized,
+        refreshInventory,
       ],
     );
 
@@ -282,6 +417,80 @@ export default function useInventoryData({
   );
 
 
+  // ---------------------------------------------------------
+  // Datenbank-Revisionsprüfung alle 5 Sekunden
+  // ---------------------------------------------------------
+  //
+  // Diese Prüfung erkennt auch Änderungen, die direkt in Supabase,
+  // über SQL oder durch die native Anwendung vorgenommen wurden.
+  // Es wird dabei NICHT die komplette Inventarliste abgefragt, sondern
+  // nur genau eine kleine Revisionsnummer.
+  useEffect(
+    () => {
+      const timer =
+        window.setInterval(
+          () => {
+            void checkRevision();
+          },
+          REVISION_CHECK_INTERVAL_MS,
+        );
+
+
+      function visibilityChanged(): void {
+        if (
+          document.visibilityState
+          === "visible"
+        ) {
+          void checkRevision();
+        }
+      }
+
+
+      function browserOnline(): void {
+        void checkRevision();
+      }
+
+
+      document.addEventListener(
+        "visibilitychange",
+        visibilityChanged,
+      );
+
+      window.addEventListener(
+        "online",
+        browserOnline,
+      );
+
+
+      return () => {
+        window.clearInterval(
+          timer,
+        );
+
+        document.removeEventListener(
+          "visibilitychange",
+          visibilityChanged,
+        );
+
+        window.removeEventListener(
+          "online",
+          browserOnline,
+        );
+      };
+    },
+    [
+      checkRevision,
+    ],
+  );
+
+
+  // ---------------------------------------------------------
+  // SSE für Änderungen über die WebApp
+  // ---------------------------------------------------------
+  //
+  // Änderungen, die über FastAPI durchgeführt werden, erscheinen dadurch
+  // weiterhin praktisch sofort. Die 5-Sekunden-Revisionsprüfung ist die
+  // zusätzliche Absicherung für direkte Datenbankänderungen.
   useEffect(
     () => {
       if (
@@ -335,9 +544,6 @@ export default function useInventoryData({
           document.visibilityState
           !== "visible"
         ) {
-          // Solange der Benutzer den Tab nicht sieht, entstehen keine
-          // Datenbankabfragen. Beim Zurückkehren wird genau einmal
-          // synchronisiert.
           hiddenSinceLastSync =
             true;
 
@@ -388,9 +594,6 @@ export default function useInventoryData({
             reconnectPending =
               false;
 
-            // Nach einer unterbrochenen SSE-Verbindung einmal synchronisieren.
-            // Dadurch kann kein während der Unterbrechung verpasstes Ereignis
-            // zu einem dauerhaft veralteten Tabellenstand führen.
             scheduleRefresh(
               true,
             );
@@ -400,8 +603,8 @@ export default function useInventoryData({
 
       eventSource.onerror =
         () => {
-          // EventSource versucht die Verbindung selbstständig erneut
-          // aufzubauen. Wir starten hier bewusst kein Polling.
+          // EventSource reconnectet selbstständig. Es wird kein zusätzliches
+          // schnelles Polling gestartet.
           reconnectPending =
             true;
         };

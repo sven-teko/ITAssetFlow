@@ -244,6 +244,12 @@ class SettingsService:
         if not isinstance(rows, list):
             return
 
+        valid_roles = {
+            "admin",
+            "user",
+            "viewer",
+        }
+
         for item in rows:
             if not isinstance(item, dict):
                 continue
@@ -287,20 +293,100 @@ class SettingsService:
             }
 
             row_id = item.get("id")
+
             if row_id is None:
-                # Neue Mitarbeiter erhalten bewusst keine Auth-Verknüpfung.
-                # app_role verwendet den DB-Default "user".
-                self.client.table("employees").insert(row).execute()
-            else:
-                # auth_user_id und app_role werden hier absichtlich NICHT
-                # verändert. Damit kann das Einstellungsfenster keine
-                # Benutzer-/Admin-Verknüpfung beschädigen.
-                (
-                    self.client.table("employees")
-                    .update(row)
-                    .eq("id", row_id)
-                    .execute()
+                # Normale Mitarbeiter ohne Auth-Verknüpfung können weiterhin
+                # als Stammdaten angelegt werden. Die DB verwendet dabei den
+                # sicheren Default "viewer"; ohne auth_user_id hat diese Rolle
+                # ohnehin keine Anmeldewirkung.
+                self.client.table(
+                    "employees"
+                ).insert(
+                    row
+                ).execute()
+                continue
+
+            current_response = (
+                self.client
+                .table(
+                    "employees"
                 )
+                .select(
+                    "auth_user_id,app_role"
+                )
+                .eq(
+                    "id",
+                    row_id,
+                )
+                .limit(
+                    1
+                )
+                .execute()
+            )
+
+            current_data = getattr(
+                current_response,
+                "data",
+                None,
+            )
+
+            current_rows = [
+                value
+                for value in current_data
+                if isinstance(
+                    value,
+                    dict,
+                )
+            ] if isinstance(
+                current_data,
+                list,
+            ) else []
+
+            if not current_rows:
+                raise ValueError(
+                    "Der Mitarbeiter existiert nicht mehr."
+                )
+
+            current = current_rows[0]
+
+            # Rollen dürfen nur bei tatsächlich mit Supabase Auth
+            # verknüpften Konten geändert werden. auth_user_id selbst wird
+            # niemals aus dem Browser übernommen.
+            if current.get(
+                "auth_user_id"
+            ):
+                role = str(
+                    item.get(
+                        "app_role",
+                        current.get(
+                            "app_role",
+                            "viewer",
+                        ),
+                    )
+                    or ""
+                ).strip().casefold()
+
+                if role not in valid_roles:
+                    raise ValueError(
+                        "Ungültige Benutzerrolle."
+                    )
+
+                row["app_role"] = role
+
+            (
+                self.client
+                .table(
+                    "employees"
+                )
+                .update(
+                    row
+                )
+                .eq(
+                    "id",
+                    row_id,
+                )
+                .execute()
+            )
 
     def _save_categories(self, rows: object) -> None:
         if not isinstance(rows, list):
@@ -779,6 +865,60 @@ def create_settings_router(
         database_payload = dict(
             payload
         )
+
+        employees = database_payload.get(
+            "employees"
+        )
+
+        if isinstance(
+            employees,
+            list,
+        ):
+            current_email = str(
+                getattr(
+                    web_session,
+                    "email",
+                    "",
+                )
+                or ""
+            ).strip().casefold()
+
+            for employee in employees:
+                if not isinstance(
+                    employee,
+                    dict,
+                ):
+                    continue
+
+                employee_email = str(
+                    employee.get(
+                        "email",
+                        "",
+                    )
+                    or ""
+                ).strip().casefold()
+
+                if (
+                    current_email
+                    and employee_email
+                    == current_email
+                ):
+                    requested_role = str(
+                        employee.get(
+                            "app_role",
+                            "admin",
+                        )
+                        or ""
+                    ).strip().casefold()
+
+                    if requested_role != "admin":
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                "Die eigene Administratorrolle kann in "
+                                "der WebApp nicht geändert werden."
+                            ),
+                        )
 
         # Standardspalten sind keine gemeinsamen Stammdaten.
         # Sie werden pro angemeldetem Web-Benutzer im Browser gespeichert.

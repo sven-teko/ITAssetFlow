@@ -85,6 +85,36 @@ WEB_ASSETS_DIR = (
     / "assets"
 )
 
+# Im Firmenbetrieb liefert IIS die React-WebApp aus.
+# FastAPI soll dort nur noch die API bereitstellen.
+#
+# false:
+#   http://localhost:8000/ -> keine React-WebApp (404)
+#   /api/...               -> weiterhin aktiv
+#
+# true:
+#   FastAPI liefert zusätzlich web/dist aus. Dieser Modus ist
+#   beispielsweise für ein eigenständiges Test-/Abgabepaket ohne IIS gedacht.
+SERVE_WEB_BUILD = (
+    os.getenv(
+        "ITASSETFLOW_SERVE_WEB",
+        "false",
+    )
+    .strip()
+    .casefold()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+print(
+    "ITAssetFlow Web-Build über FastAPI:",
+    "aktiv" if SERVE_WEB_BUILD else "deaktiviert (IIS/API-only)",
+)
+
 
 # =========================================================
 # CORS
@@ -93,7 +123,7 @@ WEB_ASSETS_DIR = (
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://itassetflow.firma.local",
+    "http://itassetflow.dlc-informatik.local",
 ]
 
 configured_cors_origins = [
@@ -116,11 +146,11 @@ ALLOWED_CORS_ORIGINS = list(
 
 # Zusätzlich dürfen bei Bedarf Ports am internen Hostnamen vorkommen.
 # Der Browser-Origin der IIS-Seite ist normalerweise
-# http://itassetflow.firma.local, aber diese Regex macht lokale
+# http://itassetflow.dlc-informatik.local, aber diese Regex macht lokale
 # Testvarianten wie :80 oder :8080 ebenfalls unproblematisch.
 CORS_ORIGIN_REGEX = os.getenv(
     "ITASSETFLOW_CORS_ORIGIN_REGEX",
-    r"^https?://itassetflow\.firma\.local(?::\d+)?$",
+    r"^https?://itassetflow\.dlc-informatik\.local(?::\d+)?$",
 ).strip()
 
 print(
@@ -325,10 +355,18 @@ class DeleteInventoryPayload(BaseModel):
     entry_keys: list[str]
 
 
+APP_ROLES = {
+    "admin",
+    "user",
+    "viewer",
+}
+
+
 @dataclass
 class WebSession:
     client: Client
     email: str
+    role: str
 
 
 # =========================================================
@@ -570,6 +608,117 @@ def clear_auth_cookies(
 
 
 # =========================================================
+# Rollen / Berechtigungen
+# =========================================================
+
+def _load_app_role(
+    client: Client,
+    email: str,
+) -> str:
+    """Liest die aktive ITAssetFlow-Rolle des angemeldeten Benutzers.
+
+    Die Rolle liegt bewusst in ``public.employees`` und wird bei jedem
+    API-Request erneut aus der Datenbank gelesen. Änderungen durch einen
+    Administrator greifen dadurch ohne neue Anmeldung auf der Serverseite.
+    """
+
+    try:
+        response = (
+            client
+            .table(
+                "employees"
+            )
+            .select(
+                "app_role,is_active,auth_user_id"
+            )
+            .eq(
+                "email",
+                email,
+            )
+            .limit(
+                1
+            )
+            .execute()
+        )
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Die Benutzerberechtigung konnte nicht geprüft werden."
+            ),
+        ) from error
+
+    data = getattr(
+        response,
+        "data",
+        None,
+    )
+
+    rows = [
+        row
+        for row in data
+        if isinstance(
+            row,
+            dict,
+        )
+    ] if isinstance(
+        data,
+        list,
+    ) else []
+
+    if not rows:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Dieses Benutzerkonto ist nicht für ITAssetFlow freigegeben."
+            ),
+        )
+
+    row = rows[0]
+
+    if not bool(
+        row.get(
+            "is_active",
+            False,
+        )
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Dieses ITAssetFlow-Benutzerkonto ist deaktiviert."
+            ),
+        )
+
+    if not row.get(
+        "auth_user_id"
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Dieses Benutzerkonto ist nicht mit Supabase Auth verknüpft."
+            ),
+        )
+
+    role = str(
+        row.get(
+            "app_role",
+        )
+        or ""
+    ).strip().casefold()
+
+    if role not in APP_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Für dieses Benutzerkonto ist keine gültige Rolle hinterlegt."
+            ),
+        )
+
+    return role
+
+
+# =========================================================
 # Web-Sitzung
 # =========================================================
 
@@ -635,10 +784,51 @@ def get_web_session(
                 new_refresh_token,
             )
 
+    role = _load_app_role(
+        client,
+        email,
+    )
+
     return WebSession(
         client=client,
         email=email,
+        role=role,
     )
+
+
+def require_editor_session(
+    web_session: WebSession = Depends(
+        get_web_session
+    ),
+) -> WebSession:
+    if web_session.role not in {
+        "admin",
+        "user",
+    }:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Dieses Benutzerkonto besitzt nur Leserechte."
+            ),
+        )
+
+    return web_session
+
+
+def require_admin_session(
+    web_session: WebSession = Depends(
+        get_web_session
+    ),
+) -> WebSession:
+    if web_session.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Für diese Funktion sind Administratorrechte erforderlich."
+            ),
+        )
+
+    return web_session
 
 
 # =========================================================
@@ -678,6 +868,11 @@ def login(
             detail=str(error),
         ) from error
 
+    role = _load_app_role(
+        client,
+        email,
+    )
+
     tokens = get_session_tokens(
         client
     )
@@ -700,6 +895,7 @@ def login(
     return {
         "authenticated": True,
         "email": email,
+        "role": role,
     }
 
 
@@ -726,6 +922,7 @@ def session(
         return {
             "authenticated": False,
             "email": None,
+            "role": None,
         }
 
     try:
@@ -738,11 +935,13 @@ def session(
         return {
             "authenticated": False,
             "email": None,
+            "role": None,
         }
 
     return {
         "authenticated": True,
         "email": web_session.email,
+        "role": web_session.role,
     }
 
 
@@ -867,6 +1066,84 @@ async def inventory_events(
     )
 
 
+
+# =========================================================
+# Performance-schonende Änderungsprüfung
+# =========================================================
+
+@app.get("/api/inventory/revision")
+def inventory_revision(
+    web_session: WebSession = Depends(
+        get_web_session
+    ),
+) -> dict[str, int]:
+    """Liefert nur den technischen Änderungsstand des Inventars.
+
+    Die Datenbank führt in ``inventory_change_state`` genau eine kleine
+    Revisionsnummer. Datenbank-Trigger erhöhen sie bei relevanten Änderungen.
+    Die Webclients können deshalb alle fünf Sekunden nur diesen einzelnen Wert
+    prüfen und müssen die vollständige Inventarliste nur bei einer tatsächlichen
+    Änderung neu laden.
+    """
+
+    try:
+        response = (
+            web_session.client
+            .table(
+                "inventory_change_state"
+            )
+            .select(
+                "revision"
+            )
+            .eq(
+                "id",
+                1,
+            )
+            .limit(
+                1
+            )
+            .execute()
+        )
+
+        data = getattr(
+            response,
+            "data",
+            None,
+        )
+
+        rows = [
+            row
+            for row in data
+            if isinstance(
+                row,
+                dict,
+            )
+        ] if isinstance(
+            data,
+            list,
+        ) else []
+
+        if not rows:
+            raise RuntimeError(
+                "inventory_change_state ist leer oder nicht lesbar."
+            )
+
+        return {
+            "revision":
+                int(
+                    rows[0].get(
+                        "revision"
+                    )
+                    or 0
+                ),
+        }
+
+    except Exception as error:
+        raise _repository_http_exception(
+            error
+        ) from error
+
+
 # =========================================================
 # Formular-Stammdaten
 # =========================================================
@@ -935,7 +1212,7 @@ def create_inventory_entry(
     request: Request,
     payload: dict[str, Any],
     web_session: WebSession = Depends(
-        get_web_session
+        require_editor_session
     ),
 ) -> dict[str, Any]:
     repository = AssetRepository(
@@ -966,7 +1243,7 @@ def update_inventory_entry(
     request: Request,
     payload: dict[str, Any],
     web_session: WebSession = Depends(
-        get_web_session
+        require_editor_session
     ),
 ) -> dict[str, Any]:
     repository = AssetRepository(
@@ -997,7 +1274,7 @@ def delete_inventory_entries(
     request: Request,
     payload: DeleteInventoryPayload,
     web_session: WebSession = Depends(
-        get_web_session
+        require_editor_session
     ),
 ) -> dict[str, int]:
     keys = [
@@ -1150,7 +1427,7 @@ def export_csv(
 async def import_csv(
     request: Request,
     web_session: WebSession = Depends(
-        get_web_session
+        require_admin_session
     ),
 ) -> dict[str, Any]:
     content = await request.body()
@@ -1258,7 +1535,7 @@ def inventory_meta(
 
 app.include_router(
     create_settings_router(
-        get_web_session,
+        require_admin_session,
         INVENTORY_CHANGES.publish,
     )
 )
@@ -1341,69 +1618,75 @@ def _safe_dist_file(
     return None
 
 
-@app.get(
-    "/",
-    include_in_schema=False,
-)
-def web_root() -> FileResponse:
-    _require_web_build()
-
-    return _web_file_response(
-        WEB_INDEX_FILE
+if SERVE_WEB_BUILD:
+    @app.get(
+        "/",
+        include_in_schema=False,
     )
+    def web_root() -> FileResponse:
+        _require_web_build()
 
-
-@app.get(
-    "/{full_path:path}",
-    include_in_schema=False,
-)
-def web_spa(
-    full_path: str,
-) -> FileResponse:
-    _require_web_build()
-
-    normalized_path = str(
-        full_path or ""
-    ).lstrip("/")
-
-    # Nicht vorhandene API-Routen dürfen niemals auf index.html
-    # fallen, sonst würde ein API-Fehler wie eine HTML-Seite aussehen.
-    if (
-        normalized_path == "api"
-        or normalized_path.startswith(
-            "api/"
-        )
-    ):
-        raise HTTPException(
-            status_code=404,
-            detail="API-Endpunkt nicht gefunden.",
-        )
-
-    static_file = _safe_dist_file(
-        normalized_path
-    )
-
-    if static_file is not None:
         return _web_file_response(
-            static_file
+            WEB_INDEX_FILE
         )
 
-    # Requests auf konkrete Dateien wie .png/.css/.js nicht auf
-    # React zurückfallen lassen, wenn die Datei nicht existiert.
-    if Path(
-        normalized_path
-    ).suffix:
-        raise HTTPException(
-            status_code=404,
-            detail="Datei nicht gefunden.",
-        )
 
-    # React Router übernimmt Client-Routen wie:
-    # /login
-    # /inventory
-    # /inventory/new
-    # /inventory/<key>/edit
-    # /settings
-    return _web_file_response(
-        WEB_INDEX_FILE
+    @app.get(
+        "/{full_path:path}",
+        include_in_schema=False,
     )
+    def web_spa(
+        full_path: str,
+    ) -> FileResponse:
+        _require_web_build()
+
+        normalized_path = str(
+            full_path or ""
+        ).lstrip("/")
+
+        # Nicht vorhandene API-Routen dürfen niemals auf index.html
+        # fallen, sonst würde ein API-Fehler wie eine HTML-Seite aussehen.
+        if (
+            normalized_path == "api"
+            or normalized_path.startswith(
+                "api/"
+            )
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="API-Endpunkt nicht gefunden.",
+            )
+
+        static_file = _safe_dist_file(
+            normalized_path
+        )
+
+        if static_file is not None:
+            return _web_file_response(
+                static_file
+            )
+
+        # Requests auf konkrete Dateien wie .png/.css/.js nicht auf
+        # React zurückfallen lassen, wenn die Datei nicht existiert.
+        if Path(
+            normalized_path
+        ).suffix:
+            raise HTTPException(
+                status_code=404,
+                detail="Datei nicht gefunden.",
+            )
+
+        # React Router übernimmt Client-Routen wie:
+        # /login
+        # /inventory
+        # /inventory/new
+        # /inventory/<key>/edit
+        # /settings
+        return _web_file_response(
+            WEB_INDEX_FILE
+        )
+else:
+    # Absichtlich keine Route für "/" oder React-Client-Routen registrieren.
+    # Dadurch kann Port 8000 im IIS-Betrieb nicht mehr als zweite,
+    # möglicherweise veraltete Weboberfläche verwendet werden.
+    pass

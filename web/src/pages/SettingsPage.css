@@ -539,3 +539,48 @@ select.settings-cell-editor {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================
+   Benutzerberechtigungen
+   ========================================================= */
+
+.settings-permissions-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  margin-bottom: 10px;
+  padding: 10px 12px;
+
+  color: #4b5563;
+  background: #f8fafc;
+
+  border: 1px solid #d8dde3;
+  border-radius: 5px;
+}
+
+.settings-permissions-intro strong {
+  color: #111827;
+}
+
+.settings-role-select {
+  width: calc(100% - 12px);
+  min-height: 30px;
+
+  margin: 2px 6px;
+  padding: 0 8px;
+
+  color: #111827;
+  background: #ffffff;
+
+  border: 1px solid #c9d1d9;
+  border-radius: 3px;
+}
+
+.settings-role-select:disabled {
+  color: #6b7280;
+  background: #f3f4f6;
+
+  cursor: not-allowed;
+}
