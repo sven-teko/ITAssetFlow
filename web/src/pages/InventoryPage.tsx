@@ -1,4 +1,8 @@
-import { Fragment, useCallback, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -13,7 +17,10 @@ import useInventoryColumns from "../hooks/useInventoryColumns";
 import useInventoryData from "../hooks/useInventoryData";
 import useInventoryView from "../hooks/useInventoryView";
 import type { DockPanelKind } from "../types/inventory";
-import { getIdentifier, getRowKey } from "../utils/inventory";
+import {
+  getIdentifier,
+  getRowKey,
+} from "../utils/inventory";
 
 type AppRole =
   | "admin"
@@ -32,13 +39,35 @@ export default function InventoryPage({
   onLogout,
 }: InventoryPageProps) {
   const navigate = useNavigate();
-  const [, setStatus] = useState("Inventardaten werden geladen ...");
-  const [aboutOpen, setAboutOpen] = useState(false);
 
-  const handleUnauthorized = useCallback((): void => {
-    onLogout();
-    navigate("/login", { replace: true });
-  }, [navigate, onLogout]);
+  const [
+    ,
+    setStatus,
+  ] = useState(
+    "Inventardaten werden geladen ...",
+  );
+
+  const [
+    aboutOpen,
+    setAboutOpen,
+  ] = useState(false);
+
+  const handleUnauthorized =
+    useCallback(
+      (): void => {
+        onLogout();
+        navigate(
+          "/login",
+          {
+            replace: true,
+          },
+        );
+      },
+      [
+        navigate,
+        onLogout,
+      ],
+    );
 
   const data = useInventoryData({
     onStatus: setStatus,
@@ -55,31 +84,54 @@ export default function InventoryPage({
   const view = useInventoryView({
     inventory: data.inventory,
     meta: data.meta,
-    displayedColumns: columns.displayedColumns,
-    formatValue: columns.formatValue,
+    displayedColumns:
+      columns.displayedColumns,
+    formatValue:
+      columns.formatValue,
   });
 
-  const handleLoggedOut = useCallback((): void => {
-    onLogout();
-    navigate("/login", { replace: true });
-  }, [navigate, onLogout]);
+  const handleLoggedOut =
+    useCallback(
+      (): void => {
+        onLogout();
+        navigate(
+          "/login",
+          {
+            replace: true,
+          },
+        );
+      },
+      [
+        navigate,
+        onLogout,
+      ],
+    );
 
   const actions = useInventoryActions({
     selectedRows: view.selectedRows,
     dataLoading: data.loading,
     onStatus: setStatus,
-    onUnauthorized: handleUnauthorized,
-    onLoggedOut: handleLoggedOut,
-    reload: data.loadData,
-    clearSelection: view.clearSelection,
+    onUnauthorized:
+      handleUnauthorized,
+    onLoggedOut:
+      handleLoggedOut,
+    reload:
+      data.loadData,
+    clearSelection:
+      view.clearSelection,
   });
 
-  const docking = useDocking({ onStatus: setStatus });
-  const loading = data.loading || actions.deleteBusy;
+  const docking = useDocking({
+    onStatus: setStatus,
+  });
+
+  const loading =
+    data.loading ||
+    actions.deleteBusy;
 
   const canEdit =
-    role === "admin"
-    || role === "user";
+    role === "admin" ||
+    role === "user";
 
   const canManageSettings =
     role === "admin";
@@ -95,6 +147,7 @@ export default function InventoryPage({
       readOnlyNotice();
       return;
     }
+
     navigate("/inventory/new");
   }
 
@@ -104,64 +157,110 @@ export default function InventoryPage({
       return;
     }
 
-    if (view.selectedRows.length !== 1) {
+    if (
+      view.selectedRows.length !== 1
+    ) {
       return;
     }
 
     navigate(
-      `/inventory/${encodeURIComponent(getRowKey(view.selectedRows[0]))}/edit`,
+      `/inventory/${encodeURIComponent(
+        getRowKey(
+          view.selectedRows[0],
+        ),
+      )}/edit`,
     );
   }
 
-  const navigationPanel = docking.navigationVisible ? (
-    <InventorySidebar
-      search={view.search}
-      filters={view.filters}
-      options={view.filterOptions}
-      loading={loading}
-      selectedIdentifiers={view.selectedIdentifiers}
-      countText={view.countText}
-      onSearchChange={view.setSearch}
-      onFiltersChange={view.setFilters}
-      onCreate={createEntry}
-      onEdit={editEntry}
-      onDelete={() => {
-        if (!canEdit) {
-          readOnlyNotice();
-          return;
+  const navigationPanel =
+    docking.navigationVisible ? (
+      <InventorySidebar
+        search={view.search}
+        filters={view.filters}
+        options={
+          view.filterOptions
         }
+        loading={loading}
+        selectedIdentifiers={
+          view.selectedIdentifiers
+        }
+        countText={view.countText}
+        onSearchChange={
+          view.setSearch
+        }
+        onFiltersChange={
+          view.setFilters
+        }
+        onCreate={createEntry}
+        onEdit={editEntry}
+        onDelete={() => {
+          if (!canEdit) {
+            readOnlyNotice();
+            return;
+          }
 
-        void actions.deleteEntries();
-      }}
-    />
-  ) : null;
+          void actions.deleteEntries();
+        }}
+      />
+    ) : null;
 
-  const detailPanel = docking.detailVisible ? (
-    <AssetDetailPanel
-      rows={view.selectedRows}
-      getIdentifier={getIdentifier}
-      getHeaderLabel={columns.getHeaderLabel}
-      formatValue={columns.formatValue}
-    />
-  ) : null;
+  const detailPanel =
+    docking.detailVisible ? (
+      <AssetDetailPanel
+        rows={view.selectedRows}
+        getIdentifier={
+          getIdentifier
+        }
+        getHeaderLabel={
+          columns.getHeaderLabel
+        }
+        formatValue={
+          columns.formatValue
+        }
+      />
+    ) : null;
 
-  function panelContent(panel: DockPanelKind): ReactNode {
-    return panel === "navigation" ? navigationPanel : detailPanel;
+  function panelContent(
+    panel: DockPanelKind,
+  ): ReactNode {
+    return panel === "navigation"
+      ? navigationPanel
+      : detailPanel;
   }
 
-  function renderDockPanel(panel: DockPanelKind, side: "left" | "right") {
-    const content = panelContent(panel);
+  function renderDockPanel(
+    panel: DockPanelKind,
+    side: "left" | "right",
+  ) {
+    const content =
+      panelContent(panel);
+
     if (!content) {
       return null;
     }
 
     return (
-      <Fragment key={`${side}-${panel}`}>
+      <Fragment
+        key={`${side}-${panel}`}
+      >
         <div
-          ref={docking.panelRef(panel)}
+          ref={
+            docking.panelRef(panel)
+          }
           data-dock-panel={panel}
-          className={docking.panelClassName(panel)}
-          onPointerDown={(event) => docking.beginDockPointer(panel, event)}
+          className={
+            docking.panelClassName(
+              panel,
+            )
+          }
+          onPointerDown={(
+            event,
+          ) =>
+            docking.beginDockPointer(
+              panel,
+              event,
+            )
+          }
         >
           {content}
         </div>
@@ -172,64 +271,127 @@ export default function InventoryPage({
   return (
     <div className="main-window">
       <input
-        ref={actions.csvFileInputRef}
+        ref={
+          actions.csvFileInputRef
+        }
         className="hidden-file-input"
         type="file"
         accept=".csv,text/csv"
         onChange={(event) => {
-          const file = event.target.files?.[0];
+          const file =
+            event.target.files?.[0];
+
           if (file) {
-            void actions.importCsvFile(file);
+            void actions.importCsvFile(
+              file,
+            );
           }
         }}
       />
 
       <MainMenu
-        navigationVisible={docking.navigationVisible}
-        detailVisible={docking.detailVisible}
-        navigationPosition={docking.navigationPosition}
-        detailPosition={docking.detailPosition}
-        columns={columns.availableColumns}
-        visibleColumns={columns.visibleColumns}
-        transferBusy={actions.transferBusy}
-        canManageSettings={canManageSettings}
-        getHeaderLabel={columns.getHeaderLabel}
-        onRefresh={() => void data.loadData()}
+        navigationVisible={
+          docking.navigationVisible
+        }
+        detailVisible={
+          docking.detailVisible
+        }
+        navigationPosition={
+          docking.navigationPosition
+        }
+        detailPosition={
+          docking.detailPosition
+        }
+        columns={
+          columns.availableColumns
+        }
+        visibleColumns={
+          columns.visibleColumns
+        }
+        transferBusy={
+          actions.transferBusy
+        }
+        canManageSettings={
+          canManageSettings
+        }
+        getHeaderLabel={
+          columns.getHeaderLabel
+        }
+        onRefresh={() =>
+          void data.loadData()
+        }
         onImportCsv={
           canManageSettings
             ? actions.chooseCsvImport
             : readOnlyNotice
         }
-        onExportCsv={() => void actions.exportCsv()}
+        onExportCsv={() =>
+          void actions.exportCsv()
+        }
         onSettings={() => {
-          if (canManageSettings) {
-            navigate("/settings");
+          if (
+            canManageSettings
+          ) {
+            navigate(
+              "/settings",
+            );
           }
         }}
-        onAbout={() => setAboutOpen(true)}
-        onLogout={() => void actions.logout()}
+        onAbout={() =>
+          setAboutOpen(true)
+        }
+        onLogout={() =>
+          void actions.logout()
+        }
         onStatus={setStatus}
-        onNavigationVisible={docking.setNavigationVisible}
-        onDetailVisible={docking.setDetailVisible}
-        onNavigationPosition={(position) =>
-          docking.dockPanelAtEdge("navigation", position)
+        onNavigationVisible={
+          docking.setNavigationVisible
         }
-        onDetailPosition={(position) =>
-          docking.dockPanelAtEdge("detail", position)
+        onDetailVisible={
+          docking.setDetailVisible
         }
-        onColumnVisible={columns.setColumnVisible}
-        onShowAllColumns={columns.showAllColumns}
-        onResetColumns={columns.resetColumns}
+        onNavigationPosition={(
+          position,
+        ) =>
+          docking.dockPanelAtEdge(
+            "navigation",
+            position,
+          )
+        }
+        onDetailPosition={(
+          position,
+        ) =>
+          docking.dockPanelAtEdge(
+            "detail",
+            position,
+          )
+        }
+        onColumnVisible={
+          columns.setColumnVisible
+        }
+        onShowAllColumns={
+          columns.showAllColumns
+        }
+        onResetColumns={
+          columns.resetColumns
+        }
       />
 
-      <div className="workspace" ref={docking.workspaceRef}>
+      <div
+        className="workspace"
+        ref={docking.workspaceRef}
+      >
         {docking.dockDrag && (
           <>
             <div
               className={[
                 "dock-drop-zone",
                 "dock-drop-zone-left",
-                docking.dockDrag.target === "left-edge" ? "active" : "",
+                docking.dockDrag
+                  .target ===
+                "left-edge"
+                  ? "active"
+                  : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -241,7 +403,11 @@ export default function InventoryPage({
               className={[
                 "dock-drop-zone",
                 "dock-drop-zone-right",
-                docking.dockDrag.target === "right-edge" ? "active" : "",
+                docking.dockDrag
+                  .target ===
+                "right-edge"
+                  ? "active"
+                  : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
@@ -252,46 +418,99 @@ export default function InventoryPage({
         )}
 
         {docking.dockOrder
-          .filter((panel) => docking.panelPosition(panel) === "left")
-          .map((panel) => renderDockPanel(panel, "left"))}
+          .filter(
+            (panel) =>
+              docking.panelPosition(
+                panel,
+              ) === "left",
+          )
+          .map((panel) =>
+            renderDockPanel(
+              panel,
+              "left",
+            ),
+          )}
 
         <main className="inventory-area">
           <div className="page-header">
             <h1>IT-Inventar</h1>
-            <span>{view.countText}</span>
+            <span>
+              {view.countText}
+            </span>
           </div>
 
           <InventoryTable
             rows={view.filteredRows}
-            columns={columns.displayedColumns}
-            allColumns={columns.availableColumns}
-            visibleColumns={columns.visibleColumns}
-            selectedKeys={view.selectedKeys}
+            columns={
+              columns.displayedColumns
+            }
+            allColumns={
+              columns.availableColumns
+            }
+            visibleColumns={
+              columns.visibleColumns
+            }
+            selectedKeys={
+              view.selectedKeys
+            }
             loading={loading}
             getRowKey={getRowKey}
-            getHeaderLabel={columns.getHeaderLabel}
-            formatValue={columns.formatValue}
-            onSelectionChange={view.setSelectedKeys}
-            onMoveColumn={columns.moveColumn}
-            onColumnVisible={columns.setColumnVisible}
-            onShowAllColumns={columns.showAllColumns}
-            onResetColumns={columns.resetColumns}
+            getHeaderLabel={
+              columns.getHeaderLabel
+            }
+            formatValue={
+              columns.formatValue
+            }
+            onSelectionChange={
+              view.setSelectedKeys
+            }
+            onMoveColumn={
+              columns.moveColumn
+            }
+            onColumnVisible={
+              columns.setColumnVisible
+            }
+            onShowAllColumns={
+              columns.showAllColumns
+            }
+            onResetColumns={
+              columns.resetColumns
+            }
           />
         </main>
 
         {docking.dockOrder
-          .filter((panel) => docking.panelPosition(panel) === "right")
-          .map((panel) => renderDockPanel(panel, "right"))}
+          .filter(
+            (panel) =>
+              docking.panelPosition(
+                panel,
+              ) === "right",
+          )
+          .map((panel) =>
+            renderDockPanel(
+              panel,
+              "right",
+            ),
+          )}
       </div>
 
-      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <AboutDialog
+        open={aboutOpen}
+        onClose={() =>
+          setAboutOpen(false)
+        }
+      />
 
       <div className="status-bar">
-        <span>{view.countText}</span>
+        <span>
+          {view.countText}
+        </span>
 
         <span
           className="status-user"
-          title={`Angemeldet als ${email}`}
+          title={
+            `Angemeldet als ${email}`
+          }
         >
           Angemeldet: {email}
         </span>

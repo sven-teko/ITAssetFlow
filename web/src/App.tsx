@@ -1,13 +1,5 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
-
-import type {
-  ReactNode,
-} from "react";
-
+import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import {
   Link,
   Navigate,
@@ -20,17 +12,14 @@ import InventoryPage from "./pages/InventoryPage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
 
-
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
-
+  import.meta.env.VITE_API_BASE_URL ??
+  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 export type AppRole =
   | "admin"
   | "user"
   | "viewer";
-
 
 type SessionResponse = {
   authenticated: boolean;
@@ -38,14 +27,12 @@ type SessionResponse = {
   role: AppRole | null;
 };
 
-
 type ProtectedPageProps = {
   email: string | null;
   role: AppRole | null;
   allowedRoles?: AppRole[];
   children: ReactNode;
 };
-
 
 function ProtectedPage({
   email,
@@ -63,10 +50,8 @@ function ProtectedPage({
   }
 
   if (
-    allowedRoles
-    && !allowedRoles.includes(
-      role,
-    )
+    allowedRoles &&
+    !allowedRoles.includes(role)
   ) {
     return (
       <Navigate
@@ -79,7 +64,6 @@ function ProtectedPage({
   return children;
 }
 
-
 function SimplePage({
   title,
   text,
@@ -90,13 +74,9 @@ function SimplePage({
   return (
     <div className="content-page">
       <div className="content-page-card">
-        <h1>
-          {title}
-        </h1>
+        <h1>{title}</h1>
 
-        <p>
-          {text}
-        </p>
+        <p>{text}</p>
 
         <Link
           className="page-back-link"
@@ -109,136 +89,92 @@ function SimplePage({
   );
 }
 
-
 export default function App() {
   const [
     checkingSession,
     setCheckingSession,
-  ] = useState(
-    true,
-  );
+  ] = useState(true);
 
   const [
     email,
     setEmail,
-  ] = useState<string | null>(
-    null,
-  );
+  ] = useState<string | null>(null);
 
   const [
     role,
     setRole,
-  ] = useState<AppRole | null>(
-    null,
+  ] = useState<AppRole | null>(null);
+
+  const clearSession = useCallback(
+    (): void => {
+      setEmail(null);
+      setRole(null);
+    },
+    [],
   );
 
-
-  const clearSession =
-    useCallback(
-      (): void => {
-        setEmail(
-          null,
+  const checkSession = useCallback(
+    async (): Promise<void> => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/auth/session`,
+          {
+            credentials: "include",
+          },
         );
 
-        setRole(
-          null,
-        );
-      },
-      [],
-    );
-
-
-  const checkSession =
-    useCallback(
-      async (): Promise<void> => {
-        try {
-          const response =
-            await fetch(
-              `${API_BASE}/api/auth/session`,
-              {
-                credentials:
-                  "include",
-              },
-            );
-
-          if (!response.ok) {
-            clearSession();
-            return;
-          }
-
-          const data = (
-            await response.json()
-          ) as SessionResponse;
-
-          if (
-            !data.authenticated
-            || !data.email
-            || !data.role
-            || ![
-              "admin",
-              "user",
-              "viewer",
-            ].includes(
-              data.role,
-            )
-          ) {
-            clearSession();
-            return;
-          }
-
-          setEmail(
-            data.email,
-          );
-
-          setRole(
-            data.role,
-          );
-
-        } catch {
+        if (!response.ok) {
           clearSession();
-
-        } finally {
-          setCheckingSession(
-            false,
-          );
+          return;
         }
-      },
-      [
-        clearSession,
-      ],
-    );
 
+        const data =
+          (await response.json()) as SessionResponse;
+
+        if (
+          !data.authenticated ||
+          !data.email ||
+          !data.role ||
+          ![
+            "admin",
+            "user",
+            "viewer",
+          ].includes(data.role)
+        ) {
+          clearSession();
+          return;
+        }
+
+        setEmail(data.email);
+        setRole(data.role);
+      } catch {
+        clearSession();
+      } finally {
+        setCheckingSession(false);
+      }
+    },
+    [clearSession],
+  );
 
   useEffect(
     () => {
       void checkSession();
     },
-    [
-      checkSession,
-    ],
+    [checkSession],
   );
-
 
   function handleLogin(
     loggedInEmail: string,
   ): void {
-    // LoginPage setzt zuerst die HttpOnly-Cookies. Danach wird die
-    // serverseitig ermittelte Rolle über /api/auth/session geladen.
-    setEmail(
-      loggedInEmail,
-    );
-
-    setRole(
-      null,
-    );
-
-    setCheckingSession(
-      true,
-    );
+    // LoginPage setzt zuerst die HttpOnly-Cookies.
+    // Anschliessend wird die serverseitig ermittelte Rolle
+    // über /api/auth/session geladen.
+    setEmail(loggedInEmail);
+    setRole(null);
+    setCheckingSession(true);
 
     void checkSession();
   }
-
 
   if (checkingSession) {
     return (
@@ -247,7 +183,6 @@ export default function App() {
       </div>
     );
   }
-
 
   return (
     <Routes>
@@ -268,20 +203,16 @@ export default function App() {
       <Route
         path="/login"
         element={
-          email && role
-            ? (
-              <Navigate
-                to="/inventory"
-                replace
-              />
-            )
-            : (
-              <LoginPage
-                onLogin={
-                  handleLogin
-                }
-              />
-            )
+          email && role ? (
+            <Navigate
+              to="/inventory"
+              replace
+            />
+          ) : (
+            <LoginPage
+              onLogin={handleLogin}
+            />
+          )
         }
       />
 
@@ -295,9 +226,7 @@ export default function App() {
             <InventoryPage
               email={email ?? ""}
               role={role ?? "viewer"}
-              onLogout={
-                clearSession
-              }
+              onLogout={clearSession}
             />
           </ProtectedPage>
         }
