@@ -1,3 +1,4 @@
+import { matchesPurchaseDate } from "../utils/purchaseDateFilter";
 import { useEffect, useMemo, useState } from "react";
 
 import type {
@@ -10,6 +11,7 @@ import { getIdentifier, getRowKey, normalizeText } from "../utils/inventory";
 
 function emptyFilters(): InventoryFilters {
   return {
+    purchaseDate: { from: "", to: "" },
     groups: new Set(),
     categories: new Set(),
     conditions: new Set(),
@@ -141,6 +143,10 @@ export default function useInventoryView({
         filters.storageLocations.size > 0
         && !filters.storageLocations.has(normalizeText(row.storage_location))
       ) {
+        return false;
+      }
+
+      if (!matchesPurchaseDate(row.purchase_date, filters.purchaseDate)) {
         return false;
       }
 

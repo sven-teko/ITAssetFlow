@@ -1,0 +1,66 @@
+.navigation .purchase-date-filter {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.navigation .purchase-date-field {
+  position: relative;
+  min-width: 0;
+}
+
+.navigation .purchase-date-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 35px;
+  padding: 0 11px;
+  border: 1px solid #c9d1d9;
+  border-radius: 5px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  color-scheme: light;
+}
+
+.navigation .purchase-date-field input:focus-visible {
+  border-color: #2f6fb7;
+  outline: 2px solid #597b9d;
+  outline-offset: 1px;
+}
+
+/* Native Datumsfelder benötigen einen separaten Platzhalter. */
+.navigation .purchase-date-empty:not(:focus) {
+  color: transparent;
+}
+
+.navigation .purchase-date-empty:not(:focus)::-webkit-datetime-edit {
+  color: transparent;
+}
+
+.navigation .purchase-date-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  color: #111827;
+  pointer-events: none;
+}
+
+.navigation .purchase-date-field:focus-within .purchase-date-placeholder {
+  visibility: hidden;
+}
+
+.navigation .purchase-date-filter:disabled .purchase-date-placeholder {
+  color: #9ba4ad;
+}
+
+.navigation .purchase-date-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+}

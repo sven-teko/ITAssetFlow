@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -751,6 +752,17 @@ export default function AssetFormPage({
   >({});
 
 
+  const errorMessageRef = useRef<HTMLDivElement>(null);
+
+  // Fehler bei der Eingabeprüfung oder beim Speichern in den sichtbaren Bereich holen.
+  useEffect(() => {
+    if (errorMessage && !loading) {
+      errorMessageRef.current?.focus({ preventScroll: true });
+      errorMessageRef.current?.scrollIntoView({ block: "start" });
+    }
+  }, [errorMessage, loading]);
+
+
   useEffect(
     () => {
       async function loadForm(): Promise<void> {
@@ -1259,10 +1271,7 @@ export default function AssetFormPage({
 
 
               if (
-                !Boolean(
-                  model.is_active
-                  ?? true,
-                )
+                !(model.is_active ?? true)
                 && !isCurrentEditModel
               ) {
                 return false;
@@ -1326,47 +1335,15 @@ export default function AssetFormPage({
     );
 
 
-  useEffect(
-    () => {
-      if (
-        modelMode !== "existing"
-      ) {
-        return;
-      }
+  // Bei ungültiger Modellauswahl sofort auf das erste verfügbare Modell wechseln.
+  const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
+    ? selectedModelId
+    : idText(existingModels[0]?.id);
 
-      const stillAvailable =
-        existingModels.some(
-          (model) =>
-            sameId(
-              model.id,
-              selectedModelId,
-            ),
-        );
-
-      if (
-        stillAvailable
-      ) {
-        return;
-      }
-
-      setSelectedModelId(
-        existingModels[0]
-          ? idText(
-              existingModels[0].id,
-            )
-          : "",
-      );
-
-      setSpecValues(
-        {},
-      );
-    },
-    [
-      modelMode,
-      existingModels,
-      selectedModelId,
-    ],
-  );
+  if (modelMode === "existing" && selectedModelId !== availableModelId) {
+    setSelectedModelId(availableModelId);
+    setSpecValues({});
+  }
 
 
   const selectedModel =
@@ -2489,6 +2466,10 @@ export default function AssetFormPage({
     );
 
 
+    const saveErrorMessage = isEditMode
+      ? "Der Inventareintrag konnte nicht aktualisiert werden."
+      : "Der Inventareintrag konnte nicht gespeichert werden.";
+
     try {
       const response =
         await fetch(
@@ -2538,16 +2519,7 @@ export default function AssetFormPage({
       if (
         !response.ok
       ) {
-        let message =
-          isEditMode
-            ? (
-              "Der Inventareintrag konnte "
-              + "nicht aktualisiert werden."
-            )
-            : (
-              "Der Inventareintrag konnte "
-              + "nicht gespeichert werden."
-            );
+        let message = saveErrorMessage;
 
 
         if (
@@ -2588,17 +2560,7 @@ export default function AssetFormPage({
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : (
-            isEditMode
-              ? (
-                "Der Inventareintrag konnte "
-                + "nicht aktualisiert werden."
-              )
-              : (
-                "Der Inventareintrag konnte "
-                + "nicht gespeichert werden."
-              )
-          ),
+          : saveErrorMessage,
       );
 
     } finally {
@@ -2793,7 +2755,12 @@ export default function AssetFormPage({
         {
           errorMessage
           && (
-            <div className="asset-form-error-message">
+            <div
+              className="asset-form-error-message"
+              ref={errorMessageRef}
+              role="alert"
+              tabIndex={-1}
+            >
               {errorMessage}
             </div>
           )
@@ -2802,9 +2769,7 @@ export default function AssetFormPage({
 
         <div className="asset-form-columns">
 
-          {/* =================================================
-              LINKE SPALTE
-              ================================================= */}
+          {/* Linke Spalte */}
 
           <div className="asset-form-column">
 
@@ -3454,9 +3419,7 @@ export default function AssetFormPage({
           </div>
 
 
-          {/* =================================================
-              RECHTE SPALTE
-              ================================================= */}
+          {/* Rechte Spalte */}
 
           <div className="asset-form-column">
 
@@ -3581,8 +3544,7 @@ export default function AssetFormPage({
                       );
 
                     } catch {
-                      // Ungültiger Wert bleibt sichtbar.
-                      // Die Meldung folgt beim Speichern.
+                      // Ungültige Preise bleiben bis zur Prüfung beim Speichern sichtbar.
                     }
                   }}
                 />

@@ -36,9 +36,7 @@ input {
 }
 
 
-/* =========================================================
-   Controls
-   ========================================================= */
+/* Controls */
 
 button {
   min-height: 35px;
@@ -107,18 +105,14 @@ input:focus {
 }
 
 
-/* =========================================================
-   Versteckte Browser-Controls
-   ========================================================= */
+/* Versteckte Browser-Controls */
 
 .hidden-file-input {
   display: none;
 }
 
 
-/* =========================================================
-   Loading
-   ========================================================= */
+/* Loading */
 
 .loading-screen {
   width: 100%;
@@ -134,9 +128,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Login
-   ========================================================= */
+/* Login */
 
 .login-page {
   width: 100%;
@@ -270,9 +262,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Main Window
-   ========================================================= */
+/* Main Window */
 
 .main-window {
   width: 100%;
@@ -293,9 +283,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Menüleiste
-   ========================================================= */
+/* Menüleiste */
 
 .menu-bar {
   position: relative;
@@ -468,9 +456,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Workspace
-   ========================================================= */
+/* Workspace */
 
 .workspace {
   width: 100%;
@@ -483,9 +469,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Sidebars
-   ========================================================= */
+/* Sidebars */
 
 .navigation,
 .details {
@@ -540,9 +524,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Navigation
-   ========================================================= */
+/* Navigation */
 
 .navigation-content {
   min-height: 0;
@@ -630,9 +612,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Sidebar Dropdowns
-   ========================================================= */
+/* Sidebar Dropdowns */
 
 .filter-dropdown {
   position: relative;
@@ -728,9 +708,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Inventar
-   ========================================================= */
+/* Inventar */
 
 .inventory-area {
   min-width: 0;
@@ -777,9 +755,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Tabelle
-   ========================================================= */
+/* Tabelle */
 
 .table-wrapper {
   min-width: 0;
@@ -909,9 +885,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Detailansicht
-   ========================================================= */
+/* Detailansicht */
 
 .details-content {
   min-height: 0;
@@ -1016,9 +990,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Statusbar
-   ========================================================= */
+/* Statusbar */
 
 .status-bar {
   min-width: 0;
@@ -1053,9 +1025,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Normale Seiten
-   ========================================================= */
+/* Normale Seiten */
 
 .content-page {
   width: 100%;
@@ -1118,9 +1088,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Scrollbars
-   ========================================================= */
+/* Scrollbars */
 
 .table-wrapper::-webkit-scrollbar,
 .details-content::-webkit-scrollbar,
@@ -1158,9 +1126,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Kleinere Browserfenster
-   ========================================================= */
+/* Kleinere Browserfenster */
 
 @media (max-width: 1050px) {
   .navigation {
@@ -1183,9 +1149,7 @@ input:focus {
     display: none;
   }
 }
-/* =========================================================
-   Erweiterte Tabellenbedienung
-   ========================================================= */
+/* Erweiterte Tabellenbedienung */
 
 .inventory-table {
   width: max-content;
@@ -1352,9 +1316,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Neupreis in der Detailansicht
-   ========================================================= */
+/* Neupreis in der Detailansicht */
 
 .detail-row-emphasized {
   margin-top: 9px;
@@ -1372,9 +1334,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   Über-Dialog
-   ========================================================= */
+/* Über-Dialog */
 
 .about-overlay {
   position: fixed;
@@ -1519,9 +1479,7 @@ input:focus {
 .about-dialog-actions button {
   min-width: 90px;
 }
-/* =========================================================
-   Kopfbereich / Branding
-   ========================================================= */
+/* Kopfbereich / Branding */
 
 .menu-brand {
   height: 40px;
@@ -1603,9 +1561,7 @@ input:focus {
     padding: 0 9px;
   }
 }
-/* =========================================================
-   Drag-Docking der Seitenleisten
-   ========================================================= */
+/* Drag-Docking der Seitenleisten */
 
 .workspace {
   position: relative;
@@ -1770,9 +1726,7 @@ input:focus {
     display: none;
   }
 }
-/* =========================================================
-   Dock-Reihenfolge innerhalb derselben Seite
-   ========================================================= */
+/* Dock-Reihenfolge innerhalb derselben Seite */
 
 .dock-shell-drop-before::before,
 .dock-shell-drop-after::after {
@@ -1829,9 +1783,7 @@ input:focus {
 }
 
 
-/* =========================================================
-   v0.3.5 – Layout- und Branding-Korrekturen
-   ========================================================= */
+/* v0.3.5 – Layout- und Branding-Korrekturen */
 
 .status-bar {
   justify-content: space-between;

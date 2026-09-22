@@ -1,8 +1,10 @@
 import {
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
+import "./MainMenu.css";
 
 
 export type DockPosition =
@@ -72,6 +74,70 @@ type MenuName =
   | "options"
   | "help"
   | null;
+
+
+type DockPanelMenuProps = {
+  title: string;
+  visible: boolean;
+  position: DockPosition;
+  onVisibleChange: (visible: boolean) => void;
+  onPositionChange: (position: DockPosition) => void;
+};
+
+const DOCK_POSITIONS = [
+  { value: "left", label: "Links andocken" },
+  { value: "right", label: "Rechts andocken" },
+] as const;
+
+function DockPanelMenu({
+  title,
+  visible,
+  position,
+  onVisibleChange,
+  onPositionChange,
+}: DockPanelMenuProps) {
+  const groupId = useId();
+
+  return (
+    <div className="menu-submenu dock-panel-menu">
+      <button type="button" aria-label={`${title}: Optionen`}>
+        <span>{title}</span>
+        <span className="dock-menu-chevron" aria-hidden="true">›</span>
+      </button>
+      <div className="submenu-popup dock-panel-popup" aria-label={`${title}: Optionen`}>
+        <label className="dock-menu-option">
+          <input
+            type="checkbox"
+            checked={visible}
+            onChange={(event) => onVisibleChange(event.target.checked)}
+          />
+          <span>{title} anzeigen</span>
+        </label>
+        <div className="menu-separator" />
+        <fieldset className="dock-menu-position" aria-label={`${title}: Position`}>
+          {DOCK_POSITIONS.map(({ value, label }) => (
+            <label
+              key={value}
+              className={`dock-menu-option${position === value ? " is-selected" : ""}`}
+            >
+              <input
+                type="radio"
+                name={groupId}
+                value={value}
+                checked={position === value}
+                onClick={() => {
+                  if (position === value) onPositionChange(value);
+                }}
+                onChange={() => onPositionChange(value)}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
+      </div>
+    </div>
+  );
+}
 
 
 export default function MainMenu({
@@ -415,178 +481,20 @@ export default function MainMenu({
           && (
             <div className="menu-popup">
 
-              <div className="menu-submenu">
-
-                <button type="button">
-                  <span>
-                    Navigation
-                  </span>
-
-                  <span>
-                    ›
-                  </span>
-                </button>
-
-
-                <div className="submenu-popup">
-
-                  <label className="menu-check-option">
-
-                    <input
-                      type="checkbox"
-                      checked={
-                        navigationVisible
-                      }
-                      onChange={(event) =>
-                        onNavigationVisible(
-                          event.target.checked,
-                        )
-                      }
-                    />
-
-                    <span>
-                      Navigation anzeigen
-                    </span>
-
-                  </label>
-
-
-                  <div className="menu-separator" />
-
-
-                  <button
-                    type="button"
-                    className={
-                      navigationPosition === "left"
-                        ? "checked-menu-button"
-                        : ""
-                    }
-                    onClick={() =>
-                      onNavigationPosition(
-                        "left",
-                      )
-                    }
-                  >
-                    Links andocken
-                  </button>
-
-
-                  <button
-                    type="button"
-                    className={
-                      navigationPosition === "right"
-                        ? "checked-menu-button"
-                        : ""
-                    }
-                    onClick={() =>
-                      onNavigationPosition(
-                        "right",
-                      )
-                    }
-                  >
-                    Rechts andocken
-                  </button>
-
-
-                  <button
-                    type="button"
-                    disabled
-                    title="Wird später umgesetzt"
-                  >
-                    Navigation lösen
-                  </button>
-
-                </div>
-
-              </div>
-
-
-              <div className="menu-submenu">
-
-                <button type="button">
-
-                  <span>
-                    Detailansicht
-                  </span>
-
-                  <span>
-                    ›
-                  </span>
-
-                </button>
-
-
-                <div className="submenu-popup">
-
-                  <label className="menu-check-option">
-
-                    <input
-                      type="checkbox"
-                      checked={
-                        detailVisible
-                      }
-                      onChange={(event) =>
-                        onDetailVisible(
-                          event.target.checked,
-                        )
-                      }
-                    />
-
-                    <span>
-                      Detailansicht anzeigen
-                    </span>
-
-                  </label>
-
-
-                  <div className="menu-separator" />
-
-
-                  <button
-                    type="button"
-                    className={
-                      detailPosition === "left"
-                        ? "checked-menu-button"
-                        : ""
-                    }
-                    onClick={() =>
-                      onDetailPosition(
-                        "left",
-                      )
-                    }
-                  >
-                    Links andocken
-                  </button>
-
-
-                  <button
-                    type="button"
-                    className={
-                      detailPosition === "right"
-                        ? "checked-menu-button"
-                        : ""
-                    }
-                    onClick={() =>
-                      onDetailPosition(
-                        "right",
-                      )
-                    }
-                  >
-                    Rechts andocken
-                  </button>
-
-
-                  <button
-                    type="button"
-                    disabled
-                    title="Wird später umgesetzt"
-                  >
-                    Detailansicht lösen
-                  </button>
-
-                </div>
-
-              </div>
+              <DockPanelMenu
+                title="Navigation"
+                visible={navigationVisible}
+                position={navigationPosition}
+                onVisibleChange={onNavigationVisible}
+                onPositionChange={onNavigationPosition}
+              />
+              <DockPanelMenu
+                title="Detailansicht"
+                visible={detailVisible}
+                position={detailPosition}
+                onVisibleChange={onDetailVisible}
+                onPositionChange={onDetailPosition}
+              />
 
 
               <div className="menu-separator" />
