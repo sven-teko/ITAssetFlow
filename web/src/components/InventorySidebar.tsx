@@ -277,6 +277,7 @@ type InventorySidebarProps = {
   options: InventoryFilterOptions;
 
   loading: boolean;
+  canManageProductModels: boolean;
 
   selectedIdentifiers: string[];
   countText: string;
@@ -292,6 +293,7 @@ type InventorySidebarProps = {
   onCreate: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onProductModels: () => void;
 };
 
 
@@ -300,6 +302,7 @@ export default function InventorySidebar({
   filters,
   options,
   loading,
+  canManageProductModels,
   selectedIdentifiers,
   countText,
   onSearchChange,
@@ -307,6 +310,7 @@ export default function InventorySidebar({
   onCreate,
   onEdit,
   onDelete,
+  onProductModels,
 }: InventorySidebarProps) {
   const selectionCount =
     selectedIdentifiers.length;
@@ -436,6 +440,16 @@ export default function InventorySidebar({
                   ? `${selectionCount} Einträge löschen`
                   : "Einträge löschen"
             }
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-product-models-button"
+            disabled={loading || !canManageProductModels}
+            title={canManageProductModels ? undefined : "Administratorrechte erforderlich"}
+            onClick={onProductModels}
+          >
+            Produktmodelle bearbeiten
           </button>
 
         </div>

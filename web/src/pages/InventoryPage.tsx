@@ -172,6 +172,10 @@ export default function InventoryPage({
     );
   }
 
+  function editProductModels(): void {
+    if (canManageSettings) navigate("/settings?tab=product-models");
+  }
+
   const navigationPanel =
     docking.navigationVisible ? (
       <InventorySidebar
@@ -181,6 +185,7 @@ export default function InventoryPage({
           view.filterOptions
         }
         loading={loading}
+        canManageProductModels={canManageSettings}
         selectedIdentifiers={
           view.selectedIdentifiers
         }
@@ -193,6 +198,7 @@ export default function InventoryPage({
         }
         onCreate={createEntry}
         onEdit={editEntry}
+        onProductModels={editProductModels}
         onDelete={() => {
           if (!canEdit) {
             readOnlyNotice();

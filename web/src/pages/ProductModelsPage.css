@@ -1,0 +1,99 @@
+/* Produktmodelle verwenden denselben Rahmen und dieselben Felder wie die übrigen Einstellungen. */
+
+.product-models-panel {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+.product-models-page {
+  min-width: 0;
+  padding: 16px;
+}
+
+.product-models-page button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.product-models-selection {
+  min-width: 0;
+  margin: 0 0 16px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #d8dde3;
+  border-radius: 6px;
+}
+
+.product-models-selection legend {
+  padding: 0 5px;
+  font-weight: 600;
+}
+
+.product-models-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 12px;
+}
+
+.product-models-filters label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.product-models-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.product-models-toolbar .product-models-delete:not(:disabled) {
+  color: #a12c27;
+  border-color: #d7aaa7;
+}
+
+.product-models-spec-footer {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e6eb;
+}
+
+.product-models-json {
+  min-height: 96px;
+  font-family: Consolas, monospace;
+}
+
+.product-models-actions > span {
+  flex: 1 1 160px;
+  color: #66717c;
+  font-size: 13px;
+}
+
+.product-models-actions > span:empty {
+  display: none;
+}
+
+@media (max-width: 620px) {
+  .product-models-page {
+    padding: 12px;
+  }
+  .product-models-selection {
+    padding: 12px;
+  }
+  .product-models-filters {
+    grid-template-columns: 1fr;
+  }
+  .product-models-actions > span {
+    flex-basis: 100%;
+  }
+}
+
+@media (max-height: 480px) {
+  .product-models-panel {
+    flex: 1 0 auto;
+  }
+}

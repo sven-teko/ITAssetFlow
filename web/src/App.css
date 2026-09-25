@@ -578,6 +578,10 @@ input:focus {
 }
 
 
+.sidebar-actions .sidebar-product-models-button {
+  margin-top: 8px;
+}
+
 .sidebar-actions button {
   width: 100%;
 

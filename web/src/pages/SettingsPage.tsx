@@ -7,8 +7,12 @@ import {
 
 import {
   useNavigate,
+  useSearchParams,
 } from "react-router-dom";
 
+import type { KeyboardEvent } from "react";
+import ProductModelsPage from "./ProductModelsPage";
+import type { ProductModelsHandle } from "./ProductModelsPage";
 import "./SettingsPage.css";
 
 
@@ -59,10 +63,22 @@ type MessageTone =
 type SettingsTab =
   | "structure"
   | "categories"
+  | "product-models"
   | "specifications"
   | "manufacturers"
   | "permissions"
   | "columns";
+
+
+const SETTINGS_TABS: Array<[SettingsTab, string]> = [
+  ["structure", "Struktur"],
+  ["categories", "Kategorien"],
+  ["product-models", "Produktmodelle"],
+  ["specifications", "Spezifikationen"],
+  ["manufacturers", "Hersteller"],
+  ["permissions", "Berechtigungen"],
+  ["columns", "Standardspalten"],
+];
 
 
 type DeleteKey =
@@ -518,12 +534,12 @@ export default function SettingsPage({
     setReloadSequence,
   ] = useState(0);
 
-  const [
-    activeTab,
-    setActiveTab,
-  ] = useState<SettingsTab>(
-    "structure",
-  );
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const activeTab = SETTINGS_TABS.find(([key]) => key === requestedTab)?.[0] ?? "structure";
+  const modelEditor = useRef<ProductModelsHandle>(null);
+  const [modelSaving, setModelSaving] = useState(false);
+  const [savedSettings, setSavedSettings] = useState("");
 
   const [
     loading,
@@ -662,6 +678,53 @@ export default function SettingsPage({
     FALLBACK_GROUP_LABELS,
   );
 
+
+  const hasSettingsChanges = Boolean(savedSettings && savedSettings !== JSON.stringify([
+    sites, departments, locations, categories, manufacturers, employees,
+    [...defaultColumns].sort(), deleted,
+  ]));
+
+  useEffect(() => {
+    if (!hasSettingsChanges && !saving) return;
+    const preventUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventUnload);
+    return () => window.removeEventListener("beforeunload", preventUnload);
+  }, [hasSettingsChanges, saving]);
+
+  function changeTab(tab: SettingsTab): boolean {
+    if (tab === activeTab) return true;
+    if (saving || modelSaving || modelEditor.current?.confirmLeave() === false) return false;
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tab);
+    setSearchParams(next, { replace: true });
+    return true;
+  }
+
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number): void {
+    const last = SETTINGS_TABS.length - 1;
+    const nextIndex = event.key === "ArrowRight" ? (index + 1) % SETTINGS_TABS.length
+      : event.key === "ArrowLeft" ? (index + last) % SETTINGS_TABS.length
+      : event.key === "Home" ? 0 : event.key === "End" ? last : null;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = SETTINGS_TABS[nextIndex][0];
+    if (changeTab(nextTab)) document.getElementById(`settings-tab-${nextTab}`)?.focus();
+  }
+
+  function closeSettings(): void {
+    if (saving || modelSaving || modelEditor.current?.confirmLeave() === false) return;
+    if (hasSettingsChanges && !window.confirm("Nicht gespeicherte Einstellungen verwerfen?")) return;
+    navigate("/inventory");
+  }
+
+  function editModelSpecifications(categoryId: string): void {
+    if (!changeTab("specifications")) return;
+    const category = categories.find(row => String(row.id) === categoryId);
+    if (category) setSpecCategoryKey(category.client_key);
+  }
 
   function showMessage(
     value: string,
@@ -1039,15 +1102,14 @@ export default function SettingsPage({
               : FALLBACK_GROUP_LABELS,
           );
 
-          setDefaultColumns(
-            new Set(
-              readStoredColumns(
-                email,
-                normalized.column_order,
-                normalized.factory_default_visible_columns,
-              ),
-            ),
+          const storedColumns = readStoredColumns(
+            email, normalized.column_order, normalized.factory_default_visible_columns,
           );
+          setDefaultColumns(new Set(storedColumns));
+          setSavedSettings(JSON.stringify([
+            normalizedSites, normalizedDepartments, normalizedLocations, normalizedCategories,
+            normalizedManufacturers, normalizedEmployees, [...storedColumns].sort(), emptyDeleted(),
+          ]));
 
           setSpecCategoryKey(
             normalizedCategories[0]
@@ -2116,7 +2178,7 @@ export default function SettingsPage({
 
 
   async function save(): Promise<void> {
-    if (saving) {
+    if (saving || loading || !savedSettings) {
       return;
     }
 
@@ -2310,19 +2372,26 @@ export default function SettingsPage({
   function renderStructure() {
     return (
       <div className="settings-structure-page">
+        <header className="settings-page-intro">
+          <h2>Standorte und Zuordnungen</h2>
+          <p>Standort → Abteilung → Lagerort. Wähle eine Zeile aus und klicke auf „Bearbeiten“.</p>
+        </header>
 
         <section className="settings-section">
           <div className="settings-section-header">
-            <h2>Standorte</h2>
+            <div>
+              <h3>Standorte <span className="settings-count">{sites.length}</span></h3>
+              <p>Adressen und Standorte deiner Organisation.</p>
+            </div>
             <div className="settings-actions">
-              <button type="button" onClick={addSite} disabled={saving}>Hinzufügen</button>
+              <button type="button" onClick={addSite} disabled={saving}>Standort hinzufügen</button>
               <button type="button" onClick={() => toggleEditing(selectedSite, "Standort")} disabled={saving || !selectedSite}>{selectedSite && editingRows.has(selectedSite) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
               <button type="button" onClick={deleteSite} disabled={saving || !selectedSite}>Löschen</button>
             </div>
           </div>
 
           <div className="settings-table-wrap">
-            <table className="settings-table">
+            <table className="settings-table settings-sites-table" aria-label="Standorte">
               <thead>
                 <tr>
                   <th>Standort</th>
@@ -2334,10 +2403,19 @@ export default function SettingsPage({
                 </tr>
               </thead>
               <tbody>
+                {sites.length === 0 && <tr><td colSpan={6} className="settings-empty-state">Noch keine Standorte vorhanden. Mit „Standort hinzufügen“ beginnen.</td></tr>}
                 {sites.map((row) => (
                   <tr
                     key={row.client_key}
                     className={rowClass(selectedSite === row.client_key, editingRows.has(row.client_key))}
+                    tabIndex={0}
+                    aria-selected={selectedSite === row.client_key}
+                    onKeyDown={event => {
+                      if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+                      event.preventDefault();
+                      setSelectedSite(row.client_key);
+                      if (event.key === "Enter" && !saving) startEditing(row.client_key, "Standort");
+                    }}
                     title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
                     onClick={() => { setSelectedSite(row.client_key); if (!editingRows.has(row.client_key)) selectionHint("Standort", row.name); }}
                     onDoubleClick={() => startEditing(row.client_key, "Standort")}
@@ -2355,20 +2433,21 @@ export default function SettingsPage({
           </div>
         </section>
 
-        <div className="settings-separator" />
-
         <section className="settings-section">
           <div className="settings-section-header">
-            <h2>Abteilungen</h2>
+            <div>
+              <h3>Abteilungen <span className="settings-count">{departments.length}</span></h3>
+              <p>Abteilungen dem passenden Standort zuordnen.</p>
+            </div>
             <div className="settings-actions">
-              <button type="button" onClick={addDepartment} disabled={saving}>Hinzufügen</button>
+              <button type="button" onClick={addDepartment} disabled={saving}>Abteilung hinzufügen</button>
               <button type="button" onClick={() => toggleEditing(selectedDepartment, "Abteilung")} disabled={saving || !selectedDepartment}>{selectedDepartment && editingRows.has(selectedDepartment) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
               <button type="button" onClick={deleteDepartment} disabled={saving || !selectedDepartment}>Löschen</button>
             </div>
           </div>
 
           <div className="settings-table-wrap">
-            <table className="settings-table">
+            <table className="settings-table settings-departments-table" aria-label="Abteilungen">
               <thead>
                 <tr>
                   <th>Abteilung</th>
@@ -2376,12 +2455,21 @@ export default function SettingsPage({
                 </tr>
               </thead>
               <tbody>
+                {departments.length === 0 && <tr><td colSpan={2} className="settings-empty-state">Noch keine Abteilungen vorhanden. Mit „Abteilung hinzufügen“ beginnen.</td></tr>}
                 {departments.map((row) => {
                   const editing = editingRows.has(row.client_key);
                   return (
                     <tr
                       key={row.client_key}
                       className={rowClass(selectedDepartment === row.client_key, editing)}
+                      tabIndex={0}
+                      aria-selected={selectedDepartment === row.client_key}
+                      onKeyDown={event => {
+                        if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+                        event.preventDefault();
+                        setSelectedDepartment(row.client_key);
+                        if (event.key === "Enter" && !saving) startEditing(row.client_key, "Abteilung");
+                      }}
                       title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
                       onClick={() => { setSelectedDepartment(row.client_key); if (!editing) selectionHint("Abteilung", row.name); }}
                       onDoubleClick={() => startEditing(row.client_key, "Abteilung")}
@@ -2412,20 +2500,21 @@ export default function SettingsPage({
           </div>
         </section>
 
-        <div className="settings-separator" />
-
         <section className="settings-section">
           <div className="settings-section-header">
-            <h2>Lagerorte</h2>
+            <div>
+              <h3>Lagerorte <span className="settings-count">{locations.length}</span></h3>
+              <p>Lager, Bereiche und Räume innerhalb einer Abteilung verwalten.</p>
+            </div>
             <div className="settings-actions">
-              <button type="button" onClick={addLocation} disabled={saving}>Hinzufügen</button>
+              <button type="button" onClick={addLocation} disabled={saving}>Lagerort hinzufügen</button>
               <button type="button" onClick={() => toggleEditing(selectedLocation, "Lagerort")} disabled={saving || !selectedLocation}>{selectedLocation && editingRows.has(selectedLocation) ? "Bearbeitung beenden" : "Bearbeiten"}</button>
               <button type="button" onClick={deleteLocation} disabled={saving || !selectedLocation}>Löschen</button>
             </div>
           </div>
 
           <div className="settings-table-wrap">
-            <table className="settings-table">
+            <table className="settings-table settings-locations-table" aria-label="Lagerorte">
               <thead>
                 <tr>
                   <th>Lagerort</th>
@@ -2435,12 +2524,21 @@ export default function SettingsPage({
                 </tr>
               </thead>
               <tbody>
+                {locations.length === 0 && <tr><td colSpan={4} className="settings-empty-state">Noch keine Lagerorte vorhanden. Mit „Lagerort hinzufügen“ beginnen.</td></tr>}
                 {locations.map((row) => {
                   const editing = editingRows.has(row.client_key);
                   return (
                     <tr
                       key={row.client_key}
                       className={rowClass(selectedLocation === row.client_key, editing)}
+                      tabIndex={0}
+                      aria-selected={selectedLocation === row.client_key}
+                      onKeyDown={event => {
+                        if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+                        event.preventDefault();
+                        setSelectedLocation(row.client_key);
+                        if (event.key === "Enter" && !saving) startEditing(row.client_key, "Lagerort");
+                      }}
                       title="Klicken zum Auswählen · Doppelklick zum Bearbeiten"
                       onClick={() => { setSelectedLocation(row.client_key); if (!editing) selectionHint("Lagerort", row.name); }}
                       onDoubleClick={() => startEditing(row.client_key, "Lagerort")}
@@ -2949,61 +3047,72 @@ export default function SettingsPage({
     <div className="settings-page">
       <div className="settings-window">
         <header className="settings-titlebar">
-          <h1>Einstellungen</h1>
+          <div>
+            <h1>Einstellungen</h1>
+            <p>Stammdaten und Darstellung von ITAssetFlow verwalten.</p>
+          </div>
+          <button type="button" disabled={saving || modelSaving} onClick={closeSettings}>← Zurück zum Inventar</button>
         </header>
 
-        <nav className="settings-tabs" aria-label="Einstellungsbereiche">
-          {([
-            ["structure", "Struktur"],
-            ["categories", "Kategorien"],
-            ["specifications", "Spezifikationen"],
-            ["manufacturers", "Hersteller"],
-            ["permissions", "Berechtigungen"],
-            ["columns", "Standardspalten"],
-          ] as Array<[SettingsTab, string]>).map(([key, label]) => (
+        <nav className="settings-tabs" role="tablist" aria-label="Einstellungsbereiche">
+          {SETTINGS_TABS.map(([key, label], index) => (
             <button
               type="button"
               key={key}
+              id={`settings-tab-${key}`}
+              role="tab"
+              aria-selected={activeTab === key}
+              aria-controls="settings-panel"
+              tabIndex={activeTab === key ? 0 : -1}
               className={activeTab === key ? "active" : ""}
-              disabled={saving}
-              onClick={() => setActiveTab(key)}
+              disabled={saving || modelSaving}
+              onClick={() => changeTab(key)}
+              onKeyDown={event => navigateTabs(event, index)}
             >
               {label}
             </button>
           ))}
         </nav>
 
-        <main className="settings-content">
-          {activeTab === "structure" && renderStructure()}
-          {activeTab === "categories" && renderCategories()}
-          {activeTab === "specifications" && renderSpecifications()}
-          {activeTab === "manufacturers" && renderManufacturers()}
-          {activeTab === "permissions" && renderPermissions()}
-          {activeTab === "columns" && renderColumns()}
-        </main>
-
-        <div className={`settings-message ${messageTone}`}>
-          {message}
-        </div>
-
-        <footer className="settings-footer">
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => navigate("/inventory")}
-          >
-            Abbrechen
-          </button>
-
-          <button
-            type="button"
-            className="primary-button"
-            disabled={saving}
-            onClick={() => void save()}
-          >
-            {saving ? "Wird gespeichert ..." : "Übernehmen"}
-          </button>
-        </footer>
+        {activeTab === "product-models" ? (
+          <ProductModelsPage
+            ref={modelEditor}
+            onSessionExpired={onSessionExpired}
+            onEditSpecifications={editModelSpecifications}
+            onSavingChange={setModelSaving}
+            pendingSettings={hasSettingsChanges}
+          />
+        ) : (
+          <>
+            <main className="settings-content" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`}>
+              {!savedSettings ? (
+                <div className="settings-empty-state">
+                  <p>Die Einstellungen konnten nicht geladen werden.</p>
+                  <button type="button" onClick={() => setReloadSequence(value => value + 1)}>Erneut laden</button>
+                </div>
+              ) : (
+                <>
+                  {activeTab === "structure" && renderStructure()}
+                  {activeTab === "categories" && renderCategories()}
+                  {activeTab === "specifications" && renderSpecifications()}
+                  {activeTab === "manufacturers" && renderManufacturers()}
+                  {activeTab === "permissions" && renderPermissions()}
+                  {activeTab === "columns" && renderColumns()}
+                </>
+              )}
+            </main>
+            <div className={`settings-message ${messageTone}`} role={messageTone === "error" ? "alert" : "status"}>
+              {message}
+            </div>
+            <footer className="settings-footer">
+              <span className="settings-save-state">{hasSettingsChanges ? "Nicht gespeicherte Einstellungen" : ""}</span>
+              <button type="button" disabled={saving} onClick={closeSettings}>Schliessen</button>
+              <button type="button" className="primary-button" disabled={saving || !savedSettings} onClick={() => void save()}>
+                {saving ? "Wird gespeichert …" : "Übernehmen"}
+              </button>
+            </footer>
+          </>
+        )}
       </div>
     </div>
   );

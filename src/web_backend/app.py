@@ -32,6 +32,7 @@ from infrastructure.supabase_client import (
     restore_user_session,
 )
 from web_backend.settings_routes import create_settings_router
+from web_backend.product_model_routes import create_product_models_router
 
 from inventory import (
     CONDITION_LABELS,
@@ -53,17 +54,13 @@ app = FastAPI(
 )
 
 
-# =========================================================
 # React-Produktionsbuild
-# =========================================================
 
 PROJECT_ROOT = Path(
     __file__
 ).resolve().parents[2]
 
-# .env muss bereits vor der CORS- und Cookie-Konfiguration
-# geladen werden. get_app_config() wird erst später innerhalb
-# der API-Routen aufgerufen und wäre dafür zu spät.
+# .env muss bereits vor der CORS- und Cookie-Konfiguration geladen werden. get_app_config() wird erst später innerhalb der API-Routen aufgerufen und wäre dafür zu spät.
 load_dotenv(
     PROJECT_ROOT / ".env",
     override=False,
@@ -85,16 +82,7 @@ WEB_ASSETS_DIR = (
     / "assets"
 )
 
-# Im Firmenbetrieb liefert IIS die React-WebApp aus.
-# FastAPI soll dort nur noch die API bereitstellen.
-#
-# false:
-#   http://localhost:8000/ -> keine React-WebApp (404)
-#   /api/...               -> weiterhin aktiv
-#
-# true:
-#   FastAPI liefert zusätzlich web/dist aus. Dieser Modus ist
-#   beispielsweise für ein eigenständiges Test-/Abgabepaket ohne IIS gedacht.
+# Im Firmenbetrieb liefert IIS die React-WebApp aus. FastAPI soll dort nur noch die API bereitstellen. false: http://localhost:8000/ -> keine React-WebApp (404) /api/...               -> weiterhin aktiv true: FastAPI liefert zusätzlich web/dist aus. Dieser Modus ist beispielsweise für ein eigenständiges Test-/Abgabepaket ohne IIS gedacht.
 SERVE_WEB_BUILD = (
     os.getenv(
         "ITASSETFLOW_SERVE_WEB",
@@ -116,9 +104,7 @@ print(
 )
 
 
-# =========================================================
 # CORS
-# =========================================================
 
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
@@ -144,10 +130,7 @@ ALLOWED_CORS_ORIGINS = list(
     )
 )
 
-# Zusätzlich dürfen bei Bedarf Ports am internen Hostnamen vorkommen.
-# Der Browser-Origin der IIS-Seite ist normalerweise
-# http://itassetflow.dlc-informatik.local, aber diese Regex macht lokale
-# Testvarianten wie :80 oder :8080 ebenfalls unproblematisch.
+# Zusätzlich dürfen bei Bedarf Ports am internen Hostnamen vorkommen. Der Browser-Origin der IIS-Seite ist normalerweise http://itassetflow.dlc-informatik.local, aber diese Regex macht lokale Testvarianten wie :80 oder :8080 ebenfalls unproblematisch.
 CORS_ORIGIN_REGEX = os.getenv(
     "ITASSETFLOW_CORS_ORIGIN_REGEX",
     r"^https?://itassetflow\.dlc-informatik\.local(?::\d+)?$",
@@ -177,9 +160,7 @@ app.add_middleware(
 )
 
 
-# =========================================================
 # Auth-Cookies
-# =========================================================
 
 ACCESS_COOKIE = "itassetflow_access_token"
 REFRESH_COOKIE = "itassetflow_refresh_token"
@@ -202,9 +183,7 @@ COOKIE_SECURE = (
 MAX_CSV_IMPORT_BYTES = 50 * 1024 * 1024
 
 
-# =========================================================
 # Ereignisgesteuerte Multiuser-Synchronisation
-# =========================================================
 
 class InventoryChangeBroker:
     """Verteilt kleine Änderungsereignisse an verbundene Webclients.
@@ -277,8 +256,7 @@ class InventoryChangeBroker:
                 event
             )
         except asyncio.QueueFull:
-            # Falls zwischen Prüfung und Einfügen doch wieder gefüllt wurde,
-            # genügt das bereits wartende Änderungsereignis.
+            # Falls zwischen Prüfung und Einfügen doch wieder gefüllt wurde, genügt das bereits wartende Änderungsereignis.
             pass
 
     def publish(
@@ -322,9 +300,7 @@ class InventoryChangeBroker:
                 and client_id
                 == normalized_source
             ):
-                # Der auslösende Client lädt nach seiner eigenen Änderung
-                # bereits gezielt neu. Dadurch vermeiden wir eine doppelte
-                # Datenbankabfrage auf diesem Browser.
+                # Der auslösende Client lädt nach seiner eigenen Änderung bereits gezielt neu. Dadurch vermeiden wir eine doppelte Datenbankabfrage auf diesem Browser.
                 continue
 
             try:
@@ -334,17 +310,14 @@ class InventoryChangeBroker:
                     event,
                 )
             except RuntimeError:
-                # Event-Loop wurde bereits beendet. Der Subscriber wird beim
-                # Schliessen der Streaming-Verbindung entfernt.
+                # Event-Loop wurde bereits beendet. Der Subscriber wird beim Schliessen der Streaming-Verbindung entfernt.
                 continue
 
 
 INVENTORY_CHANGES = InventoryChangeBroker()
 
 
-# =========================================================
 # Modelle
-# =========================================================
 
 class LoginPayload(BaseModel):
     email: str
@@ -369,9 +342,7 @@ class WebSession:
     role: str
 
 
-# =========================================================
 # Allgemeine Helfer
-# =========================================================
 
 def _normalize_text(
     value: Any,
@@ -396,8 +367,7 @@ def _request_client_id(
     if not value:
         return None
 
-    # Begrenzung verhindert, dass beliebig grosse Headerwerte im Broker
-    # gespeichert oder weiterverarbeitet werden.
+    # Begrenzung verhindert, dass beliebig grosse Headerwerte im Broker gespeichert oder weiterverarbeitet werden.
     return value[:128]
 
 
@@ -563,9 +533,7 @@ def _repository_http_exception(
     )
 
 
-# =========================================================
 # Cookie-Helfer
-# =========================================================
 
 def set_auth_cookies(
     response: Response,
@@ -607,9 +575,7 @@ def clear_auth_cookies(
     )
 
 
-# =========================================================
 # Rollen / Berechtigungen
-# =========================================================
 
 def _load_app_role(
     client: Client,
@@ -718,9 +684,7 @@ def _load_app_role(
     return role
 
 
-# =========================================================
 # Web-Sitzung
-# =========================================================
 
 def get_web_session(
     request: Request,
@@ -831,9 +795,7 @@ def require_admin_session(
     return web_session
 
 
-# =========================================================
 # Allgemein
-# =========================================================
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
@@ -843,9 +805,7 @@ def health() -> dict[str, str]:
     }
 
 
-# =========================================================
 # Auth
-# =========================================================
 
 @app.post("/api/auth/login")
 def login(
@@ -958,9 +918,7 @@ def logout(
     }
 
 
-# =========================================================
 # Inventar laden
-# =========================================================
 
 @app.get("/api/inventory")
 def inventory(
@@ -998,8 +956,7 @@ async def inventory_events(
         get_web_session
     ),
 ) -> StreamingResponse:
-    # Die Dependency dient der Authentifizierung. Die eigentliche
-    # Streaming-Verbindung benötigt danach keinen direkten Supabase-Zugriff.
+    # Die Dependency dient der Authentifizierung. Die eigentliche Streaming-Verbindung benötigt danach keinen direkten Supabase-Zugriff.
     del web_session
 
     normalized_client_id = str(
@@ -1024,8 +981,7 @@ async def inventory_events(
         )
 
         try:
-            # "ready" bestätigt nur die Verbindung. Der Client führt dadurch
-            # keinen zusätzlichen Reload beim normalen Seitenstart aus.
+            # "ready" bestätigt nur die Verbindung. Der Client führt dadurch keinen zusätzlichen Reload beim normalen Seitenstart aus.
             yield (
                 "event: ready\n"
                 f"data: {ready_data}\n\n"
@@ -1042,9 +998,7 @@ async def inventory_events(
                     )
 
                 except asyncio.TimeoutError:
-                    # Ein Kommentar hält die HTTP-Verbindung durch Proxies,
-                    # Firewalls und Browser hinweg aktiv, ohne Datenbankarbeit
-                    # auszulösen.
+                    # Ein Kommentar hält die HTTP-Verbindung durch Proxies, Firewalls und Browser hinweg aktiv, ohne Datenbankarbeit auszulösen.
                     yield ": keep-alive\n\n"
                     continue
 
@@ -1067,9 +1021,7 @@ async def inventory_events(
 
 
 
-# =========================================================
 # Performance-schonende Änderungsprüfung
-# =========================================================
 
 @app.get("/api/inventory/revision")
 def inventory_revision(
@@ -1144,9 +1096,7 @@ def inventory_revision(
         ) from error
 
 
-# =========================================================
 # Formular-Stammdaten
-# =========================================================
 
 @app.get("/api/inventory/form-data")
 def inventory_form_data(
@@ -1203,9 +1153,7 @@ def inventory_edit_form_data(
     )
 
 
-# =========================================================
 # Inventareintrag erstellen / bearbeiten / löschen
-# =========================================================
 
 @app.post("/api/inventory")
 def create_inventory_entry(
@@ -1354,9 +1302,7 @@ def delete_inventory_entries(
         ) from error
 
 
-# =========================================================
 # CSV Import / Export
-# =========================================================
 
 @app.get("/api/transfer/export/csv")
 def export_csv(
@@ -1498,9 +1444,7 @@ async def import_csv(
                 pass
 
 
-# =========================================================
 # Inventar-Metadaten
-# =========================================================
 
 @app.get("/api/inventory/meta")
 def inventory_meta(
@@ -1529,9 +1473,7 @@ def inventory_meta(
         ),
     }
 
-# =========================================================
-# Einstellungen
-# =========================================================
+# Einstellungen und Produktmodelle
 
 app.include_router(
     create_settings_router(
@@ -1539,9 +1481,13 @@ app.include_router(
         INVENTORY_CHANGES.publish,
     )
 )
-# =========================================================
+app.include_router(
+    create_product_models_router(
+        require_admin_session,
+        INVENTORY_CHANGES.publish,
+    )
+)
 # React-WebApp / SPA
-# =========================================================
 
 WEB_MEDIA_TYPES: dict[str, str] = {
     ".html": "text/html; charset=utf-8",
@@ -1644,8 +1590,7 @@ if SERVE_WEB_BUILD:
             full_path or ""
         ).lstrip("/")
 
-        # Nicht vorhandene API-Routen dürfen niemals auf index.html
-        # fallen, sonst würde ein API-Fehler wie eine HTML-Seite aussehen.
+        # Nicht vorhandene API-Routen dürfen niemals auf index.html fallen, sonst würde ein API-Fehler wie eine HTML-Seite aussehen.
         if (
             normalized_path == "api"
             or normalized_path.startswith(
@@ -1666,8 +1611,7 @@ if SERVE_WEB_BUILD:
                 static_file
             )
 
-        # Requests auf konkrete Dateien wie .png/.css/.js nicht auf
-        # React zurückfallen lassen, wenn die Datei nicht existiert.
+        # Requests auf konkrete Dateien wie .png/.css/.js nicht auf React zurückfallen lassen, wenn die Datei nicht existiert.
         if Path(
             normalized_path
         ).suffix:
@@ -1676,17 +1620,10 @@ if SERVE_WEB_BUILD:
                 detail="Datei nicht gefunden.",
             )
 
-        # React Router übernimmt Client-Routen wie:
-        # /login
-        # /inventory
-        # /inventory/new
-        # /inventory/<key>/edit
-        # /settings
+        # React Router übernimmt Client-Routen wie: /login /inventory /inventory/new /inventory/<key>/edit /settings
         return _web_file_response(
             WEB_INDEX_FILE
         )
 else:
-    # Absichtlich keine Route für "/" oder React-Client-Routen registrieren.
-    # Dadurch kann Port 8000 im IIS-Betrieb nicht mehr als zweite,
-    # möglicherweise veraltete Weboberfläche verwendet werden.
+    # Absichtlich keine Route für "/" oder React-Client-Routen registrieren. Dadurch kann Port 8000 im IIS-Betrieb nicht mehr als zweite, möglicherweise veraltete Weboberfläche verwendet werden.
     pass

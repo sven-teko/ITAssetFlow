@@ -166,9 +166,7 @@ export default function App() {
   function handleLogin(
     loggedInEmail: string,
   ): void {
-    // LoginPage setzt zuerst die HttpOnly-Cookies.
-    // Anschliessend wird die serverseitig ermittelte Rolle
-    // über /api/auth/session geladen.
+    // Nach dem Setzen der HttpOnly-Cookies lädt /api/auth/session die serverseitige Rolle.
     setEmail(loggedInEmail);
     setRole(null);
     setCheckingSession(true);
@@ -268,6 +266,15 @@ export default function App() {
                 clearSession
               }
             />
+          </ProtectedPage>
+        }
+      />
+
+      <Route
+        path="/product-models"
+        element={
+          <ProtectedPage email={email} role={role} allowedRoles={["admin"]}>
+            <Navigate to="/settings?tab=product-models" replace />
           </ProtectedPage>
         }
       />
