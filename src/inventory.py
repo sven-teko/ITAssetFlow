@@ -3,11 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-# ---------------------------------------------------------------------------
 # Fachliche Codes
-# ---------------------------------------------------------------------------
-# Die grobe Gruppierung kommt primär aus product_categories.inventory_group.
-# Die Code-Sets bleiben als Fallback, falls Zusatzdaten einmal unvollständig sind.
 
 DEVICE_CATEGORY_CODES = {
     "barcode_scanner",
@@ -40,14 +36,14 @@ PERIPHERAL_CATEGORY_CODES = {
 COMPONENT_CATEGORY_CODES = {
     "cpu",
     "memory",
-    "ram",  # Kompatibilität mit älteren Datenständen
+    "ram",
     "motherboard",
     "power_supply",
     "storage_drive",
 }
 
-# Einheitliche UI-Bezeichnungen. Die Datenbank-Codes bleiben technisch stabil,
-# die sichtbaren Namen werden überall (Tabelle + Filter) aus dieser Map erzeugt.
+# Einheitliche UI-Bezeichnungen.
+
 CATEGORY_LABELS = {
     "barcode_scanner": "Barcodescanner",
     "cable": "Kabel",
@@ -129,12 +125,7 @@ INVENTORY_GROUP_ALIASES = {
     "sonstiges": "other",
 }
 
-# ---------------------------------------------------------------------------
 # Tabellenansicht
-# ---------------------------------------------------------------------------
-# Es werden bewusst nur fachlich relevante Spalten zugelassen.
-# Interne IDs, Codes und rohe JSON-Felder bleiben in Supabase erhalten,
-# erscheinen aber nicht als Tabellenspalten bzw. Spaltenfilter.
 
 PREFERRED_COLUMN_ORDER = [
     "asset_tag",
