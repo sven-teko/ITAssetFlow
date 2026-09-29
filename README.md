@@ -1,126 +1,126 @@
 # ITAssetFlow
 
-ITAssetFlow ist eine webbasierte Anwendung zur Verwaltung von IT-Inventar, Lagerbeständen und Materialbewegungen.
+ITAssetFlow is a web-based application for managing IT inventory, stock levels, and material movements.
 
-Das Projekt entstand im Rahmen meiner TEKO-Diplomarbeit **„Prozessoptimierung IT-Inventar“** bei der **DLC-Informatik GmbH**. Ziel ist es, die bestehende Inventar- und Lagerverwaltung transparenter, nachvollziehbarer und effizienter zu gestalten.
+The project was developed as part of my TEKO diploma thesis **“IT Inventory Process Optimization”** at **DLC-Informatik GmbH**. Its goal is to make the existing inventory and stock management more transparent, traceable, and efficient.
 
-Die Webanwendung ist die Hauptversion von ITAssetFlow. Zusätzlich existiert eine native Desktop-Anwendung mit PySide6. Diese ist nicht als zweite Hauptlösung gedacht, sondern als optionale Alternative für einen spezifischen Spezialfall.
-
----
-
-## Inhalt
-
-- [Projektziel](#projektziel)
-- [Funktionsumfang](#funktionsumfang)
-- [Architektur](#architektur)
-- [Bereitstellung im Überblick](#bereitstellung-im-überblick)
-- [Online-Demo auf Render](#online-demo-auf-render)
-- [Lokaler Webserver zum Testen](#lokaler-webserver-zum-testen)
-- [Produktiver Betrieb mit IIS](#produktiver-betrieb-mit-iis)
-- [GitHub-Branches und Releases](#github-branches-und-releases)
-- [Technologien](#technologien)
-- [Benutzerrollen und Sicherheit](#benutzerrollen-und-sicherheit)
-- [Datenmodell](#datenmodell)
-- [Projektstruktur](#projektstruktur)
-- [Konfiguration](#konfiguration)
-- [Entwicklungsumgebung](#entwicklungsumgebung)
-- [Frontend neu bauen](#frontend-neu-bauen)
-- [Optionale Desktop-Anwendung](#optionale-desktop-anwendung)
-- [Demo-Datenbank](#demo-datenbank)
-- [Test und Abnahme](#test-und-abnahme)
-- [Abgrenzung](#abgrenzung)
-- [Diplomarbeitskontext](#diplomarbeitskontext)
+The web application is the main version of ITAssetFlow. A native desktop application built with PySide6 is also available. It is intended as an optional alternative for a specific use case, rather than a second primary solution.
 
 ---
 
-# Projektziel
+## Contents
 
-Ausgangspunkt der Diplomarbeit ist die bestehende Verwaltung und Lagerung des IT-Inventars bei der DLC-Informatik GmbH.
-
-Dazu gehören unter anderem:
-
-- Notebooks und Computer
-- Monitore
-- Drucker
-- Kassensysteme
-- Netzwerkgeräte
-- Computerkomponenten
-- Kabel und Adapter
-- Ersatzteile
-- Installations- und Verbrauchsmaterial
-- Lizenzen und Softwaredaten
-
-
-Die Software ist damit ein Bestandteil der gesamten Prozessoptimierung und nicht das alleinige Ergebnis der Diplomarbeit.
+- [Project Goal](#project-goal)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Deployment Overview](#deployment-overview)
+- [Online Demo on Render](#online-demo-on-render)
+- [Local Web Server for Testing](#local-web-server-for-testing)
+- [Production Deployment with IIS](#production-deployment-with-iis)
+- [GitHub Branches and Releases](#github-branches-and-releases)
+- [Technologies](#technologies)
+- [User Roles and Security](#user-roles-and-security)
+- [Data Model](#data-model)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Development Environment](#development-environment)
+- [Rebuilding the Frontend](#rebuilding-the-frontend)
+- [Optional Desktop Application](#optional-desktop-application)
+- [Demo Database](#demo-database)
+- [Testing and Acceptance](#testing-and-acceptance)
+- [Scope](#scope)
+- [Diploma Thesis Context](#diploma-thesis-context)
 
 ---
 
-# Funktionsumfang
+# Project Goal
 
-ITAssetFlow unterscheidet zwischen inventarisierten Geräten und mengenbasierten Lagerartikeln.
+The diploma thesis starts with the existing management and storage of IT inventory at DLC-Informatik GmbH.
 
-## Einzelgeräte
+This includes, among other things:
 
-Einzelgeräte werden separat erfasst und können individuell verfolgt werden.
+- Notebooks and computers
+- Monitors
+- Printers
+- Point-of-sale systems
+- Network devices
+- Computer components
+- Cables and adapters
+- Spare parts
+- Installation materials and consumables
+- Licenses and software data
+
+
+The software is therefore one part of the overall process optimization, rather than the sole outcome of the diploma thesis.
+
+---
+
+# Features
+
+ITAssetFlow distinguishes between individually inventoried devices and quantity-based stock items.
+
+## Individual Devices
+
+Individual devices are recorded separately and can be tracked individually.
 
 
 
-Je nach Gerät können unter anderem folgende Informationen gespeichert werden:
+Depending on the device, the following information can be stored, among other things:
 
-- Hersteller
-- Produktmodell
-- Kategorie
-- Seriennummer
-- Inventarnummer
-- technische Spezifikationen
-- Standort
-- Abteilung
-- Lagerort
-- Zuweisung
+- Manufacturer
+- Product model
+- Category
+- Serial number
+- Inventory number
+- Technical specifications
+- Site
+- Department
+- Storage location
+- Assignment
 - Status
 
-## Mengenartikel
+## Quantity-Based Items
 
-Mengenartikel werden über Lagerbewegungen geführt.
+Quantity-based items are managed through stock movements.
 
-Beispiele:
+Examples:
 
-- Netzwerkkabel
-- Adapter
+- Network cables
+- Adapters
 - SSDs
-- RAM-Module
-- Ersatzteile
-- Verbrauchsmaterial
-- Installationsmaterial
+- RAM modules
+- Spare parts
+- Consumables
+- Installation materials
 
-## Weitere Funktionen
+## Additional Features
 
-Der aktuelle Projektstand enthält unter anderem:
+The current project includes, among other things:
 
-- Benutzeranmeldung
-- Inventarübersicht
-- Suche und Filterung
-- konfigurierbare Tabellenansichten
-- Detailansicht
-- Erstellen und Bearbeiten von Inventareinträgen
-- Löschen von Inventareinträgen
-- Verwaltung von Herstellern
-- Verwaltung von Kategorien
-- Verwaltung von Produktmodellen
-- kategoriespezifische technische Spezifikationen
-- Verwaltung von Organisation, Standorten, Abteilungen und Lagerorten
-- Lagerbewegungen
-- Bestandsübersichten
-- CSV sowie Postgre-SQL Import und Export
-- Einstellungen
-- Mehrbenutzerbetrieb
-- rollenbasierte Zugriffssteuerung
+- User login
+- Inventory overview
+- Search and filtering
+- Configurable table views
+- Detail view
+- Creating and editing inventory entries
+- Deleting inventory entries
+- Managing manufacturers
+- Managing categories
+- Managing product models
+- Category-specific technical specifications
+- Managing the organization, sites, departments, and storage locations
+- Stock movements
+- Stock overviews
+- CSV and PostgreSQL import and export
+- Settings
+- Multi-user operation
+- Role-based access control
 
 ---
 
-# Architektur
+# Architecture
 
-Die Anwendung besteht aus mehreren Schichten.
+The application consists of several layers.
 
 ```text
                          ┌─────────────────────┐
@@ -134,18 +134,18 @@ Die Anwendung besteht aus mehreren Schichten.
                      │                             │
           ┌──────────▼──────────┐       ┌──────────▼──────────┐
           │   Native Desktop    │       │      FastAPI        │
-          │ Python / PySide6    │       │    Web-Backend      │
+          │ Python / PySide6    │       │    Web Backend      │
           └─────────────────────┘       └──────────┬──────────┘
                                                    │
                                         ┌──────────▼──────────┐
                                         │      React          │
-                                        │    Web-Frontend     │
+                                        │    Web Frontend     │
                                         └─────────────────────┘
 ```
 
-Die Desktop-Anwendung greift direkt über einen authentifizierten Supabase-Client auf die Daten zu.
+The desktop application accesses the data directly through an authenticated Supabase client.
 
-Die Webanwendung verwendet dagegen den Weg:
+The web application follows this path:
 
 ```text
 Browser
@@ -159,40 +159,40 @@ Supabase
 PostgreSQL
 ```
 
-Die Webanwendung ist die Hauptversion des Projekts.
+The web application is the main version of the project.
 
-Die native Desktop-Anwendung bleibt als optionale Alternative erhalten und verwendet dieselbe zentrale Datenbasis.
+The native desktop application remains available as an optional alternative and uses the same central database.
 
 ---
 
-# Bereitstellung im Überblick
+# Deployment Overview
 
-ITAssetFlow kann auf drei Arten ausgeführt werden. Für Entwicklung, Demo und produktiven Betrieb werden bewusst unterschiedliche Varianten verwendet.
+ITAssetFlow can be run in three ways. Separate options are used for development, demos, and production.
 
-| Variante | Zweck | Frontend | Backend |
+| Option | Purpose | Frontend | Backend |
 |---|---|---|---|
-| **Render-Demo** | öffentliche Diplomarbeits-Demo | `web/dist` wird über FastAPI ausgeliefert | FastAPI auf Render |
-| **Lokaler Webserver** | schneller Test eines Release-Pakets | `web/dist` wird über FastAPI ausgeliefert | `Webserver_localhost.bat` / `src/web_main.py` |
-| **Produktiver Webserver** | interner Firmenbetrieb | IIS liefert `web/dist` aus | `web_backend.cmd` / `src/web_main.py` |
+| **Render demo** | Public diploma thesis demo | `web/dist` is served by FastAPI | FastAPI on Render |
+| **Local web server** | Quick test of a release package | `web/dist` is served by FastAPI | `Webserver_localhost.bat` / `src/web_main.py` |
+| **Production web server** | Internal company use | IIS serves `web/dist` | `web_backend.cmd` / `src/web_main.py` |
 
-Der Ordner `web/dist` ist ein **generiertes Build-Artefakt**. Er gehört deshalb nicht zum normalen Entwicklungsstand im `main`-Branch. Für die Render-Bereitstellung und für GitHub-Releases wird er gezielt erzeugt und mitgeliefert.
+The `web/dist` folder is a **generated build artifact**. It is therefore not part of the normal development state on the `main` branch. It is built and included specifically for deployment on Render and for GitHub releases.
 
 ---
 
-# Online-Demo auf Render
+# Online Demo on Render
 
-Für die Diplomarbeitspräsentation und für externe Tests steht eine separate Demo-Instanz auf **Render** zur Verfügung.
+A separate demo instance on **Render** is available for the diploma thesis presentation and external testing.
 
-## Demo-URL
+## Demo URL
 
 ```text
 https://itassetflow-demo.onrender.com
 ```
 
-Die Demo ist vollständig von der produktiven Umgebung der DLC-Informatik GmbH getrennt. Sie verwendet eine eigene Supabase-Datenbank, eigene Demo-Benutzer und ausschliesslich Test- bzw. Demodaten.
+The demo is entirely separate from the production environment of DLC-Informatik GmbH. It uses its own Supabase database, its own demo users, and test or demo data only.
 
 
-Auf Render liefert FastAPI zusätzlich das fertige React-Frontend aus. Dafür wird in der Render-Konfiguration unter anderem der Standalone-Modus aktiviert:
+On Render, FastAPI also serves the finished React frontend. The Render configuration enables standalone mode, among other settings:
 
 ```env
 ITASSETFLOW_SERVE_WEB=true
@@ -200,105 +200,105 @@ ITASSETFLOW_COOKIE_SECURE=true
 ITASSETFLOW_CORS_ORIGINS=https://itassetflow-demo.onrender.com
 ```
 
-Die für Render benötigten Supabase-Werte werden als Environment Variables im Render-Service gepflegt und nicht im Repository gespeichert.
+The Supabase values required by Render are maintained as environment variables in the Render service and are not stored in the repository.
 
-## Branch `webapp`
+## `webapp` Branch
 
-Der Branch **`webapp`** dient ausschliesslich der Render-Bereitstellung.
+The **`webapp`** branch is used exclusively for deployment on Render.
 
 ---
 
-# Lokaler Webserver zum Testen
+# Local Web Server for Testing
 
-Ein GitHub-Release enthält bereits den gebauten Ordner `web/dist`. Dadurch kann die Webanwendung lokal getestet werden, ohne Node.js, npm oder Vite installieren zu müssen.
+A GitHub release already contains the built `web/dist` folder. The web application can therefore be tested locally without installing Node.js, npm, or Vite.
 
-Zum Start dient:
+To start it, use:
 
 ```text
 Webserver_localhost.bat
 ```
 
-## Voraussetzungen
+## Requirements
 
-Benötigt werden:
+You need:
 
 - Python 3
-- die Pakete aus `requirements.txt`
-- eine gültige `.env` z.b. aus `.env_example`
-- der im Release enthaltene Ordner `web/dist`
+- The packages in `requirements.txt`
+- A valid `.env`, e.g. based on `.env_example`
+- The `web/dist` folder included in the release
 
-Die Python-Abhängigkeiten können einmalig installiert werden:
+The Python dependencies can be installed once:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-## Lokale Konfiguration
+## Local Configuration
 
-Für den lokalen Standalone-Test muss FastAPI neben der API auch den React-Build ausliefern:
+For a local standalone test, FastAPI must serve the React build as well as the API:
 
 ```env
 ITASSETFLOW_SERVE_WEB=true
 ITASSETFLOW_COOKIE_SECURE=false
 ```
 
-Zusätzlich werden die gültigen Supabase-Werte benötigt.
+Valid Supabase values are also required.
 
 ## Start
 
-Die Datei kann per Doppelklick gestartet werden:
+The file can be started by double-clicking it:
 
 ```text
 Webserver_localhost.bat
 ```
 
-Alternativ kann das Backend direkt gestartet werden:
+Alternatively, the backend can be started directly:
 
 ```powershell
 python src/web_main.py
 ```
 
-Die lokale Webanwendung ist danach über folgende Adresse erreichbar:
+The local web application is then available at:
 
 ```text
 http://127.0.0.1:8000/#/login
 ```
 
-Der API-Status kann separat geprüft werden:
+The API status can be checked separately at:
 
 ```text
 http://127.0.0.1:8000/api/health
 ```
 
-Diese Variante ist für Funktionstests, Vorführungen und die Prüfung eines Release-Pakets gedacht. Für den dauerhaften Firmenbetrieb wird stattdessen IIS verwendet.
+This option is intended for functional tests, demonstrations, and checking a release package. IIS is used for ongoing company operations.
 
 ---
 
-# Produktiver Betrieb mit IIS
+# Production Deployment with IIS
 
 
 
-## 1. Release verwenden
+## 1. Use the Release
 
-Für den Firmenserver wird das fertige Release-Paket verwendet. Der darin enthaltene Ordner
+The finished release package is used on the company server. It contains this folder:
 
 ```text
 web/dist/
 ```
 
-ist bereits gebaut. Auf dem Zielserver werden deshalb **Node.js, npm und Vite nicht benötigt**.
+The folder is already built. Therefore, **Node.js, npm, and Vite are not required** on the target server.
 
-## 2. Frontend über IIS bereitstellen
+## 2. Serve the Frontend through IIS
 
-IIS kann direkt auf den enthaltenen Build verweisen, beispielsweise:
+IIS can point directly to the included build, for example:
 
 ```text
 C:\ITAssetFlow\web\dist
 ```
 
-Alternativ kann der Inhalt von `web/dist` in ein bestehendes IIS-Webverzeichnis kopiert werden.
+Alternatively, the contents of `web/dist` can be copied into an existing IIS web directory.
 
-Der Ordner enthält typischerweise:
+The folder typically contains:
 
 ```text
 web/dist/
@@ -308,9 +308,9 @@ web/dist/
     └── *.css
 ```
 
-## 3. Backend vorbereiten
+## 3. Prepare the Backend
 
-Das Backend benötigt Python und die Pakete aus:
+The backend requires Python and the packages in:
 
 ```text
 requirements.txt
@@ -322,9 +322,9 @@ Installation:
 python -m pip install -r requirements.txt
 ```
 
-Zusätzlich muss auf dem Server eine produktive `.env` vorhanden sein. Diese Datei ist aus Sicherheitsgründen **nicht Bestandteil des GitHub-Releases**.
+A production `.env` must also be present on the server. For security reasons, this file is **not included in the GitHub release**.
 
-Für den IIS-Betrieb wird FastAPI nur als API verwendet:
+For IIS operation, FastAPI is used only as an API:
 
 ```env
 ITASSETFLOW_SERVE_WEB=false
@@ -332,48 +332,48 @@ ITASSETFLOW_WEB_HOST=0.0.0.0
 ITASSETFLOW_WEB_PORT=8000
 ```
 
-`ITASSETFLOW_COOKIE_SECURE` und `ITASSETFLOW_CORS_ORIGINS` müssen passend zur tatsächlich verwendeten internen HTTP-/HTTPS-Konfiguration gesetzt werden.
+`ITASSETFLOW_COOKIE_SECURE` and `ITASSETFLOW_CORS_ORIGINS` must be set to match the actual internal HTTP/HTTPS configuration.
 
-## 4. Backend starten
+## 4. Start the Backend
 
-Für den manuellen Start steht im Release folgende Datei zur Verfügung:
+The release includes the following file for a manual start:
 
 ```text
 web_backend.cmd
 ```
 
-Sie startet:
+It starts:
 
 ```text
 src/web_main.py
 ```
 
-Das Backend kann alternativ direkt gestartet werden:
+Alternatively, the backend can be started directly:
 
 ```powershell
 python src/web_main.py
 ```
 
-Der API-Status kann beispielsweise über
+For example, the API status can be checked at:
 
 ```text
 http://localhost:8000/api/health
 ```
 
-geprüft werden.
+This endpoint can be used to verify that the API is responding.
 
-## 5. Dauerbetrieb als Windows-Dienst
+## 5. Run Continuously as a Windows Service
 
-Für den produktiven Betrieb sollte das Backend nicht dauerhaft in einem offenen CMD-Fenster laufen.
+For production use, the backend should not run permanently in an open CMD window.
 
 ---
 
 
 ## GitHub Release
 
-Für einen Release wird aus dem aktuellen `main`-Stand ein neuer Produktionsbuild erzeugt und zusammen mit den für die Ausführung notwendigen Dateien als ZIP bereitgestellt.
+For a release, a new production build is created from the current state of `main` and packaged as a ZIP together with the files needed to run it.
 
-Nicht in das Release-Paket gehören:
+The release package must not include:
 
 ```text
 .env
@@ -383,24 +383,24 @@ __pycache__/
 .git/
 ```
 
-Auch die React-Entwicklungsumgebung mit `web/src`, `node_modules` und den TypeScript-/Vite-Konfigurationsdateien ist für die reine Ausführung des Release-Pakets nicht nötig. Der vollständige Frontend-Quellcode bleibt im Repository im `main`-Branch nachvollziehbar.
+The React development environment, including `web/src`, `node_modules`, and the TypeScript/Vite configuration files, is also unnecessary for simply running the release package. The full frontend source code remains available in the repository on the `main` branch.
 
-### Wichtig beim Download
+### Important When Downloading
 
 
-Zum direkten Testen der Anwendung muss das bereitgestellte Releasezipt verwendet werden, beispielsweise:
+To test the application directly, use the provided release ZIP, for example:
 
 ```text
 ITAssetFlow-v1.0..zip
 ```
 
-Dieses Paket enthält `web/dist` bereits fertig gebaut.
+This package already includes the finished `web/dist` build.
 
 ---
 
-# Technologien
+# Technologies
 
-## Web-Frontend
+## Web Frontend
 
 - React
 - TypeScript
@@ -414,47 +414,47 @@ Dieses Paket enthält `web/dist` bereits fertig gebaut.
 - FastAPI
 - Uvicorn
 
-## Datenbank und API
+## Database and API
 
 - Supabase
 - PostgreSQL
 - PostgREST
 
-## Authentifizierung und Berechtigungen
+## Authentication and Permissions
 
 - Supabase Auth
 - PostgreSQL Row Level Security
-- Datenbankfunktionen
+- Database functions
 - Trigger
 - Views
 
-## Optionale Desktop-Version
+## Optional Desktop Version
 
 - Python
 - PySide6
 - PyInstaller
 
-## Bereitstellung
+## Deployment
 
 - Microsoft IIS
 - Windows Server
-- Render für die öffentliche Demo-Instanz
+- Render for the public demo instance
 
 ---
 
-# Benutzerrollen und Sicherheit
+# User Roles and Security
 
-ITAssetFlow verwendet drei Anwendungsrollen.
+ITAssetFlow uses three application roles.
 
-| Rolle | Datenbankwert | Zweck |
+| Role | Database value | Purpose |
 |---|---|---|
-| Administrator | `admin` | administrative und vollständige Bearbeitungsrechte |
-| Bearbeiter | `user` | Inventardaten lesen und bearbeiten |
-|Betrachterr | `viewer` | ausschliesslich lesender Zugriff |
+| Administrator | `admin` | Administrative and full editing rights |
+| Editor | `user` | Read and edit inventory data |
+| Viewer | `viewer` | Read-only access |
 
-Die Anmeldung erfolgt über Supabase Auth.
+Authentication is handled by Supabase Auth.
 
-Die Verbindung zwischen Auth-Benutzer und Mitarbeiterdatensatz wird über `employees.auth_user_id` hergestellt.
+The connection between an authenticated user and an employee record is established through `employees.auth_user_id`.
 
 ```text
 Supabase Auth
@@ -471,11 +471,11 @@ public.employees
 Row Level Security
 ```
 
-Die Berechtigungen werden nicht nur in der Oberfläche geprüft.
+Permissions are not checked only in the user interface.
 
-Die Datenbank schützt die relevanten Tabellen zusätzlich über Row Level Security.
+The database additionally protects the relevant tables using Row Level Security.
 
-Zu den verwendeten Hilfsfunktionen gehören unter anderem:
+The helper functions used include:
 
 ```text
 private.current_app_role()
@@ -484,39 +484,39 @@ private.can_read_inventory()
 private.can_edit_inventory()
 ```
 
-## Sicherheitsgrundsätze
+## Security Principles
 
-- `.env` nicht in Git einchecken
-- keine Datenbankpasswörter im Quellcode speichern
-- keine Benutzerpasswörter im Quellcode speichern
-- keine Supabase Service-Role-Keys im React-Frontend verwenden
-- Benutzerzugriffe über Supabase Auth absichern
-- Datenbankzugriffe über RLS absichern
-- für den regulären Webbetrieb HTTPS verwenden
-- Firewall-Freigaben auf das notwendige Netzwerk beschränken
+- Do not commit `.env` to Git
+- Do not store database passwords in the source code
+- Do not store user passwords in the source code
+- Do not use Supabase service role keys in the React frontend
+- Secure user access with Supabase Auth
+- Secure database access with RLS
+- Use HTTPS for regular web operation
+- Limit firewall access to the necessary network
 
-Der Supabase Publishable Key ist für Client-Anwendungen vorgesehen. Die eigentliche Zugriffskontrolle erfolgt über Authentifizierung und RLS.
+The Supabase publishable key is intended for client applications. Actual access control is provided by authentication and RLS.
 
 ---
 
-# Datenmodell
+# Data Model
 
-Die Datenbank ist in mehrere logische Bereiche aufgeteilt.
+The database is divided into several logical areas.
 
-## Organisation und Lagerstruktur
+## Organization and Storage Structure
 
 ```text
-Organisation
+Organization
     │
     ▼
-Standort
+Site
     │
-    ├── Abteilung
+    ├── Department
     │
-    └── Lagerort
+    └── Storage location
 ```
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 organizations
@@ -527,17 +527,17 @@ storage_locations
 employees
 ```
 
-## Hersteller und Produktdaten
+## Manufacturers and Product Data
 
 ```text
-Hersteller ───────┐
-                  ├── Produktmodell
-Kategorie ────────┘
+Manufacturer ────┐
+                  ├── Product model
+Category ────────┘
      │
-     └── Spezifikationsschema
+     └── Specification schema
 ```
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 manufacturers
@@ -545,15 +545,15 @@ product_categories
 product_models
 ```
 
-Produktkategorien können ein Spezifikationsschema enthalten.
+Product categories can contain a specification schema.
 
-Dadurch können je Kategorie unterschiedliche technische Eigenschaften definiert werden.
+This makes it possible to define different technical attributes for each category.
 
-Produktmodelle speichern die dazugehörigen konkreten Spezifikationen.
+Product models store the corresponding specific specifications.
 
-## Inventar
+## Inventory
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 assets
@@ -562,11 +562,11 @@ asset_assignments
 asset_component_assignments
 ```
 
-Damit können Geräte, Standorte und Zuordnungen nachvollzogen werden.
+This makes it possible to track devices, sites, and assignments.
 
-## Lagerbestand
+## Stock
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 stock_movements
@@ -574,18 +574,18 @@ stock_counts
 stock_targets
 ```
 
-Zusätzlich stehen Views für Bestandsinformationen zur Verfügung:
+Views are also available for stock information:
 
 ```text
 stock_levels
 stock_levels_total
 ```
 
-Der Bestand kann dadurch aus den erfassten Materialbewegungen nachvollzogen werden.
+Stock levels can therefore be traced back to the recorded material movements.
 
-## Softwareverwaltung
+## Software Management
 
-Die Datenbank enthält ausserdem Tabellen für:
+The database also contains tables for:
 
 ```text
 software_products
@@ -593,7 +593,7 @@ software_licenses
 software_installations
 ```
 
-## Weitere technische Tabellen
+## Additional Technical Tables
 
 ```text
 audit_log
@@ -603,11 +603,11 @@ connection_test
 
 ---
 
-# Projektstruktur
+# Project Structure
 
-Die folgende Struktur zeigt den Entwicklungsstand im **`main`-Branch**.
+The following structure shows the development state on the **`main` branch**.
 
-Generierte Ordner wie `__pycache__`, `node_modules` und `web/dist` sind bewusst nicht als Bestandteil des eigentlichen Quellcodes aufgeführt.
+Generated folders such as `__pycache__`, `node_modules`, and `web/dist` are deliberately omitted from the actual source code structure.
 
 ```text
 ITAssetFlow/
@@ -680,9 +680,9 @@ ITAssetFlow/
 └── web_backend.cmd
 ```
 
-## Generierter Produktionsbuild
+## Generated Production Build
 
-Nach
+After running
 
 ```powershell
 cd web
@@ -690,7 +690,7 @@ npm.cmd ci
 npm.cmd run build
 ```
 
-wird zusätzlich erzeugt:
+the following is also generated:
 
 ```text
 web/
@@ -699,28 +699,28 @@ web/
     └── assets/
 ```
 
-## Wichtige Einstiegspunkte
+## Key Entry Points
 
-| Datei | Zweck |
+| File | Purpose |
 |---|---|
-| `src/web_main.py` | Start des FastAPI-Web-Backends |
-| `web/src/main.tsx` | Einstiegspunkt des React-Frontends |
-| `src/main.py` | Start der optionalen Desktop-Anwendung |
-| `Webserver_localhost.bat` | lokaler Standalone-Test mit dem fertigen `web/dist` |
-| `web_backend.cmd` | manueller Start des Backends für IIS / echten Webserver |
-| `.env` | lokale bzw. serverspezifische Konfiguration; wird nicht in Git gespeichert |
-| `.env.example` | Vorlage für die Konfiguration |
-| `ITAssetFlow.spec` | PyInstaller-Konfiguration der optionalen Desktop-Anwendung |
+| `src/web_main.py` | Starts the FastAPI web backend |
+| `web/src/main.tsx` | Entry point of the React frontend |
+| `src/main.py` | Starts the optional desktop application |
+| `Webserver_localhost.bat` | Local standalone test using the finished `web/dist` build |
+| `web_backend.cmd` | Manual start of the backend for IIS / a production web server |
+| `.env` | Local or server-specific configuration; not stored in Git |
+| `.env.example` | Configuration template |
+| `ITAssetFlow.spec` | PyInstaller configuration for the optional desktop application |
 
 ---
 
-# Konfiguration
+# Configuration
 
-ITAssetFlow verwendet eine `.env`-Datei für umgebungsabhängige Einstellungen.
+ITAssetFlow uses a `.env` file for environment-specific settings.
 
-Die echte `.env` darf nicht in Git eingecheckt oder in einem öffentlichen Release mitgeliefert werden.
+The real `.env` must not be committed to Git or included in a public release.
 
-Grundsätzlich werden benötigt:
+The basic settings required are:
 
 ```env
 SUPABASE_URL=https://example.supabase.co
@@ -730,18 +730,18 @@ ITASSETFLOW_WEB_HOST=0.0.0.0
 ITASSETFLOW_WEB_PORT=8000
 ```
 
-## Lokaler Standalone-Test
+## Local Standalone Test
 
-Beim lokalen Test liefert FastAPI zusätzlich das React-Frontend aus:
+For local testing, FastAPI also serves the React frontend:
 
 ```env
 ITASSETFLOW_SERVE_WEB=true
 ITASSETFLOW_COOKIE_SECURE=false
 ```
 
-## IIS / echter Webserver
+## IIS / Production Web Server
 
-Beim Firmenbetrieb liefert IIS das Frontend aus. FastAPI stellt nur die API bereit:
+In the company environment, IIS serves the frontend. FastAPI provides only the API:
 
 ```env
 ITASSETFLOW_SERVE_WEB=false
@@ -749,17 +749,17 @@ ITASSETFLOW_WEB_HOST=0.0.0.0
 ITASSETFLOW_WEB_PORT=8000
 ```
 
-Zusätzlich wird die erlaubte Browser-Origin passend zur internen Adresse gesetzt, beispielsweise:
+The allowed browser origin must also be set to match the internal address, for example:
 
 ```env
 ITASSETFLOW_CORS_ORIGINS=http://ITAssetFlow.dlc-informatik.local
 ```
 
-Bei einem vollständig über HTTPS betriebenen Aufbau muss die Konfiguration entsprechend auf HTTPS angepasst und `ITASSETFLOW_COOKIE_SECURE=true` gesetzt werden.
+For a setup running entirely over HTTPS, the configuration must be adjusted accordingly and `ITASSETFLOW_COOKIE_SECURE=true` must be set.
 
-## Render-Demo
+## Render Demo
 
-Render verwendet eigene Environment Variables. Die Demo nutzt eine separate Supabase-Instanz und unter anderem:
+Render uses its own environment variables. The demo uses a separate Supabase instance and, among other settings:
 
 ```env
 ITASSETFLOW_SERVE_WEB=true
@@ -767,33 +767,33 @@ ITASSETFLOW_COOKIE_SECURE=true
 ITASSETFLOW_CORS_ORIGINS=https://itassetflow-demo.onrender.com
 ```
 
-## Supabase-Verbindung
+## Supabase Connection
 
-Der verwendete Publishable Key ist für den vorgesehenen Client-/Anwendungszugriff gedacht, die eigentliche Zugriffskontrolle erfolgt zusätzlich über Supabase Auth und Row Level Security.
+The publishable key used is intended for client/application access. Actual access control is additionally enforced through Supabase Auth and Row Level Security.
 
-Nicht im Client bzw. Repository zu speichern sind:
+Do not store the following in the client or repository:
 
-- Datenbankpasswort
-- Service-Role-Key
-- Benutzerpasswörter
+- Database password
+- Service role key
+- User passwords
 
 
 
 ---
 
-# Entwicklungsumgebung
+# Development Environment
 
-Für die Weiterentwicklung werden Python, Node.js und npm benötigt.
+Python, Node.js, and npm are required for further development.
 
-## Python-Abhängigkeiten
+## Python Dependencies
 
-Diese werden beim Start über requirements.txt automatisch installiert, falls dies nicht der Fall ist. Alternativ können diese auch manuell im Projektordner installiert werden:
+If missing, these are installed automatically at startup from requirements.txt. Alternatively, they can be installed manually in the project directory:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-## Frontend-Abhängigkeiten
+## Frontend Dependencies
 
 ```powershell
 cd web
@@ -801,29 +801,29 @@ npm.cmd ci
 cd ..
 ```
 
-Durch `npm.cmd ci` wird der vorhandene `package-lock.json` verwendet.
+`npm.cmd ci` uses the existing `package-lock.json`.
 
-## Entwicklungsmodus
+## Development Mode
 
 ```powershell
 python src/web_main.py --dev
 ```
 
-Im Entwicklungsmodus wird zusätzlich der Vite-Entwicklungsserver verwendet.
+Development mode also uses the Vite development server.
 
-Typische lokale Adresse:
+Typical local address:
 
 ```text
 http://127.0.0.1:5173
 ```
 
-Diese Betriebsart ist für die Entwicklung gedacht.
+This mode is intended for development.
 
 ---
 
-# Frontend neu bauen
+# Rebuilding the Frontend
 
-Nach Änderungen am React-Frontend muss ein neuer Produktionsbuild erzeugt werden.
+After changes to the React frontend, a new production build must be created.
 
 ```powershell
 cd web
@@ -831,25 +831,25 @@ npm.cmd ci
 npm.cmd run build
 ```
 
-Der neue Build befindet sich danach unter:
+The new build is then located in:
 
 ```text
 web/dist/
 ```
 
-Im **`main`-Branch** wird dieser Ordner nicht gespeichert.
-Er wird nur im Branch `webapp` für Render verwendet, wo ein fertiger Produktionsbuild benötigt wird.
+This folder is not stored on the **`main` branch**.
+It is used only on the `webapp` branch for Render, where a finished production build is required.
 
-Wurde zuvor ein spezieller Render-Build erzeugt, muss vor dem Firmen-/Release-Build darauf geachtet werden, dass keine Render-spezifische `VITE_API_BASE_URL` mehr in der lokalen Build-Umgebung gesetzt ist.
+If a special Render build was created earlier, make sure that no Render-specific `VITE_API_BASE_URL` remains set in the local build environment before creating the company/release build.
 
 ---
 
-# Optionale Desktop-Anwendung
+# Optional Desktop Application
 
-Neben der Webanwendung existiert ein nativer PySide6-Client.
-Diese Anwendung ist nicht die Hauptlösung der Diplomarbeit.
+In addition to the web application, a native PySide6 client is available.
+This application is not the main solution of the diploma thesis.
 
-Sie bleibt als optionale Alternative bestehen, falls in einem speziellen Fall ein nativer Windows-Client benötigt wird.
+It remains available as an optional alternative if a native Windows client is needed for a specific use case.
 
 Start:
 
@@ -857,70 +857,70 @@ Start:
 python src/main.py
 ```
 
-Für einen Windows-Build steht die PyInstaller-Konfiguration zur Verfügung:
+The PyInstaller configuration is available for a Windows build:
 
 ```text
 ITAssetFlow.spec
 ```
 
-Die Desktop-Anwendung verwendet dieselbe Supabase-Datenbasis und dieselben serverseitigen Berechtigungsregeln.
+The desktop application uses the same Supabase database and the same server-side permission rules.
 
 ---
 
-# Demo-Datenbank
+# Demo Database
 
-Für die Diplomarbeitspräsentation und die öffentliche Demo wird eine separate Supabase-Datenbank verwendet.
+A separate Supabase database is used for the diploma thesis presentation and the public demo.
 
-Die Demo-Umgebung ist von der produktiven Datenbank getrennt und hat eigene Testbenutzer sowie eigene Demodaten.
-Somit kann ITAssetFlow realistisch demonstriert werden, ohne die produktive Umgebung zu verändern.
+The demo environment is separate from the production database and has its own test users and demo data.
+This allows ITAssetFlow to be demonstrated realistically without changing the production environment.
 
-Übernommen werden können unkritische Stammdaten wie:
+Non-sensitive master data can be copied, such as:
 
-- Organisation
-- Standorte
-- Abteilungen
-- Lagerorte
-- Hersteller
-- Produktkategorien
-- Spezifikationsdefinitionen
-- Produktmodelle
-- technische Spezifikationen
+- Organization
+- Sites
+- Departments
+- Storage locations
+- Manufacturers
+- Product categories
+- Specification definitions
+- Product models
+- Technical specifications
 
-Nicht übernommen werden:
+The following are not copied:
 
-- produktive Benutzerpasswörter
-- reale Auth-Sitzungen
-- vertrauliche Mitarbeiterdaten
-- reale Gerätezuordnungen
-- reale Lagerbewegungen
-- personenbezogene oder andere sensible Betriebsdaten
+- Production user passwords
+- Real authentication sessions
+- Confidential employee data
+- Real device assignments
+- Real stock movements
+- Personal or other sensitive operational data
 
 ---
 
-# Test und Abnahme
+# Testing and Acceptance
 
-## Rollen
+## Roles
 
 ### Administrator
 
-Der Administrator besitzt die weitreichendsten Rechte und kann administrative Funktionen verwenden.
+The administrator has the broadest permissions and can use administrative functions.
 
-### Bearbeiter
+### Editor
 
-Der Bearbeiter kann Inventardaten lesen und die vorgesehenen Daten bearbeiten.
+The editor can read inventory data and edit the data as intended.
 
-### Betrachter
+### Viewer
 
-Der Betrachter besitzt ausschliesslich lesenden Zugriff.
-Schreibende Zugriffe müssen für diese Rolle serverseitig durch RLS blockiert werden.
+The viewer has read-only access.
+Write access for this role must be blocked on the server side by RLS.
 
-# Nachvollziehbarkeit
+# Traceability
 
-Ein zentrales Ziel von ITAssetFlow ist, nicht nur den aktuellen Zustand zu speichern, sondern Änderungen und Bewegungen nachvollziehbarer zu machen.
+A central goal of ITAssetFlow is to store the current state while also making changes and movements easier to trace.
 
-Damit kann unter anderem nachvollzogen werden wo sich ein Gerät befand, wem ein Gerät zugewiesen war, wann Material verschoben wurde, wie ein Bestand entstanden ist und welche relevanten Änderungen vorgenommen wurden.
+This includes tracking where a device was located, to whom it was assigned, when material was moved, how a stock level came about, and which relevant changes were made.
 
-Dazu gehören unter anderem:
+This includes, among other things:
 
 ```text
 asset_locations
@@ -934,42 +934,42 @@ audit_log
 
 ---
 
-# Abgrenzung
+# Scope
 
-Das Projekt soll kein vollständiges ERP-System, Warenwirtschaftssystem, IT-Service-Management-System
-oder Beschaffungssystem ersetzen. Die Webanwendung ist das primäre Endprodukt.
+The project is not intended to replace a complete ERP system, inventory management system, IT service management system,
+or procurement system. The web application is the primary end product.
 
-Der Schwerpunkt liegt auf:
+The focus is on:
 
-- IT-Inventar
-- Lagerbeständen
-- Materialbewegungen
-- zentraler Datenhaltung
-- Rollen und Berechtigungen
-- Mehrbenutzerbetrieb
-- einfacher Bedienbarkeit
+- IT inventory
+- Stock levels
+- Material movements
+- Centralized data storage
+- Roles and permissions
+- Multi-user operation
+- Ease of use
 
 ---
 
-# Diplomarbeitskontext
+# Diploma Thesis Context
 
-Das Projekt gehört zur TEKO-Diplomarbeit:
+The project is part of the TEKO diploma thesis:
 
-**Prozessoptimierung IT-Inventar**
+**IT Inventory Process Optimization**
 
-**Diplomand:** Sven Döring  
-**Ausbildung:** Dipl. Informatiker HF, Fachrichtung Systemtechnik  
-**Klasse:** S-TIP-23-Di-z  
-**Unternehmen:** DLC-Informatik GmbH
+**Candidate:** Sven Döring  
+**Education:** Dipl. Informatiker HF, specialization in Systems Engineering  
+**Class:** S-TIP-23-Di-z  
+**Company:** DLC-Informatik GmbH
 
-Als interner Kunde wurde die Materialverwaltung bzw. das Lager der DLC-Informatik GmbH definiert.
-Die Lösung soll dazu beitragen:
+The material management department / warehouse of DLC-Informatik GmbH was defined as the internal customer.
+The solution is intended to help:
 
-- Ressourcen einzusparen
-- Zeit und Kosten zu reduzieren
-- Materialbewegungen besser nachzuvollziehen
-- die Bestandsübersicht zu verbessern
-- die Planung von Materialbeschaffungen zu unterstützen
+- Save resources
+- Reduce time and costs
+- Improve the traceability of material movements
+- Improve the stock overview
+- Support the planning of material purchases
 
 
 ---
@@ -977,15 +977,15 @@ Die Lösung soll dazu beitragen:
 
 ## Releases
 
-Der GitHub-Release erhält ein separat erstelltes ZIP-Paket. Dieses enthält den fertigen `web/dist`-Ordner sowie die Startdateien für den lokalen Test und den IIS-/Backend-Betrieb.
+The GitHub release includes a separately created ZIP package. It contains the finished `web/dist` folder and the startup files for local testing and IIS/backend operation.
 
-Alternativ ist eine Demoversion der Datenbank auf Render ersichtlich:
+Alternatively, a demo version of the database can be viewed on Render:
 https://itassetflow-demo.onrender.com/#/
 
 ---
 
-# Nutzung
+# Usage
 
-Das Projekt ist für interne Zwecke der DLC-Informatik GmbH sowie für Ausbildungs- und Diplomarbeitszwecke vorgesehen.
+The project is intended for internal use by DLC-Informatik GmbH and for educational and diploma thesis purposes.
 
-Eine weitergehende öffentliche Lizenzierung oder Weitergabe wird nicht festgelegt.
+No further public licensing or distribution terms have been specified.
