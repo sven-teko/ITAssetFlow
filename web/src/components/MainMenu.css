@@ -1,0 +1,76 @@
+/* Navigation und Detailansicht */
+.menu-popup .dock-panel-menu > button {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.dock-menu-chevron {
+  margin-left: 24px;
+  color: #647181;
+}
+
+.menu-popup .dock-panel-popup {
+  min-width: 240px;
+  padding: 6px;
+  border-radius: 6px;
+  box-shadow: 0 5px 18px rgba(31, 41, 55, 0.14);
+}
+
+.dock-panel-popup .dock-menu-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  color: #1f2937;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dock-panel-popup .dock-menu-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2868ad;
+  cursor: pointer;
+}
+
+.dock-panel-popup .dock-menu-option.is-selected {
+  color: #215b98;
+  background: #edf3fa;
+  font-weight: 600;
+}
+
+.dock-panel-popup .dock-menu-option:hover {
+  background: #e9eef4;
+}
+
+.dock-panel-popup .dock-menu-option:focus-within {
+  outline: 2px solid #597b9d;
+  outline-offset: -2px;
+}
+
+.dock-panel-popup .menu-separator {
+  margin: 6px 4px;
+}
+
+.dock-panel-popup .dock-menu-position {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+/* Untermenüs auch per Tab-Taste öffnen. */
+.menu-submenu:focus-within > .submenu-popup {
+  display: block;
+}
+
+/* Beim Wechsel mit der Maus nur das aktuelle Untermenü zeigen. */
+.menu-popup:has(> .menu-submenu:hover) > .menu-submenu:not(:hover) > .submenu-popup {
+  display: none;
+}

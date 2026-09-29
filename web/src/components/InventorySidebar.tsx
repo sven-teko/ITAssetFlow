@@ -1,3 +1,5 @@
+import PurchaseDateFilter from "./PurchaseDateFilter";
+import type { PurchaseDateCriteria } from "../utils/purchaseDateFilter";
 import {
   useEffect,
   useRef,
@@ -22,6 +24,7 @@ export type InventoryFilterOptions = {
 
 
 export type InventoryFilters = {
+  purchaseDate: PurchaseDateCriteria;
   groups: Set<string>;
   categories: Set<string>;
   conditions: Set<string>;
@@ -30,6 +33,15 @@ export type InventoryFilters = {
   storageLocations: Set<string>;
 };
 
+
+const FILTER_FIELDS = [
+  { key: "groups", label: "Inventartyp" },
+  { key: "categories", label: "Kategorie" },
+  { key: "conditions", label: "Zustand" },
+  { key: "sites", label: "Standort" },
+  { key: "departments", label: "Abteilung" },
+  { key: "storageLocations", label: "Lagerort" },
+] as const;
 
 type MultiSelectDropdownProps = {
   placeholder: string;
@@ -265,6 +277,7 @@ type InventorySidebarProps = {
   options: InventoryFilterOptions;
 
   loading: boolean;
+  canManageProductModels: boolean;
 
   selectedIdentifiers: string[];
   countText: string;
@@ -280,6 +293,7 @@ type InventorySidebarProps = {
   onCreate: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onProductModels: () => void;
 };
 
 
@@ -288,6 +302,7 @@ export default function InventorySidebar({
   filters,
   options,
   loading,
+  canManageProductModels,
   selectedIdentifiers,
   countText,
   onSearchChange,
@@ -295,13 +310,14 @@ export default function InventorySidebar({
   onCreate,
   onEdit,
   onDelete,
+  onProductModels,
 }: InventorySidebarProps) {
   const selectionCount =
     selectedIdentifiers.length;
 
 
   function updateFilter(
-    name: keyof InventoryFilters,
+    name: keyof InventoryFilterOptions,
     value: Set<string>,
   ): void {
     onFiltersChange({
@@ -363,87 +379,21 @@ export default function InventorySidebar({
 
         <div className="sidebar-filter-list">
 
-          <MultiSelectDropdown
-            placeholder="Inventartyp"
-            options={options.groups}
-            selected={filters.groups}
-            onChange={(value) =>
-              updateFilter(
-                "groups",
-                value,
-              )
-            }
+          {FILTER_FIELDS.map(({ key, label }) => (
+            <MultiSelectDropdown
+              key={key}
+              placeholder={label}
+              options={options[key]}
+              selected={filters[key]}
+              onChange={(value) => updateFilter(key, value)}
+            />
+          ))}
+
+          <PurchaseDateFilter
+            value={filters.purchaseDate}
+            disabled={loading}
+            onChange={(purchaseDate) => onFiltersChange({ ...filters, purchaseDate })}
           />
-
-
-          <MultiSelectDropdown
-            placeholder="Kategorie"
-            options={options.categories}
-            selected={filters.categories}
-            onChange={(value) =>
-              updateFilter(
-                "categories",
-                value,
-              )
-            }
-          />
-
-
-          <MultiSelectDropdown
-            placeholder="Zustand"
-            options={options.conditions}
-            selected={filters.conditions}
-            onChange={(value) =>
-              updateFilter(
-                "conditions",
-                value,
-              )
-            }
-          />
-
-
-          <MultiSelectDropdown
-            placeholder="Standort"
-            options={options.sites}
-            selected={filters.sites}
-            onChange={(value) =>
-              updateFilter(
-                "sites",
-                value,
-              )
-            }
-          />
-
-
-          <MultiSelectDropdown
-            placeholder="Abteilung"
-            options={options.departments}
-            selected={filters.departments}
-            onChange={(value) =>
-              updateFilter(
-                "departments",
-                value,
-              )
-            }
-          />
-
-
-          <MultiSelectDropdown
-            placeholder="Lagerort"
-            options={
-              options.storageLocations
-            }
-            selected={
-              filters.storageLocations
-            }
-            onChange={(value) =>
-              updateFilter(
-                "storageLocations",
-                value,
-              )
-            }
-          />
-
         </div>
 
 
@@ -490,6 +440,16 @@ export default function InventorySidebar({
                   ? `${selectionCount} Einträge löschen`
                   : "Einträge löschen"
             }
+          </button>
+
+          <button
+            type="button"
+            className="sidebar-product-models-button"
+            disabled={loading || !canManageProductModels}
+            title={canManageProductModels ? undefined : "Administratorrechte erforderlich"}
+            onClick={onProductModels}
+          >
+            Produktmodelle bearbeiten
           </button>
 
         </div>

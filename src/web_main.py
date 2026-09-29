@@ -46,9 +46,7 @@ FORWARDED_ALLOW_IPS = os.getenv(
 ).strip() or "127.0.0.1"
 
 
-# =========================================================
 # Python-Requirements
-# =========================================================
 
 def _read_text_auto(path: Path) -> str:
     """Liest UTF-8-, UTF-16- und UTF-32-Textdateien robust ein."""
@@ -262,9 +260,7 @@ ensure_runtime_dependencies()
 import uvicorn
 
 
-# =========================================================
 # Optionaler Vite-Entwicklungsserver
-# =========================================================
 
 def find_npm() -> str:
     """Findet npm. Unter Windows wird npm.cmd bevorzugt."""
@@ -392,9 +388,7 @@ def stop_frontend_dev_server(
             pass
 
 
-# =========================================================
 # Startparameter
-# =========================================================
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -415,10 +409,7 @@ def parse_args() -> argparse.Namespace:
 
     return parser.parse_args()
 
-
-# =========================================================
 # Hauptprogramm
-# =========================================================
 
 def main() -> None:
     args = parse_args()
