@@ -50,20 +50,6 @@ Dazu gehören unter anderem:
 - Installations- und Verbrauchsmaterial
 - Lizenzen und Softwaredaten
 
-Der bestehende Prozess wird analysiert und auf Schwachstellen sowie Optimierungsmöglichkeiten untersucht.
-ITAssetFlow ist die praktische technische Umsetzung der daraus entwickelten Lösungsvariante.
-
-Wichtige Ziele sind:
-
-- zentrale Verwaltung des IT-Inventars
-- bessere Übersicht über Bestände und Einzelgeräte
-- nachvollziehbare Materialbewegungen
-- klare Zuordnung zu Standorten, Abteilungen und Lagerorten
-- strukturierte Verwaltung von Herstellern, Kategorien und Produktmodellen
-- Reduktion manueller und mehrfach geführter Informationen
-- rollenbasierter Mehrbenutzerbetrieb
-- bessere Grundlage für Materialbeschaffung und Bestandsplanung
-- Verbesserung von Transparenz und Nachvollziehbarkeit
 
 Die Software ist damit ein Bestandteil der gesamten Prozessoptimierung und nicht das alleinige Ergebnis der Diplomarbeit.
 
@@ -77,15 +63,7 @@ ITAssetFlow unterscheidet zwischen inventarisierten Geräten und mengenbasierten
 
 Einzelgeräte werden separat erfasst und können individuell verfolgt werden.
 
-Beispiele:
 
-- Notebook
-- Desktop-PC
-- Monitor
-- Drucker
-- Kassensystem
-- Switch
-- Access Point
 
 Je nach Gerät können unter anderem folgende Informationen gespeichert werden:
 
@@ -115,8 +93,6 @@ Beispiele:
 - Verbrauchsmaterial
 - Installationsmaterial
 
-Dadurch lässt sich nachvollziehen, wie sich ein Lagerbestand zusammensetzt und wann Material ein- oder ausgelagert wurde.
-
 ## Weitere Funktionen
 
 Der aktuelle Projektstand enthält unter anderem:
@@ -135,7 +111,7 @@ Der aktuelle Projektstand enthält unter anderem:
 - Verwaltung von Organisation, Standorten, Abteilungen und Lagerorten
 - Lagerbewegungen
 - Bestandsübersichten
-- CSV-Import und CSV-Export
+- CSV sowie Postgre-SQL Import und Export
 - Einstellungen
 - Mehrbenutzerbetrieb
 - rollenbasierte Zugriffssteuerung
@@ -215,21 +191,6 @@ https://itassetflow-demo.onrender.com
 
 Die Demo ist vollständig von der produktiven Umgebung der DLC-Informatik GmbH getrennt. Sie verwendet eine eigene Supabase-Datenbank, eigene Demo-Benutzer und ausschliesslich Test- bzw. Demodaten.
 
-## Technischer Aufbau
-
-```text
-Browser
-   │
-   ▼
-Render
-   │
-   ├── React-Frontend aus web/dist
-   │
-   └── FastAPI / src/web_main.py
-            │
-            ▼
-       Demo-Supabase
-```
 
 Auf Render liefert FastAPI zusätzlich das fertige React-Frontend aus. Dafür wird in der Render-Konfiguration unter anderem der Standalone-Modus aktiviert:
 
@@ -244,10 +205,6 @@ Die für Render benötigten Supabase-Werte werden als Environment Variables im R
 ## Branch `webapp`
 
 Der Branch **`webapp`** dient ausschliesslich der Render-Bereitstellung.
-
-Er enthält den für Render benötigten Stand inklusive des gebauten `web/dist`-Ordners. Änderungen an der eigentlichen Anwendung werden zuerst im `main`-Branch gepflegt und anschliessend für die Demo in den `webapp`-Branch übernommen.
-
-Der Render-Build ist nicht als produktiver Firmen-Release gedacht. Für den internen Betrieb und für die Abgabe wird ein eigener Release-Build erstellt.
 
 ---
 
@@ -267,7 +224,7 @@ Benötigt werden:
 
 - Python 3
 - die Pakete aus `requirements.txt`
-- eine gültige `.env`
+- eine gültige `.env` z.b. aus `.env_example`
 - der im Release enthaltene Ordner `web/dist`
 
 Die Python-Abhängigkeiten können einmalig installiert werden:
@@ -319,28 +276,7 @@ Diese Variante ist für Funktionstests, Vorführungen und die Prüfung eines Rel
 
 # Produktiver Betrieb mit IIS
 
-Im internen Firmenbetrieb übernimmt **Microsoft IIS** die Bereitstellung des React-Frontends. FastAPI läuft getrennt davon als Backend.
 
-```text
-Browser
-   │
-   ├── Webseite
-   ▼
-  IIS
-   │
-   └── web/dist
-
-Browser
-   │
-   └── API-Anfragen
-          ▼
-     FastAPI
-          │
-          ▼
-       Supabase
-```
-
-Diese Trennung entspricht dem vorgesehenen produktiven Aufbau von ITAssetFlow.
 
 ## 1. Release verwenden
 
@@ -430,67 +366,14 @@ geprüft werden.
 
 Für den produktiven Betrieb sollte das Backend nicht dauerhaft in einem offenen CMD-Fenster laufen.
 
-Empfohlen ist ein Windows-Dienst bzw. ein geeigneter Service-Wrapper, der `src/web_main.py` automatisch startet. Dadurch läuft das Backend auch ohne angemeldeten Benutzer und wird nach einem Serverneustart automatisch wieder gestartet.
-
-`web_backend.cmd` bleibt trotzdem sinnvoll für manuelle Tests und Fehlersuche.
-
 ---
 
-# GitHub-Branches und Releases
-
-Repository, Render-Demo und ausführbarer Release haben unterschiedliche Aufgaben.
-
-## `main`
-
-Der Branch **`main`** enthält den eigentlichen Entwicklungs- und Quellcode der Anwendung.
-
-Der generierte Ordner
-
-```text
-web/dist/
-```
-
-wird dort bewusst **nicht** mitgeführt. Er wird bei Bedarf mit Vite neu erzeugt.
-
-Dadurch bleibt der Hauptbranch übersichtlich und enthält keine unnötigen Build-Artefakte.
-
-## `webapp`
-
-Der Branch **`webapp`** ist für die Bereitstellung der öffentlichen Render-Demo vorgesehen.
-
-Dort befindet sich der für Render benötigte Produktionsbuild, damit Render sowohl FastAPI als auch die Weboberfläche bereitstellen kann.
 
 ## GitHub Release
 
 Für einen Release wird aus dem aktuellen `main`-Stand ein neuer Produktionsbuild erzeugt und zusammen mit den für die Ausführung notwendigen Dateien als ZIP bereitgestellt.
 
-Ein Release-Paket ist beispielsweise so aufgebaut:
-
-```text
-ITAssetFlow-vX.Y.Z/
-│
-├── README.md
-├── requirements.txt
-├── .env.example
-├── Webserver_localhost.bat
-├── web_backend.cmd
-│
-├── src/
-│   ├── infrastructure/
-│   ├── web_backend/
-│   ├── config.py
-│   ├── inventory.py
-│   ├── logging_config.py
-│   ├── settings_manager.py
-│   └── web_main.py
-│
-└── web/
-    └── dist/
-        ├── index.html
-        └── assets/
-```
-
-Nicht in das Release-Paket gehören unter anderem:
+Nicht in das Release-Paket gehören:
 
 ```text
 .env
@@ -568,7 +451,7 @@ ITAssetFlow verwendet drei Anwendungsrollen.
 |---|---|---|
 | Administrator | `admin` | administrative und vollständige Bearbeitungsrechte |
 | Bearbeiter | `user` | Inventardaten lesen und bearbeiten |
-| Leser | `viewer` | ausschliesslich lesender Zugriff |
+|Betrachterr | `viewer` | ausschliesslich lesender Zugriff |
 
 Die Anmeldung erfolgt über Supabase Auth.
 
@@ -817,8 +700,6 @@ web/
     └── assets/
 ```
 
-Dieser Ordner wird im `main`-Branch nicht versioniert. Er wird für den `webapp`-Branch und für GitHub-Releases gezielt erzeugt.
-
 ## Wichtige Einstiegspunkte
 
 | Datei | Zweck |
@@ -889,13 +770,15 @@ ITASSETFLOW_CORS_ORIGINS=https://itassetflow-demo.onrender.com
 
 ## Supabase-Verbindung
 
+Der verwendete Publishable Key ist für den vorgesehenen Client-/Anwendungszugriff gedacht, die eigentliche Zugriffskontrolle erfolgt zusätzlich über Supabase Auth und Row Level Security.
+
 Nicht im Client bzw. Repository zu speichern sind:
 
 - Datenbankpasswort
 - Service-Role-Key
 - Benutzerpasswörter
 
-Der verwendete Publishable Key ist für den vorgesehenen Client-/Anwendungszugriff gedacht; die eigentliche Zugriffskontrolle erfolgt zusätzlich über Supabase Auth und Row Level Security.
+
 
 ---
 
@@ -904,6 +787,8 @@ Der verwendete Publishable Key ist für den vorgesehenen Client-/Anwendungszugri
 Für die Weiterentwicklung werden Python, Node.js und npm benötigt.
 
 ## Python-Abhängigkeiten
+
+Diese werden beim Start über requirements.txt automatisch installiert, falls dies nicht der Fall ist. Alternativ können diese auch manuell im Projektordner installiert werden:
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -954,14 +839,7 @@ web/dist/
 ```
 
 Im **`main`-Branch** wird dieser Ordner nicht gespeichert.
-
-Er wird nur dort verwendet, wo ein fertiger Produktionsbuild benötigt wird:
-
-- im Branch `webapp` für Render
-- im GitHub-Release für lokale Tests
-- im GitHub-Release für den produktiven IIS-Betrieb
-
-Vor einem Release sollte der Build neu erstellt und vollständig getestet werden.
+Er wird nur im Branch `webapp` für Render verwendet, wo ein fertiger Produktionsbuild benötigt wird.
 
 Wurde zuvor ein spezieller Render-Build erzeugt, muss vor dem Firmen-/Release-Build darauf geachtet werden, dass keine Render-spezifische `VITE_API_BASE_URL` mehr in der lokalen Build-Umgebung gesetzt ist.
 
@@ -970,8 +848,7 @@ Wurde zuvor ein spezieller Render-Build erzeugt, muss vor dem Firmen-/Release-Bu
 # Optionale Desktop-Anwendung
 
 Neben der Webanwendung existiert ein nativer PySide6-Client.
-
-Diese Anwendung ist **nicht die Hauptlösung der Diplomarbeit**.
+Diese Anwendung ist nicht die Hauptlösung der Diplomarbeit.
 
 Sie bleibt als optionale Alternative bestehen, falls in einem speziellen Fall ein nativer Windows-Client benötigt wird.
 
@@ -995,7 +872,8 @@ Die Desktop-Anwendung verwendet dieselbe Supabase-Datenbasis und dieselben serve
 
 Für die Diplomarbeitspräsentation und die öffentliche Demo wird eine separate Supabase-Datenbank verwendet.
 
-Die Demo-Umgebung ist von der produktiven Datenbank getrennt.
+Die Demo-Umgebung ist von der produktiven Datenbank getrennt und hat eigene Testbenutzer sowie eigene Demodaten.
+Somit kann ITAssetFlow realistisch demonstriert werden, ohne die produktive Umgebung zu verändern.
 
 Übernommen werden können unkritische Stammdaten wie:
 
@@ -1009,7 +887,7 @@ Die Demo-Umgebung ist von der produktiven Datenbank getrennt.
 - Produktmodelle
 - technische Spezifikationen
 
-Nicht übernommen werden sollen:
+Nicht übernommen werden:
 
 - produktive Benutzerpasswörter
 - reale Auth-Sitzungen
@@ -1018,15 +896,9 @@ Nicht übernommen werden sollen:
 - reale Lagerbewegungen
 - personenbezogene oder andere sensible Betriebsdaten
 
-Die Demo verwendet eigene Testbenutzer und eigene Demodaten.
-
-Damit kann ITAssetFlow realistisch demonstriert werden, ohne die produktive Umgebung zu verändern.
-
 ---
 
 # Test und Abnahme
-
-Vor einem Release sollten die wichtigsten Benutzerabläufe mit den vorgesehenen Rollen geprüft werden.
 
 ## Rollen
 
@@ -1038,45 +910,16 @@ Der Administrator besitzt die weitreichendsten Rechte und kann administrative Fu
 
 Der Bearbeiter kann Inventardaten lesen und die vorgesehenen Daten bearbeiten.
 
-### Leser
+### Betrachter
 
-Der Leser besitzt ausschliesslich lesenden Zugriff.
-
+Der Betrachter besitzt ausschliesslich lesenden Zugriff.
 Schreibende Zugriffe müssen für diese Rolle serverseitig durch RLS blockiert werden.
-
-## Wichtige Testfälle
-
-Vor einem Release sollten mindestens folgende Punkte geprüft werden:
-
-- Login mit gültigem Benutzer
-- Login mit falschem Passwort
-- Logout
-- Inventar laden
-- Suche und Filterung
-- Eintrag erstellen
-- Eintrag bearbeiten
-- Eintrag löschen
-- Hersteller verwalten
-- Kategorien verwalten
-- Produktmodelle verwalten
-- technische Spezifikationen erfassen
-- Standort und Lagerort ändern
-- Lagerbewegungen erfassen
-- CSV-Import
-- CSV-Export
-- paralleler Zugriff mit mehreren Benutzern
-- Rollen und Berechtigungen
-- serverseitige RLS-Sperren
-- Neustart des Backends
-- Start über `Webserver_localhost.bat`
-- Release-Build unter IIS mit `web_backend.cmd`
-- Zugriff auf die Render-Demo
-
----
 
 # Nachvollziehbarkeit
 
 Ein zentrales Ziel von ITAssetFlow ist, nicht nur den aktuellen Zustand zu speichern, sondern Änderungen und Bewegungen nachvollziehbarer zu machen.
+
+Damit kann unter anderem nachvollzogen werden wo sich ein Gerät befand, wem ein Gerät zugewiesen war, wann Material verschoben wurde, wie ein Bestand entstanden ist und welche relevanten Änderungen vorgenommen wurden.
 
 Dazu gehören unter anderem:
 
@@ -1088,41 +931,24 @@ stock_movements
 audit_log
 ```
 
-Damit kann unter anderem nachvollzogen werden:
 
-- wo sich ein Gerät befand
-- wem ein Gerät zugewiesen war
-- wann Material verschoben wurde
-- wie ein Bestand entstanden ist
-- welche relevanten Änderungen vorgenommen wurden
 
 ---
 
 # Abgrenzung
 
-ITAssetFlow ist eine auf den untersuchten internen Inventar- und Lagerprozess zugeschnittene Lösung.
-
-Das Projekt soll kein vollständiges:
-
-- ERP-System
-- Warenwirtschaftssystem
-- IT-Service-Management-System
-- Beschaffungssystem
-
-ersetzen.
+Das Projekt soll kein vollständiges ERP-System, Warenwirtschaftssystem, IT-Service-Management-System
+oder Beschaffungssystem ersetzen. Die Webanwendung ist das primäre Endprodukt.
 
 Der Schwerpunkt liegt auf:
 
 - IT-Inventar
 - Lagerbeständen
 - Materialbewegungen
-- Nachvollziehbarkeit
 - zentraler Datenhaltung
 - Rollen und Berechtigungen
 - Mehrbenutzerbetrieb
 - einfacher Bedienbarkeit
-
-Die Webanwendung ist das primäre Endprodukt.
 
 ---
 
@@ -1137,10 +963,7 @@ Das Projekt gehört zur TEKO-Diplomarbeit:
 **Klasse:** S-TIP-23-Di-z  
 **Unternehmen:** DLC-Informatik GmbH
 
-Die offizielle Themeneingabe beschreibt die Analyse und Optimierung des bestehenden Prozesses zur Verwaltung und Lagerung des IT-Inventars.
-
 Als interner Kunde wurde die Materialverwaltung bzw. das Lager der DLC-Informatik GmbH definiert.
-
 Die Lösung soll dazu beitragen:
 
 - Ressourcen einzusparen
@@ -1149,98 +972,16 @@ Die Lösung soll dazu beitragen:
 - die Bestandsübersicht zu verbessern
 - die Planung von Materialbeschaffungen zu unterstützen
 
-Zu den Erfolgskriterien gehören unter anderem:
-
-- bestehenden Inventarprozess dokumentieren
-- Schwachstellen und Optimierungspotenziale identifizieren
-- Verbesserungsvorschläge ausarbeiten
-- eine definitive Lösungsvariante umsetzen
-- praktische Umsetzbarkeit nachweisen
-- Transparenz und Nachvollziehbarkeit verbessern
-- Potenziale für Zeit- und Kostenersparnis aufzeigen
-
-ITAssetFlow ist die technische Umsetzung dieser Lösungsvariante.
 
 ---
 
-# Projektgrundlagen
-
-Für die Diplomarbeit und das Projekt werden insbesondere folgende Unterlagen berücksichtigt:
-
-- Themeneingabe der Diplomarbeit
-- TEKO-Richtlinien Diplomarbeit
-- TEKO-Bewertungsraster Diplomarbeit
-- Prüfungsreglement und Promotionsordnung
-- DA-Ablaufplan TIP-23
-- projektinterne Analyse-, Konzept- und Entwicklungsunterlagen
-
-Die eigentliche Diplomarbeitsdokumentation behandelt zusätzlich:
-
-- Ausgangslage
-- Ist-Prozess
-- Schwachstellenanalyse
-- Variantenvergleich
-- Soll-Prozess
-- Begründung der gewählten Lösung
-- Umsetzung
-- Zielerreichung
-- Reflexion und Lessons Learned
-
-Diese README dient dagegen als technische Projekt- und Startdokumentation für ITAssetFlow.
-
----
-
-# Hinweise zu Git
-
-Folgende Dateien und Verzeichnisse sollen nicht in den normalen `main`-Branch aufgenommen werden:
-
-```text
-.env
-__pycache__/
-*.pyc
-web/node_modules/
-web/dist/
-```
-
-Zusätzlich dürfen keine produktiven Datenbankexports, Passwörter oder Secret Keys in Git gespeichert werden.
-
-## Branch-Aufteilung
-
-```text
-main
-└── vollständiger Entwicklungs- und Quellcode
-    └── ohne web/dist
-
-webapp
-└── Bereitstellungsstand für Render
-    └── mit dem für Render erzeugten web/dist
-```
 
 ## Releases
 
-Ein GitHub-Release erhält ein separat erstelltes ZIP-Paket. Dieses enthält den fertigen `web/dist`-Ordner sowie die Startdateien für den lokalen Test und den IIS-/Backend-Betrieb.
+Der GitHub-Release erhält ein separat erstelltes ZIP-Paket. Dieses enthält den fertigen `web/dist`-Ordner sowie die Startdateien für den lokalen Test und den IIS-/Backend-Betrieb.
 
-Dadurch bleibt der `main`-Branch sauber, während ein Release trotzdem ohne Node.js neu gebaut werden zu müssen direkt getestet oder auf einem Webserver bereitgestellt werden kann.
-
-Die automatisch von GitHub erzeugten **Source code**-Archive sind nicht mit dem ausführbaren Release-Paket gleichzusetzen, da sie den nicht versionierten `web/dist`-Ordner aus `main` nicht enthalten.
-
----
-
-# Projektstatus
-
-ITAssetFlow befindet sich im Diplomarbeitsstand 2026.
-
-Die Hauptanwendung besteht aus:
-
-```text
-React / TypeScript
-        ↓
-FastAPI
-        ↓
-Supabase / PostgreSQL
-```
-
-Zusätzlich bleibt eine native PySide6-Version als optionale Ausweichlösung bestehen.
+Alternativ ist eine Demoversion der Datenbank auf Render ersichtlich:
+https://itassetflow-demo.onrender.com/#/
 
 ---
 
@@ -1248,4 +989,4 @@ Zusätzlich bleibt eine native PySide6-Version als optionale Ausweichlösung bes
 
 Das Projekt ist für interne Zwecke der DLC-Informatik GmbH sowie für Ausbildungs- und Diplomarbeitszwecke vorgesehen.
 
-Eine weitergehende öffentliche Lizenzierung oder Weitergabe wird durch diese README nicht festgelegt.
+Eine weitergehende öffentliche Lizenzierung oder Weitergabe wird nicht festgelegt.
