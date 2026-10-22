@@ -1,11 +1,10 @@
+import { API_BASE } from "../api/config";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ProductModelsPage, { type ProductModelsHandle } from "./ProductModelsPage";
 import "./SettingsPage.css";
+import EmployeesSettings, { type EmployeeRow } from "../components/EmployeesSettings";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ??
-  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 const LOCATION_TYPES = {
   warehouse: "Lager",
@@ -39,6 +38,7 @@ type MessageTone = "info" | "success" | "warning" | "error";
 
 type SettingsTab =
   | "structure"
+  | "employees"
   | "categories"
   | "product-models"
   | "specifications"
@@ -48,6 +48,7 @@ type SettingsTab =
 
 const SETTINGS_TABS: Array<[SettingsTab, string]> = [
   ["structure", "Struktur"],
+  ["employees", "Mitarbeiter"],
   ["categories", "Kategorien"],
   ["product-models", "Produktmodelle"],
   ["specifications", "Spezifikationen"],
@@ -121,19 +122,6 @@ type ManufacturerRow = {
 };
 
 type AppRole = "admin" | "user" | "viewer";
-
-type EmployeeRow = {
-  id: RowId;
-  client_key: string;
-  employee_number: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  department_ref: string | null;
-  is_active: boolean;
-  auth_user_id: string | null;
-  app_role: AppRole;
-};
 
 type SettingsResponse = {
   sites: Array<Record<string, unknown>>;
@@ -622,7 +610,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
             last_name: text(row.last_name),
             email: text(row.email),
             department_ref: idRef(row.department_id as RowId),
-            is_active: Boolean(row.is_active),
+            is_active: row.is_active !== false,
             auth_user_id: text(row.auth_user_id) || null,
             app_role: appRole,
           };
@@ -899,6 +887,11 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
       return;
     }
 
+    if (employees.some((employee) => employee.department_ref === row.client_key)) {
+      showMessage("Die Abteilung wird noch von einem Mitarbeiter verwendet.", "warning");
+      return;
+    }
+
     if (!window.confirm(`„${row.name || "Abteilung"}“ wirklich löschen?`)) {
       return;
     }
@@ -1124,6 +1117,27 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     );
     validateUniqueNames(categories, "Kategorie");
     validateUniqueNames(manufacturers, "Hersteller");
+
+    const employeeEmails = new Set<string>();
+    const employeeNumbers = new Set<string>();
+    for (const employee of employees) {
+      const label = [employee.first_name, employee.last_name].filter(Boolean).join(" ") || "ohne Name";
+      if (!employee.first_name.trim() || !employee.last_name.trim()) {
+        errors.push(`Mitarbeiter „${label}“: Vorname und Nachname sind erforderlich.`);
+      }
+      if (employee.department_ref && !departmentByKey.has(employee.department_ref)) {
+        errors.push(`Mitarbeiter „${label}“: Abteilung existiert nicht mehr.`);
+      }
+      const address = employee.email.trim().toLocaleLowerCase();
+      if (address && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+        errors.push(`Mitarbeiter „${label}“: E-Mail-Adresse ist ungültig.`);
+      }
+      if (address && employeeEmails.has(address)) errors.push(`E-Mail-Adresse „${address}“ ist doppelt vorhanden.`);
+      if (address) employeeEmails.add(address);
+      const number = employee.employee_number.trim().toLocaleLowerCase();
+      if (number && employeeNumbers.has(number)) errors.push(`Personalnummer „${employee.employee_number}“ ist doppelt vorhanden.`);
+      if (number) employeeNumbers.add(number);
+    }
 
     for (const department of departments) {
       if (!department.site_ref || !siteByKey.has(department.site_ref)) {
@@ -2309,6 +2323,16 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
               ) : (
                 <>
                   {activeTab === "structure" && renderStructure()}
+                  {activeTab === "employees" && <EmployeesSettings
+                    employees={employees} sites={sortedSites} departments={sortedDepartments}
+                    saving={saving} email={email} setEmployees={setEmployees}
+                    nextKey={() => nextKey("employee")} onMessage={(value) => showMessage(value)}
+                    onDelete={(row) => {
+                      rememberDeleted("employees", row.id);
+                      setEmployees((current) => current.filter((item) => item.client_key !== row.client_key));
+                      showMessage("Mitarbeiter zum Löschen vorgemerkt. Mit „Übernehmen“ speichern.", "warning");
+                    }}
+                  />}
                   {activeTab === "categories" && renderCategories()}
                   {activeTab === "specifications" && renderSpecifications()}
                   {activeTab === "manufacturers" && renderManufacturers()}

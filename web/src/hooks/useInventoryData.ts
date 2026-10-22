@@ -61,6 +61,8 @@ export default function useInventoryData({
   );
 
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const inFlightRef =
     useRef<Promise<void> | null>(
       null,
@@ -127,10 +129,10 @@ export default function useInventoryData({
 
   const executeLoad =
     useCallback(
-      async (
+      async function executeLoad(
         includeMeta: boolean,
         interactive: boolean,
-      ): Promise<void> => {
+      ): Promise<void> {
         if (
           inFlightRef.current
         ) {
@@ -154,9 +156,8 @@ export default function useInventoryData({
                 true,
               );
 
-              onStatus(
-                "Inventardaten werden geladen ...",
-              );
+              setLoadError(null);
+              onStatus("Inventardaten werden geladen ...");
             }
 
             try {
@@ -209,15 +210,10 @@ export default function useInventoryData({
               }
 
               if (interactive) {
-                setInventory(
-                  [],
-                );
-
-                onStatus(
-                  error instanceof Error
-                    ? error.message
-                    : "Inventar konnte nicht geladen werden.",
-                );
+                const message = error instanceof Error
+                  ? error.message : "Inventar konnte nicht geladen werden.";
+                setLoadError(message);
+                onStatus(message);
 
               } else {
                 // Bei einer kurzzeitigen Netzwerkstörung bleibt der zuletzt
@@ -683,6 +679,7 @@ export default function useInventoryData({
     inventory,
     meta,
     loading,
+    loadError,
     loadData,
     refreshInventory,
   };

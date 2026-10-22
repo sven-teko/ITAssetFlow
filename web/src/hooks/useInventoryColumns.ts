@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import type { InventoryMeta, InventoryRow } from "../types/inventory";
 import { normalizeText } from "../utils/inventory";
@@ -49,49 +49,25 @@ export default function useInventoryColumns({
   onStatus,
 }: UseInventoryColumnsOptions) {
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set());
+  const [requestedVisible, setRequestedVisible] = useState<Set<string> | null>(null);
 
-  useEffect(() => {
-    if (!meta) {
-      return;
-    }
-
+  const availableColumns = useMemo(() => {
+    if (!meta) return [];
     const available = meta.column_order.filter((column) =>
-      inventory.some((row) => column in row),
+      inventory.length === 0 || inventory.some((row) => column in row),
     );
+    return [
+      ...columnOrder.filter((column) => available.includes(column)),
+      ...available.filter((column) => !columnOrder.includes(column)),
+    ];
+  }, [columnOrder, inventory, meta]);
 
-    setColumnOrder((current) => {
-      const preserved = current.filter((column) => available.includes(column));
-      const missing = available.filter((column) => !preserved.includes(column));
-      return [...preserved, ...missing];
-    });
-
-    setVisibleColumns((current) => {
-      const preserved = new Set(
-        [...current].filter((column) => available.includes(column)),
-      );
-
-      if (preserved.size > 0) {
-        return preserved;
-      }
-
-      return new Set(
-        configuredDefaultColumns(
-          email,
-          available,
-          meta.default_visible_columns,
-        ),
-      );
-    });
-  }, [email, inventory, meta]);
-
-  const availableColumns = useMemo(
-    () =>
-      columnOrder.filter((column) =>
-        inventory.some((row) => column in row),
-      ),
-    [columnOrder, inventory],
-  );
+  const visibleColumns = useMemo(() => {
+    const selected = new Set([...requestedVisible ?? []].filter((column) => availableColumns.includes(column)));
+    return selected.size > 0 ? selected : new Set(configuredDefaultColumns(
+      email, availableColumns, meta?.default_visible_columns ?? [],
+    ));
+  }, [availableColumns, email, meta, requestedVisible]);
 
   const displayedColumns = useMemo(
     () => availableColumns.filter((column) => visibleColumns.has(column)),
@@ -148,47 +124,27 @@ export default function useInventoryColumns({
   );
 
   const moveColumn = useCallback((source: string, target: string): void => {
-    if (source === target) {
+    if (source === target) return;
+    const next = availableColumns.filter((column) => column !== source);
+    const targetIndex = next.indexOf(target);
+    if (targetIndex < 0) return;
+    next.splice(targetIndex, 0, source);
+    setColumnOrder(next);
+  }, [availableColumns]);
+
+  const setColumnVisible = useCallback((column: string, visible: boolean): void => {
+    if (!visible && visibleColumns.size <= 1) {
+      onStatus("Mindestens eine Spalte muss sichtbar bleiben.");
       return;
     }
-
-    setColumnOrder((current) => {
-      const next = current.filter((column) => column !== source);
-      const targetIndex = next.indexOf(target);
-
-      if (targetIndex < 0) {
-        return [...next, source];
-      }
-
-      next.splice(targetIndex, 0, source);
-      return next;
-    });
-  }, []);
-
-  const setColumnVisible = useCallback(
-    (column: string, visible: boolean): void => {
-      setVisibleColumns((current) => {
-        const next = new Set(current);
-
-        if (visible) {
-          next.add(column);
-          return next;
-        }
-
-        if (next.size <= 1) {
-          onStatus("Mindestens eine Spalte muss sichtbar bleiben.");
-          return current;
-        }
-
-        next.delete(column);
-        return next;
-      });
-    },
-    [onStatus],
-  );
+    const next = new Set(visibleColumns);
+    if (visible) next.add(column);
+    else next.delete(column);
+    setRequestedVisible(next);
+  }, [onStatus, visibleColumns]);
 
   const showAllColumns = useCallback((): void => {
-    setVisibleColumns(new Set(availableColumns));
+    setRequestedVisible(new Set(availableColumns));
   }, [availableColumns]);
 
   const resetColumns = useCallback((): void => {
@@ -196,7 +152,7 @@ export default function useInventoryColumns({
       return;
     }
 
-    setVisibleColumns(
+    setRequestedVisible(
       new Set(
         configuredDefaultColumns(
           email,

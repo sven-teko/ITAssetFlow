@@ -1,8 +1,7 @@
+import { API_BASE } from "./config";
 import { getInventoryClientId, UnauthorizedError } from "./inventoryApi";
 import type { ProductModel, ProductModelsData } from "../utils/productModels";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 async function request(path: string, options: RequestInit): Promise<unknown> {
   const response = await fetch(`${API_BASE}/api/product-models${path}`, {

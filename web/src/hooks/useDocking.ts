@@ -41,6 +41,8 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
     startX: number;
     startY: number;
     dragging: boolean;
+    pointerId: number;
+    target: DockDropTarget | null;
   } | null>(null);
 
   const panelPosition = useCallback(
@@ -162,6 +164,14 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
         return null;
       }
 
+      const rect = workspace.getBoundingClientRect();
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+      // Dieselbe Geometrie wie .dock-drop-zone. Die Randzonen haben Vorrang
+      // vor einer bereits dort angedockten Seitenleiste.
+      const edgeZone = Math.min(112, Math.max(72, rect.width * 0.08));
+      if (clientX <= rect.left + edgeZone) return "left-edge";
+      if (clientX >= rect.right - edgeZone) return "right-edge";
+
       const otherPanel: DockPanelKind =
         draggedPanel === "navigation" ? "detail" : "navigation";
       const otherElement = dockShellRefs.current[otherPanel];
@@ -183,23 +193,12 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
         }
       }
 
-      const rect = workspace.getBoundingClientRect();
-      const edgeZone = Math.min(190, Math.max(110, rect.width * 0.18));
-
-      if (clientX >= rect.left && clientX <= rect.left + edgeZone) {
-        return "left-edge";
-      }
-
-      if (clientX <= rect.right && clientX >= rect.right - edgeZone) {
-        return "right-edge";
-      }
-
       return null;
     }
 
     function pointerMove(event: PointerEvent): void {
       const pending = dockPointerRef.current;
-      if (!pending) {
+      if (!pending || pending.pointerId !== event.pointerId) {
         return;
       }
 
@@ -217,39 +216,45 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
       }
 
       event.preventDefault();
+      pending.target = dockTargetAt(event.clientX, event.clientY, pending.panel);
       setDockDrag({
         panel: pending.panel,
-        target: dockTargetAt(event.clientX, event.clientY, pending.panel),
+        target: pending.target,
       });
     }
 
-    function finishDockDrag(): void {
+    function finishDockDrag(event: PointerEvent): void {
       const pending = dockPointerRef.current;
-      if (!pending) {
+      if (!pending || pending.pointerId !== event.pointerId) {
         return;
       }
 
       dockPointerRef.current = null;
       document.body.classList.remove("dock-panel-dragging");
 
-      setDockDrag((current) => {
-        if (pending.dragging && current?.target) {
-          applyDockTarget(pending.panel, current.target);
-        }
-        return null;
-      });
+      const target = dockTargetAt(event.clientX, event.clientY, pending.panel);
+      setDockDrag(null);
+      // Keine Zustandsänderungen in einem React-State-Updater ausführen:
+      // dieser kann im StrictMode mehrfach aufgerufen werden.
+      if (pending.dragging && target) applyDockTarget(pending.panel, target);
+    }
+
+    function cancelDockDrag(): void {
+      dockPointerRef.current = null;
+      document.body.classList.remove("dock-panel-dragging");
+      setDockDrag(null);
     }
 
     window.addEventListener("pointermove", pointerMove, { passive: false });
     window.addEventListener("pointerup", finishDockDrag);
-    window.addEventListener("pointercancel", finishDockDrag);
-    window.addEventListener("blur", finishDockDrag);
+    window.addEventListener("pointercancel", cancelDockDrag);
+    window.addEventListener("blur", cancelDockDrag);
 
     return () => {
       window.removeEventListener("pointermove", pointerMove);
       window.removeEventListener("pointerup", finishDockDrag);
-      window.removeEventListener("pointercancel", finishDockDrag);
-      window.removeEventListener("blur", finishDockDrag);
+      window.removeEventListener("pointercancel", cancelDockDrag);
+      window.removeEventListener("blur", cancelDockDrag);
       document.body.classList.remove("dock-panel-dragging");
     };
   }, [applyDockTarget]);
@@ -267,7 +272,7 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
 
   const beginDockPointer = useCallback(
     (panel: DockPanelKind, event: ReactPointerEvent<HTMLDivElement>): void => {
-      if (event.button !== 0 || !event.isPrimary) {
+      if (event.button !== 0 || !event.isPrimary || window.matchMedia("(max-width: 720px)").matches) {
         return;
       }
 
@@ -282,6 +287,8 @@ export default function useDocking({ onStatus }: UseDockingOptions) {
         startX: event.clientX,
         startY: event.clientY,
         dragging: false,
+        pointerId: event.pointerId,
+        target: null,
       };
     },
     [],

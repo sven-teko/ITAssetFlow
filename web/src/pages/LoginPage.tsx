@@ -1,3 +1,4 @@
+import { API_BASE } from "../api/config";
 import {
   useState,
 } from "react";
@@ -9,11 +10,6 @@ import type {
 import {
   useNavigate,
 } from "react-router-dom";
-
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 
 type LoginResponse = {
