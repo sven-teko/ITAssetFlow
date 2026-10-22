@@ -1,0 +1,48 @@
+{
+  "name": "ITAssetFlow Render Hotfix",
+  "date": "2026-10-22",
+  "target_branch": "webapp",
+  "source_commit": "05385fa419cb59c6952fb05c0784b3f4ae6e1f1b",
+  "api_target": "same origin",
+  "checks": {
+    "asset_references": "passed",
+    "gitignore_tracking": "passed",
+    "browser_test_scripts": 2,
+    "browser_scenario_groups": 15,
+    "test_api": "simulated"
+  },
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "b67b1d9dada4dc59955c7d679a646f9259f21ef066279e48d8a780ebfb30a56a"
+    },
+    {
+      "path": "RENDER-HOTFIX.md",
+      "sha256": "613cb2fdba18a78f6910f63fee2c7dbf1b504cd9b131bc5f59615dd1ada5d6d4"
+    },
+    {
+      "path": "web/dist/QR-LICENSES.txt",
+      "sha256": "7a02884c68c6f2b57dc2ceec1128d4df757781d39b1016ceef4897d98661327e"
+    },
+    {
+      "path": "web/dist/assets/esm-ni1Pr6Ff.js",
+      "sha256": "3903f9b909f1b857bcaecdc9fcb66469cf556ba9dc0f3523192f98f24c5416ce"
+    },
+    {
+      "path": "web/dist/assets/index-CKwHWMzF.css",
+      "sha256": "f806a97cdab564b4b57a50c6027a27e4030a4296ba2c995ed841ed1e3e068374"
+    },
+    {
+      "path": "web/dist/assets/index-DtiLwxa2.js",
+      "sha256": "73694702e6845a6a30600e4354ce24f273e064517abcdc3539d6b062f3b0d0aa"
+    },
+    {
+      "path": "web/dist/index.html",
+      "sha256": "354cd7fb86b1241b8d058ec02d78ce6adc3060b6737eed07ed376f900a7489ea"
+    },
+    {
+      "path": "web/dist/logo.png",
+      "sha256": "80612a5a9412ca0f325bcd143f44a9ab0ed204b4911b754061c7095787b9fe9e"
+    }
+  ]
+}

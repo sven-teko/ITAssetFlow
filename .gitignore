@@ -131,3 +131,7 @@ logs/
 
 *.session
 *.token
+
+# Render-Branch: den gesamten Frontend-Build mitversionieren.
+!web/dist/
+!web/dist/**
