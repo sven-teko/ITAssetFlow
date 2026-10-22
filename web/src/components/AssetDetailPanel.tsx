@@ -525,8 +525,7 @@ export default function AssetDetailPanel({
     }
 
 
-    let formatted =
-      "";
+    let formatted: string;
 
     if (
       field === "new_price"

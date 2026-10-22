@@ -1,13 +1,10 @@
+import { API_BASE } from "./config";
 import type {
   CsvImportResult,
   DeleteInventoryResult,
   InventoryMeta,
   InventoryRow,
 } from "../types/inventory";
-
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL
-  ?? `${window.location.protocol}//${window.location.hostname}:8000`;
 
 
 const CLIENT_ID_STORAGE_KEY =

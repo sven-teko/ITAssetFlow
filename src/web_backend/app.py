@@ -26,6 +26,7 @@ from supabase import Client
 from config import get_app_config
 from infrastructure.asset_repository import AssetRepository
 from infrastructure.data_transfer_service import DataTransferService
+from infrastructure.qr_service import QrService
 from infrastructure.supabase_client import (
     authenticate_user,
     get_session_tokens,
@@ -1154,6 +1155,29 @@ def inventory_edit_form_data(
 
 
 # Inventareintrag erstellen / bearbeiten / löschen
+
+@app.get("/api/qr/lookup")
+def lookup_qr(code: str, web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
+    try:
+        return QrService(web_session.client, actor_email=web_session.email).lookup(code)
+    except Exception as error:
+        raise _repository_http_exception(error) from error
+
+
+@app.post("/api/qr/stock")
+def adjust_qr_stock(
+    request: Request,
+    payload: dict[str, Any],
+    web_session: WebSession = Depends(require_editor_session),
+) -> dict[str, Any]:
+    try:
+        result = QrService(web_session.client, actor_email=web_session.email).adjust(payload)
+        INVENTORY_CHANGES.publish(_request_client_id(request))
+        return result
+    except Exception as error:
+        if "nicht genügend lagerbestand" in str(error).casefold():
+            raise HTTPException(status_code=409, detail="Nicht genügend Lagerbestand. Bitte den aktuellen Bestand erneut prüfen.") from error
+        raise _repository_http_exception(error) from error
 
 @app.post("/api/inventory")
 def create_inventory_entry(

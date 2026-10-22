@@ -1,5 +1,5 @@
 import { matchesPurchaseDate } from "../utils/purchaseDateFilter";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import type {
   FilterOption,
@@ -15,6 +15,7 @@ function emptyFilters(): InventoryFilters {
     groups: new Set(),
     categories: new Set(),
     conditions: new Set(),
+    statuses: new Set(),
     sites: new Set(),
     departments: new Set(),
     storageLocations: new Set(),
@@ -72,8 +73,11 @@ export default function useInventoryView({
     const groups = new Map<string, string>();
     const categories = new Map<string, string>();
     const conditions = new Map<string, string>();
+    const statuses = new Map<string, string>();
 
     for (const row of inventory) {
+      const status = normalizeText(row.status);
+      if (status) statuses.set(status, meta?.status_labels[status] ?? String(row.status));
       const group = normalizeText(row._web_inventory_group);
       if (group) {
         groups.set(group, meta?.inventory_group_labels[group] ?? group);
@@ -97,6 +101,7 @@ export default function useInventoryView({
       groups: mapOptions(groups),
       categories: mapOptions(categories),
       conditions: mapOptions(conditions),
+      statuses: mapOptions(statuses),
       sites: uniqueTextOptions(inventory, "site_name"),
       departments: uniqueTextOptions(inventory, "department_name"),
       storageLocations: uniqueTextOptions(inventory, "storage_location"),
@@ -107,6 +112,9 @@ export default function useInventoryView({
     const searchValue = search.trim().toLocaleLowerCase();
 
     return inventory.filter((row) => {
+      if (filters.statuses.size > 0 && !filters.statuses.has(normalizeText(row.status))) {
+        return false;
+      }
       if (
         filters.groups.size > 0
         && !filters.groups.has(normalizeText(row._web_inventory_group))
@@ -162,16 +170,16 @@ export default function useInventoryView({
     });
   }, [displayedColumns, filters, formatValue, inventory, search]);
 
-  useEffect(() => {
-    const validKeys = new Set(filteredRows.map(getRowKey));
-    setSelectedKeys((current) =>
-      new Set([...current].filter((key) => validKeys.has(key))),
-    );
-  }, [filteredRows]);
+  // Verdeckte Zeilen dürfen auch im Render unmittelbar nach einem Filterwechsel
+  // nicht bearbeitet oder gelöscht werden.
+  const visibleSelectedKeys = useMemo(
+    () => new Set(filteredRows.map(getRowKey).filter((key) => selectedKeys.has(key))),
+    [filteredRows, selectedKeys],
+  );
 
   const selectedRows = useMemo(
-    () => inventory.filter((row) => selectedKeys.has(getRowKey(row))),
-    [inventory, selectedKeys],
+    () => filteredRows.filter((row) => visibleSelectedKeys.has(getRowKey(row))),
+    [filteredRows, visibleSelectedKeys],
   );
 
   const selectedIdentifiers = useMemo(
@@ -186,12 +194,12 @@ export default function useInventoryView({
 
   return {
     search,
-    setSearch,
+    setSearch: (value: string) => { setSearch(value); setSelectedKeys(new Set()); },
     filters,
-    setFilters,
+    setFilters: (value: InventoryFilters) => { setFilters(value); setSelectedKeys(new Set()); },
     filterOptions,
     filteredRows,
-    selectedKeys,
+    selectedKeys: visibleSelectedKeys,
     setSelectedKeys,
     selectedRows,
     selectedIdentifiers,

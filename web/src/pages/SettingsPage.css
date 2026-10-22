@@ -1,5 +1,19 @@
 /* Gemeinsamer Rahmen für alle Einstellungsreiter. */
 
+.settings-employees-page { gap: 16px; }
+.settings-employee-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.settings-employee-filters > label { display: flex; flex-direction: column; gap: 5px; color: #526171; font-size: 13px; }
+.settings-employee-filters select, .settings-employee-filters input[type="search"] {
+  min-height: 34px; max-width: 260px; padding: 6px 8px; background: #fff; border: 1px solid #cbd3dd; border-radius: 4px;
+}
+.settings-employee-filters > .settings-employee-checkbox { flex-direction: row; align-items: center; min-height: 34px; }
+.settings-employees-table { min-width: 1000px; }
+.settings-employees-table th:nth-child(3) { width: 23%; }
+.settings-employees-table th:nth-child(6) { width: 22%; }
+.settings-employee-active { text-align: center; }
+.settings-employee-count { margin-left: auto; color: #66717c; font-size: 13px; }
+.settings-employee-note { margin: 0; color: #66717c; font-size: 13px; line-height: 1.5; }
+
 .settings-page {
   width: 100%;
   height: 100%;
@@ -576,3 +590,6 @@ select.settings-cell-editor {
     overflow: visible;
   }
 }
+
+.settings-employee-filters > label:nth-child(3) { flex: 1 1 250px; max-width: 360px; }
+.settings-employee-filters input[type="search"] { width: 100%; max-width: none; }

@@ -1,149 +1,126 @@
 # ITAssetFlow
 
-ITAssetFlow ist eine webbasierte Anwendung zur Verwaltung von IT-Inventar, Lagerbeständen und Materialbewegungen.
+ITAssetFlow is a web-based application for managing IT inventory, stock levels, and material movements.
 
-Das Projekt entstand im Rahmen meiner TEKO-Diplomarbeit **„Prozessoptimierung IT-Inventar“** bei der **DLC-Informatik GmbH**. Ziel ist es, die bestehende Inventar- und Lagerverwaltung transparenter, nachvollziehbarer und effizienter zu gestalten.
+The project was developed as part of my TEKO diploma thesis **“IT Inventory Process Optimization”** at **DLC-Informatik GmbH**. Its goal is to make the existing inventory and stock management more transparent, traceable, and efficient.
 
-Die **Webanwendung ist die Hauptversion** von ITAssetFlow. Zusätzlich existiert eine native Desktop-Anwendung mit PySide6. Diese ist nicht als zweite Hauptlösung gedacht, sondern als optionale Alternative für einen spezifischen Notfall oder Spezialfall.
-
----
-
-## Inhalt
-
-- [Projektziel](#projektziel)
-- [Funktionsumfang](#funktionsumfang)
-- [Architektur](#architektur)
-- [Projekt ausführen](#projekt-ausführen)
-- [Empfohlener Betrieb mit IIS](#empfohlener-betrieb-mit-iis)
-- [Lokaler Testserver](#lokaler-testserver)
-- [Online-Demo](#online-demo)
-- [Technologien](#technologien)
-- [Benutzerrollen und Sicherheit](#benutzerrollen-und-sicherheit)
-- [Datenmodell](#datenmodell)
-- [Projektstruktur](#projektstruktur)
-- [Konfiguration](#konfiguration)
-- [Entwicklungsumgebung](#entwicklungsumgebung)
-- [Frontend neu bauen](#frontend-neu-bauen)
-- [Optionale Desktop-Anwendung](#optionale-desktop-anwendung)
-- [Demo-Datenbank](#demo-datenbank)
-- [Test und Abnahme](#test-und-abnahme)
-- [Abgrenzung](#abgrenzung)
-- [Diplomarbeitskontext](#diplomarbeitskontext)
+The web application is the main version of ITAssetFlow. A native desktop application built with PySide6 is also available. It is intended as an optional alternative for a specific use case, rather than a second primary solution.
 
 ---
 
-# Projektziel
+## Contents
 
-Ausgangspunkt der Diplomarbeit ist die bestehende Verwaltung und Lagerung des IT-Inventars bei der DLC-Informatik GmbH.
-
-Dazu gehören unter anderem:
-
-- Notebooks und Computer
-- Monitore
-- Drucker
-- Kassensysteme
-- Netzwerkgeräte
-- SSDs und RAM
-- Kabel und Adapter
-- Ersatzteile
-- Installations- und Verbrauchsmaterial
-
-Der bestehende Prozess wird analysiert, dokumentiert und auf Schwachstellen sowie Optimierungsmöglichkeiten untersucht.
-
-ITAssetFlow ist die praktische technische Umsetzung der daraus entwickelten Lösungsvariante.
-
-Wichtige Ziele sind:
-
-- zentrale Verwaltung des IT-Inventars
-- bessere Übersicht über Bestände und Einzelgeräte
-- nachvollziehbare Materialbewegungen
-- klare Zuordnung zu Standorten, Abteilungen und Lagerorten
-- strukturierte Verwaltung von Herstellern, Kategorien und Produktmodellen
-- Reduktion manueller und mehrfach geführter Informationen
-- rollenbasierter Mehrbenutzerbetrieb
-- bessere Grundlage für Materialbeschaffung und Bestandsplanung
-- Verbesserung von Transparenz und Nachvollziehbarkeit
-
-Die Software ist damit ein Bestandteil der gesamten Prozessoptimierung und nicht das alleinige Ergebnis der Diplomarbeit.
+- [Project Goal](#project-goal)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Deployment Overview](#deployment-overview)
+- [Online Demo on Render](#online-demo-on-render)
+- [Local Web Server for Testing](#local-web-server-for-testing)
+- [Production Deployment with IIS](#production-deployment-with-iis)
+- [GitHub Branches and Releases](#github-branches-and-releases)
+- [Technologies](#technologies)
+- [User Roles and Security](#user-roles-and-security)
+- [Data Model](#data-model)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Development Environment](#development-environment)
+- [Rebuilding the Frontend](#rebuilding-the-frontend)
+- [Optional Desktop Application](#optional-desktop-application)
+- [Demo Database](#demo-database)
+- [Testing and Acceptance](#testing-and-acceptance)
+- [Scope](#scope)
+- [Diploma Thesis Context](#diploma-thesis-context)
 
 ---
 
-# Funktionsumfang
+# Project Goal
 
-ITAssetFlow unterscheidet zwischen **einzeln inventarisierten Geräten** und **mengenbasierten Lagerartikeln**.
+The diploma thesis starts with the existing management and storage of IT inventory at DLC-Informatik GmbH.
 
-## Einzelgeräte
+This includes, among other things:
 
-Einzelgeräte werden separat erfasst und können individuell verfolgt werden.
+- Notebooks and computers
+- Monitors
+- Printers
+- Point-of-sale systems
+- Network devices
+- Computer components
+- Cables and adapters
+- Spare parts
+- Installation materials and consumables
+- Licenses and software data
 
-Beispiele:
 
-- Notebook
-- Desktop-PC
-- Monitor
-- Drucker
-- Kassensystem
-- Switch
-- Access Point
+The software is therefore one part of the overall process optimization, rather than the sole outcome of the diploma thesis.
 
-Je nach Gerät können unter anderem folgende Informationen gespeichert werden:
+---
 
-- Hersteller
-- Produktmodell
-- Kategorie
-- Seriennummer
-- Inventarnummer
-- technische Spezifikationen
-- Standort
-- Abteilung
-- Lagerort
-- Zuweisung
+# Features
+
+ITAssetFlow distinguishes between individually inventoried devices and quantity-based stock items.
+
+## Individual Devices
+
+Individual devices are recorded separately and can be tracked individually.
+
+
+
+Depending on the device, the following information can be stored, among other things:
+
+- Manufacturer
+- Product model
+- Category
+- Serial number
+- Inventory number
+- Technical specifications
+- Site
+- Department
+- Storage location
+- Assignment
 - Status
 
-## Mengenartikel
+## Quantity-Based Items
 
-Mengenartikel werden über Lagerbewegungen geführt.
+Quantity-based items are managed through stock movements.
 
-Beispiele:
+Examples:
 
-- Netzwerkkabel
-- Adapter
+- Network cables
+- Adapters
 - SSDs
-- RAM-Module
-- Ersatzteile
-- Verbrauchsmaterial
-- Installationsmaterial
+- RAM modules
+- Spare parts
+- Consumables
+- Installation materials
 
-Dadurch lässt sich nachvollziehen, wie sich ein Lagerbestand zusammensetzt und wann Material ein- oder ausgelagert wurde.
+## Additional Features
 
-## Weitere Funktionen
+The current project includes, among other things:
 
-Der aktuelle Projektstand enthält unter anderem:
-
-- Benutzeranmeldung
-- Inventarübersicht
-- Suche und Filterung
-- konfigurierbare Tabellenansichten
-- Detailansicht
-- Erstellen und Bearbeiten von Inventareinträgen
-- Löschen von Inventareinträgen
-- Verwaltung von Herstellern
-- Verwaltung von Kategorien
-- Verwaltung von Produktmodellen
-- kategoriespezifische technische Spezifikationen
-- Verwaltung von Organisation, Standorten, Abteilungen und Lagerorten
-- Lagerbewegungen
-- Bestandsübersichten
-- CSV-Import und CSV-Export
-- Einstellungen
-- Mehrbenutzerbetrieb
-- rollenbasierte Zugriffssteuerung
+- User login
+- Inventory overview
+- Search and filtering
+- Configurable table views
+- Detail view
+- Creating and editing inventory entries
+- Deleting inventory entries
+- Managing manufacturers
+- Managing categories
+- Managing product models
+- Category-specific technical specifications
+- Managing the organization, sites, departments, and storage locations
+- Stock movements
+- Stock overviews
+- CSV and PostgreSQL import and export
+- Settings
+- Multi-user operation
+- Role-based access control
 
 ---
 
-# Architektur
+# Architecture
 
-Die Anwendung besteht aus mehreren Schichten.
+The application consists of several layers.
 
 ```text
                          ┌─────────────────────┐
@@ -157,18 +134,18 @@ Die Anwendung besteht aus mehreren Schichten.
                      │                             │
           ┌──────────▼──────────┐       ┌──────────▼──────────┐
           │   Native Desktop    │       │      FastAPI        │
-          │ Python / PySide6    │       │    Web-Backend      │
+          │ Python / PySide6    │       │    Web Backend      │
           └─────────────────────┘       └──────────┬──────────┘
                                                    │
                                         ┌──────────▼──────────┐
                                         │      React          │
-                                        │    Web-Frontend     │
+                                        │    Web Frontend     │
                                         └─────────────────────┘
 ```
 
-Die Desktop-Anwendung greift direkt über einen authentifizierten Supabase-Client auf die Daten zu.
+The desktop application accesses the data directly through an authenticated Supabase client.
 
-Die Webanwendung verwendet dagegen den Weg:
+The web application follows this path:
 
 ```text
 Browser
@@ -182,88 +159,162 @@ Supabase
 PostgreSQL
 ```
 
-Die Webanwendung ist die Hauptversion des Projekts.
+The web application is the main version of the project.
 
-Die native Desktop-Anwendung bleibt als optionale Alternative erhalten und verwendet dieselbe zentrale Datenbasis.
-
----
-
-# Projekt ausführen
-
-Für ITAssetFlow sind drei Betriebsarten vorgesehen:
-
-1. **Release auf einem Webserver bereitstellen**  
-   Dies ist die empfohlene Variante für den regulären Betrieb.
-
-2. **Lokalen Testserver über `testserver.bat` starten**  
-   Diese Variante ist für lokale Tests und Demonstrationen gedacht.
-
-3. **Online-Demo verwenden**  
-   Eine separate Demo-Instanz wird auf DigitalOcean gehostet.
+The native desktop application remains available as an optional alternative and uses the same central database.
 
 ---
 
-# Empfohlener Betrieb mit IIS
+# Deployment Overview
 
-Für den regulären internen Betrieb wird empfohlen, den bereits gebauten Frontend-Ordner aus einem Release zu verwenden und diesen über einen Webserver wie **Microsoft IIS** bereitzustellen.
+ITAssetFlow can be run in three ways. Separate options are used for development, demos, and production.
 
-Damit muss das React-Frontend auf dem Zielserver nicht erneut mit Node.js gebaut werden.
+| Option | Purpose | Frontend | Backend |
+|---|---|---|---|
+| **Render demo** | Public diploma thesis demo | `web/dist` is served by FastAPI | FastAPI on Render |
+| **Local web server** | Quick test of a release package | `web/dist` is served by FastAPI | `Webserver_localhost.bat` / `src/web_main.py` |
+| **Production web server** | Internal company use | IIS serves `web/dist` | `web_backend.cmd` / `src/web_main.py` |
 
-## 1. Release verwenden
+The `web/dist` folder is a **generated build artifact**. It is therefore not part of the normal development state on the `main` branch. It is built and included specifically for deployment on Render and for GitHub releases.
 
-Aus dem gewünschten Release wird der enthaltene `dist`-Ordner verwendet.
+---
 
-Typischer Inhalt:
+# Online Demo on Render
+
+A separate demo instance on **Render** is available for the diploma thesis presentation and external testing.
+
+## Demo URL
 
 ```text
-dist/
+https://itassetflow-demo.onrender.com
+```
+
+The demo is entirely separate from the production environment of DLC-Informatik GmbH. It uses its own Supabase database, its own demo users, and test or demo data only.
+
+
+On Render, FastAPI also serves the finished React frontend. The Render configuration enables standalone mode, among other settings:
+
+```env
+ITASSETFLOW_SERVE_WEB=true
+ITASSETFLOW_COOKIE_SECURE=true
+ITASSETFLOW_CORS_ORIGINS=https://itassetflow-demo.onrender.com
+```
+
+The Supabase values required by Render are maintained as environment variables in the Render service and are not stored in the repository.
+
+## `webapp` Branch
+
+The **`webapp`** branch is used exclusively for deployment on Render.
+
+---
+
+# Local Web Server for Testing
+
+A GitHub release already contains the built `web/dist` folder. The web application can therefore be tested locally without installing Node.js, npm, or Vite.
+
+To start it, use:
+
+```text
+Webserver_localhost.bat
+```
+
+## Requirements
+
+You need:
+
+- Python 3
+- The packages in `requirements.txt`
+- A valid `.env`, e.g. based on `.env_example`
+- The `web/dist` folder included in the release
+
+The Python dependencies can be installed once:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## Local Configuration
+
+For a local standalone test, FastAPI must serve the React build as well as the API:
+
+```env
+ITASSETFLOW_SERVE_WEB=true
+ITASSETFLOW_COOKIE_SECURE=false
+```
+
+Valid Supabase values are also required.
+
+## Start
+
+The file can be started by double-clicking it:
+
+```text
+Webserver_localhost.bat
+```
+
+Alternatively, the backend can be started directly:
+
+```powershell
+python src/web_main.py
+```
+
+The local web application is then available at:
+
+```text
+http://127.0.0.1:8000/#/login
+```
+
+The API status can be checked separately at:
+
+```text
+http://127.0.0.1:8000/api/health
+```
+
+This option is intended for functional tests, demonstrations, and checking a release package. IIS is used for ongoing company operations.
+
+---
+
+# Production Deployment with IIS
+
+
+
+## 1. Use the Release
+
+The finished release package is used on the company server. It contains this folder:
+
+```text
+web/dist/
+```
+
+The folder is already built. Therefore, **Node.js, npm, and Vite are not required** on the target server.
+
+## 2. Serve the Frontend through IIS
+
+IIS can point directly to the included build, for example:
+
+```text
+C:\ITAssetFlow\web\dist
+```
+
+Alternatively, the contents of `web/dist` can be copied into an existing IIS web directory.
+
+The folder typically contains:
+
+```text
+web/dist/
 ├── index.html
 └── assets/
     ├── *.js
     └── *.css
 ```
 
-Je nach Release können zusätzliche statische Dateien enthalten sein.
+## 3. Prepare the Backend
 
-## 2. `dist` auf den Webserver kopieren
-
-Der Inhalt des `dist`-Ordners wird auf den Webserver kopiert.
-
-Beispiel:
+The backend requires Python and the packages in:
 
 ```text
-C:\inetpub\ITAssetFlow\
+requirements.txt
 ```
-
-Danach sollte die `index.html` direkt im konfigurierten IIS-Verzeichnis liegen.
-
-Beispiel:
-
-```text
-C:\inetpub\ITAssetFlow\
-├── index.html
-└── assets\
-```
-
-IIS stellt in dieser Variante das fertige React-Frontend bereit.
-
-## 3. IIS konfigurieren
-
-Im IIS-Manager wird eine Website oder eine entsprechende Site-Bindung für ITAssetFlow eingerichtet.
-
-Für den internen Zielbetrieb ist beispielsweise folgende Adresse vorgesehen:
-
-```text
-https://ITAssetFlow.dlc-informatik.local
-```
-
-Bei Verwendung von HTTPS muss ein passendes Zertifikat eingerichtet werden.
-
-Sind bereits andere Webseiten auf Port 80 oder 443 vorhanden, können diese über unterschiedliche Hostnamen getrennt werden.
-
-## 4. Backend vorbereiten
-
-Das Backend benötigt Python sowie die in `requirements.txt` definierten Python-Pakete.
 
 Installation:
 
@@ -271,159 +322,85 @@ Installation:
 python -m pip install -r requirements.txt
 ```
 
-Zusätzlich wird eine gültige `.env` benötigt.
+A production `.env` must also be present on the server. For security reasons, this file is **not included in the GitHub release**.
 
-Beispiel:
+For IIS operation, FastAPI is used only as an API:
 
 ```env
-SUPABASE_URL=https://example.supabase.co
-SUPABASE_PUBLISHABLE_KEY=your_publishable_key
-
+ITASSETFLOW_SERVE_WEB=false
 ITASSETFLOW_WEB_HOST=0.0.0.0
 ITASSETFLOW_WEB_PORT=8000
-ITASSETFLOW_COOKIE_SECURE=true
-
-ITASSETFLOW_CORS_ORIGINS=https://ITAssetFlow.dlc-informatik.local
 ```
 
-## 5. Backend starten
+`ITASSETFLOW_COOKIE_SECURE` and `ITASSETFLOW_CORS_ORIGINS` must be set to match the actual internal HTTP/HTTPS configuration.
 
-Das FastAPI-Backend wird über `web_main.py` gestartet:
+## 4. Start the Backend
+
+The release includes the following file for a manual start:
+
+```text
+web_backend.cmd
+```
+
+It starts:
+
+```text
+src/web_main.py
+```
+
+Alternatively, the backend can be started directly:
 
 ```powershell
 python src/web_main.py
 ```
 
-Der verwendete Port wird über die `.env` festgelegt.
-
-Beispiel:
+For example, the API status can be checked at:
 
 ```text
-8000
+http://localhost:8000/api/health
 ```
 
-Das Frontend kommuniziert anschliessend mit diesem Backend.
+This endpoint can be used to verify that the API is responding.
 
-## 6. Dauerbetrieb
+## 5. Run Continuously as a Windows Service
 
-Für einen regulären Serverbetrieb sollte `web_main.py` nach einem Serverneustart automatisch gestartet werden.
-
-Dies kann beispielsweise über:
-
-- einen Windows-Dienst
-- die Windows-Aufgabenplanung
-- einen bestehenden Prozessmanager
-
-erfolgen.
-
-Die konkrete Umsetzung hängt von der verwendeten Serverumgebung ab.
-
-## 7. Firewall
-
-Falls das Backend direkt über einen eigenen Port erreichbar sein muss, muss dieser entsprechend freigegeben werden.
-
-Beispiel für Port 8000:
-
-```powershell
-New-NetFirewallRule `
-  -DisplayName "ITAssetFlow Backend" `
-  -Direction Inbound `
-  -Protocol TCP `
-  -LocalPort 8000 `
-  -Action Allow
-```
-
-Die Freigabe sollte nur für das tatsächlich benötigte interne Netzwerk erfolgen.
-
-## Betriebsübersicht
-
-```text
-Browser
-   │
-   ├── HTTPS
-   ▼
-IIS
-   │
-   └── React-Frontend aus dem Release / dist
-
-Browser
-   │
-   ├── API
-   ▼
-FastAPI / src/web_main.py
-   │
-   ▼
-Supabase
-```
-
-Für den Serverbetrieb wird bewusst der fertige Frontend-Build aus dem Release verwendet.
-
-Node.js und Vite werden auf dem Zielserver dadurch nicht benötigt.
+For production use, the backend should not run permanently in an open CMD window.
 
 ---
 
-# Lokaler Testserver
 
-Für einen schnellen lokalen Funktionstest steht im Projekt die Datei
+## GitHub Release
+
+For a release, a new production build is created from the current state of `main` and packaged as a ZIP together with the files needed to run it.
+
+The release package must not include:
 
 ```text
-testserver.bat
+.env
+web/node_modules/
+__pycache__/
+*.pyc
+.git/
 ```
 
-zur Verfügung.
+The React development environment, including `web/src`, `node_modules`, and the TypeScript/Vite configuration files, is also unnecessary for simply running the release package. The full frontend source code remains available in the repository on the `main` branch.
 
-Sie ist für lokale Tests und Demonstrationen gedacht und nicht für den dauerhaften Produktivbetrieb.
+### Important When Downloading
 
-## Start
 
-Die Datei kann direkt per Doppelklick gestartet werden.
+To test the application directly, use the provided release ZIP, for example:
 
-Alternativ:
-
-```powershell
-.\testserver.bat
+```text
+ITAssetFlow-v1.0..zip
 ```
 
-Damit wird die für den lokalen Test vorgesehene Serverumgebung gestartet.
-
-Diese Variante eignet sich insbesondere für:
-
-- schnelle Funktionstests
-- Vorführungen
-- lokale Tests auf einem Entwicklungsrechner
-- Prüfung eines Release-Standes ohne IIS-Einrichtung
-
-Für den regulären Serverbetrieb wird dagegen die Bereitstellung des `dist`-Ordners über IIS oder einen vergleichbaren Webserver empfohlen.
+This package already includes the finished `web/dist` build.
 
 ---
 
-# Online-Demo
+# Technologies
 
-Für die Diplomarbeitspräsentation und für externe Tests existiert zusätzlich eine separate Demo-Instanz auf **DigitalOcean**.
-
-Die Demo ist von der produktiven Umgebung der DLC-Informatik GmbH getrennt.
-
-## Demo-URL
-
-```text
-<DIGITALOCEAN-DEMO-URL>
-```
-
-Die endgültige URL wird hier eingetragen, sobald die öffentliche Adresse feststeht.
-
-Die Demo-Instanz verwendet:
-
-- eine eigene Supabase-Datenbank
-- separate Demo-Benutzer
-- Test- und Demodaten
-- keine produktiven Authentifizierungsdaten
-- keine vertraulichen Inventardaten der DLC-Informatik GmbH
-
----
-
-# Technologien
-
-## Web-Frontend
+## Web Frontend
 
 - React
 - TypeScript
@@ -437,47 +414,47 @@ Die Demo-Instanz verwendet:
 - FastAPI
 - Uvicorn
 
-## Datenbank und API
+## Database and API
 
 - Supabase
 - PostgreSQL
 - PostgREST
 
-## Authentifizierung und Berechtigungen
+## Authentication and Permissions
 
 - Supabase Auth
 - PostgreSQL Row Level Security
-- Datenbankfunktionen
+- Database functions
 - Trigger
 - Views
 
-## Optionale Desktop-Version
+## Optional Desktop Version
 
 - Python
 - PySide6
 - PyInstaller
 
-## Bereitstellung
+## Deployment
 
 - Microsoft IIS
 - Windows Server
-- DigitalOcean für die Demo-Instanz
+- Render for the public demo instance
 
 ---
 
-# Benutzerrollen und Sicherheit
+# User Roles and Security
 
-ITAssetFlow verwendet drei Anwendungsrollen.
+ITAssetFlow uses three application roles.
 
-| Rolle | Datenbankwert | Zweck |
+| Role | Database value | Purpose |
 |---|---|---|
-| Administrator | `admin` | administrative und vollständige Bearbeitungsrechte |
-| Bearbeiter | `user` | Inventardaten lesen und bearbeiten |
-| Leser | `viewer` | ausschliesslich lesender Zugriff |
+| Administrator | `admin` | Administrative and full editing rights |
+| Editor | `user` | Read and edit inventory data |
+| Viewer | `viewer` | Read-only access |
 
-Die Anmeldung erfolgt über Supabase Auth.
+Authentication is handled by Supabase Auth.
 
-Die Verbindung zwischen Auth-Benutzer und Mitarbeiterdatensatz wird über `employees.auth_user_id` hergestellt.
+The connection between an authenticated user and an employee record is established through `employees.auth_user_id`.
 
 ```text
 Supabase Auth
@@ -494,11 +471,11 @@ public.employees
 Row Level Security
 ```
 
-Die Berechtigungen werden nicht nur in der Oberfläche geprüft.
+Permissions are not checked only in the user interface.
 
-Die Datenbank schützt die relevanten Tabellen zusätzlich über Row Level Security.
+The database additionally protects the relevant tables using Row Level Security.
 
-Zu den verwendeten Hilfsfunktionen gehören unter anderem:
+The helper functions used include:
 
 ```text
 private.current_app_role()
@@ -507,39 +484,39 @@ private.can_read_inventory()
 private.can_edit_inventory()
 ```
 
-## Sicherheitsgrundsätze
+## Security Principles
 
-- `.env` nicht in Git einchecken
-- keine Datenbankpasswörter im Quellcode speichern
-- keine Benutzerpasswörter im Quellcode speichern
-- keine Supabase Service-Role-Keys im React-Frontend verwenden
-- Benutzerzugriffe über Supabase Auth absichern
-- Datenbankzugriffe über RLS absichern
-- für den regulären Webbetrieb HTTPS verwenden
-- Firewall-Freigaben auf das notwendige Netzwerk beschränken
+- Do not commit `.env` to Git
+- Do not store database passwords in the source code
+- Do not store user passwords in the source code
+- Do not use Supabase service role keys in the React frontend
+- Secure user access with Supabase Auth
+- Secure database access with RLS
+- Use HTTPS for regular web operation
+- Limit firewall access to the necessary network
 
-Der Supabase Publishable Key ist für Client-Anwendungen vorgesehen. Die eigentliche Zugriffskontrolle erfolgt über Authentifizierung und RLS.
+The Supabase publishable key is intended for client applications. Actual access control is provided by authentication and RLS.
 
 ---
 
-# Datenmodell
+# Data Model
 
-Die Datenbank ist in mehrere logische Bereiche aufgeteilt.
+The database is divided into several logical areas.
 
-## Organisation und Lagerstruktur
+## Organization and Storage Structure
 
 ```text
-Organisation
+Organization
     │
     ▼
-Standort
+Site
     │
-    ├── Abteilung
+    ├── Department
     │
-    └── Lagerort
+    └── Storage location
 ```
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 organizations
@@ -550,17 +527,17 @@ storage_locations
 employees
 ```
 
-## Hersteller und Produktdaten
+## Manufacturers and Product Data
 
 ```text
-Hersteller ───────┐
-                  ├── Produktmodell
-Kategorie ────────┘
+Manufacturer ────┐
+                  ├── Product model
+Category ────────┘
      │
-     └── Spezifikationsschema
+     └── Specification schema
 ```
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 manufacturers
@@ -568,15 +545,15 @@ product_categories
 product_models
 ```
 
-Produktkategorien können ein Spezifikationsschema enthalten.
+Product categories can contain a specification schema.
 
-Dadurch können je Kategorie unterschiedliche technische Eigenschaften definiert werden.
+This makes it possible to define different technical attributes for each category.
 
-Produktmodelle speichern die dazugehörigen konkreten Spezifikationen.
+Product models store the corresponding specific specifications.
 
-## Inventar
+## Inventory
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 assets
@@ -585,11 +562,11 @@ asset_assignments
 asset_component_assignments
 ```
 
-Damit können Geräte, Standorte und Zuordnungen nachvollzogen werden.
+This makes it possible to track devices, sites, and assignments.
 
-## Lagerbestand
+## Stock
 
-Wichtige Tabellen:
+Key tables:
 
 ```text
 stock_movements
@@ -597,18 +574,18 @@ stock_counts
 stock_targets
 ```
 
-Zusätzlich stehen Views für Bestandsinformationen zur Verfügung:
+Views are also available for stock information:
 
 ```text
 stock_levels
 stock_levels_total
 ```
 
-Der Bestand kann dadurch aus den erfassten Materialbewegungen nachvollzogen werden.
+Stock levels can therefore be traced back to the recorded material movements.
 
-## Softwareverwaltung
+## Software Management
 
-Die Datenbank enthält ausserdem Tabellen für:
+The database also contains tables for:
 
 ```text
 software_products
@@ -616,7 +593,7 @@ software_licenses
 software_installations
 ```
 
-## Weitere technische Tabellen
+## Additional Technical Tables
 
 ```text
 audit_log
@@ -626,11 +603,11 @@ connection_test
 
 ---
 
-# Projektstruktur
+# Project Structure
 
-Die folgende Struktur entspricht dem aktuellen Aufbau von ITAssetFlow.
+The following structure shows the development state on the **`main` branch**.
 
-Generierte Ordner wie `__pycache__` und `node_modules` sind bewusst nicht als Bestandteil der eigentlichen Quellcode-Struktur aufgeführt.
+Generated folders such as `__pycache__`, `node_modules`, and `web/dist` are deliberately omitted from the actual source code structure.
 
 ```text
 ITAssetFlow/
@@ -654,7 +631,6 @@ ITAssetFlow/
 │   └── web_main.py
 │
 ├── web/
-│   ├── dist/
 │   ├── public/
 │   │
 │   ├── src/
@@ -695,116 +671,18 @@ ITAssetFlow/
 │   ├── tsconfig.node.json
 │   └── vite.config.ts
 │
-├── .env
 ├── .env.example
 ├── .gitignore
 ├── ITAssetFlow.spec
 ├── README.md
 ├── requirements.txt
-└── testserver.bat
+├── Webserver_localhost.bat
+└── web_backend.cmd
 ```
 
-## Wichtige Einstiegspunkte
+## Generated Production Build
 
-| Datei | Zweck |
-|---|---|
-| `src/web_main.py` | Start des FastAPI-Web-Backends |
-| `web/src/main.tsx` | Einstiegspunkt des React-Frontends |
-| `src/main.py` | Start der optionalen Desktop-Anwendung |
-| `testserver.bat` | lokaler Testserver |
-| `.env` | lokale bzw. serverspezifische Konfiguration |
-| `.env.example` | Vorlage für die Konfiguration |
-| `ITAssetFlow.spec` | PyInstaller-Konfiguration |
-
----
-
-# Konfiguration
-
-ITAssetFlow verwendet eine `.env`-Datei für umgebungsabhängige Einstellungen.
-
-Die echte `.env` darf nicht in Git eingecheckt werden.
-
-Beispiel:
-
-```env
-SUPABASE_URL=https://example.supabase.co
-SUPABASE_PUBLISHABLE_KEY=your_publishable_key
-
-ITASSETFLOW_WEB_HOST=0.0.0.0
-ITASSETFLOW_WEB_PORT=8000
-ITASSETFLOW_COOKIE_SECURE=false
-
-ITASSETFLOW_CORS_ORIGINS=http://127.0.0.1:5173
-```
-
-Für einen internen HTTPS-Betrieb:
-
-```env
-ITASSETFLOW_WEB_HOST=0.0.0.0
-ITASSETFLOW_WEB_PORT=8000
-ITASSETFLOW_COOKIE_SECURE=true
-
-ITASSETFLOW_CORS_ORIGINS=https://ITAssetFlow.dlc-informatik.local
-```
-
-## Supabase-Verbindung
-
-Benötigt werden:
-
-```env
-SUPABASE_URL=...
-SUPABASE_PUBLISHABLE_KEY=...
-```
-
-Nicht im Client zu speichern sind:
-
-- Datenbankpasswort
-- Service-Role-Key
-- Benutzerpasswörter
-
----
-
-# Entwicklungsumgebung
-
-Für die Weiterentwicklung werden Python, Node.js und npm benötigt.
-
-## Python-Abhängigkeiten
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-## Frontend-Abhängigkeiten
-
-```powershell
-cd web
-npm.cmd ci
-cd ..
-```
-
-Durch `npm.cmd ci` wird der vorhandene `package-lock.json` verwendet.
-
-## Entwicklungsmodus
-
-```powershell
-python src/web_main.py --dev
-```
-
-Im Entwicklungsmodus wird zusätzlich der Vite-Entwicklungsserver verwendet.
-
-Typische lokale Adresse:
-
-```text
-http://127.0.0.1:5173
-```
-
-Diese Betriebsart ist für die Entwicklung gedacht.
-
----
-
-# Frontend neu bauen
-
-Nach Änderungen am React-Frontend muss ein neuer Produktionsbuild erzeugt werden.
+After running
 
 ```powershell
 cd web
@@ -812,25 +690,166 @@ npm.cmd ci
 npm.cmd run build
 ```
 
-Der neue Build befindet sich danach unter:
+the following is also generated:
+
+```text
+web/
+└── dist/
+    ├── index.html
+    └── assets/
+```
+
+## Key Entry Points
+
+| File | Purpose |
+|---|---|
+| `src/web_main.py` | Starts the FastAPI web backend |
+| `web/src/main.tsx` | Entry point of the React frontend |
+| `src/main.py` | Starts the optional desktop application |
+| `Webserver_localhost.bat` | Local standalone test using the finished `web/dist` build |
+| `web_backend.cmd` | Manual start of the backend for IIS / a production web server |
+| `.env` | Local or server-specific configuration; not stored in Git |
+| `.env.example` | Configuration template |
+| `ITAssetFlow.spec` | PyInstaller configuration for the optional desktop application |
+
+---
+
+# Configuration
+
+ITAssetFlow uses a `.env` file for environment-specific settings.
+
+The real `.env` must not be committed to Git or included in a public release.
+
+The basic settings required are:
+
+```env
+SUPABASE_URL=https://example.supabase.co
+SUPABASE_PUBLISHABLE_KEY=your_publishable_key
+
+ITASSETFLOW_WEB_HOST=0.0.0.0
+ITASSETFLOW_WEB_PORT=8000
+```
+
+## Local Standalone Test
+
+For local testing, FastAPI also serves the React frontend:
+
+```env
+ITASSETFLOW_SERVE_WEB=true
+ITASSETFLOW_COOKIE_SECURE=false
+```
+
+## IIS / Production Web Server
+
+In the company environment, IIS serves the frontend. FastAPI provides only the API:
+
+```env
+ITASSETFLOW_SERVE_WEB=false
+ITASSETFLOW_WEB_HOST=0.0.0.0
+ITASSETFLOW_WEB_PORT=8000
+```
+
+The allowed browser origin must also be set to match the internal address, for example:
+
+```env
+ITASSETFLOW_CORS_ORIGINS=http://ITAssetFlow.dlc-informatik.local
+```
+
+For a setup running entirely over HTTPS, the configuration must be adjusted accordingly and `ITASSETFLOW_COOKIE_SECURE=true` must be set.
+
+## Render Demo
+
+Render uses its own environment variables. The demo uses a separate Supabase instance and, among other settings:
+
+```env
+ITASSETFLOW_SERVE_WEB=true
+ITASSETFLOW_COOKIE_SECURE=true
+ITASSETFLOW_CORS_ORIGINS=https://itassetflow-demo.onrender.com
+```
+
+## Supabase Connection
+
+The publishable key used is intended for client/application access. Actual access control is additionally enforced through Supabase Auth and Row Level Security.
+
+Do not store the following in the client or repository:
+
+- Database password
+- Service role key
+- User passwords
+
+
+
+---
+
+# Development Environment
+
+Python, Node.js, and npm are required for further development.
+
+## Python Dependencies
+
+If missing, these are installed automatically at startup from requirements.txt. Alternatively, they can be installed manually in the project directory:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## Frontend Dependencies
+
+```powershell
+cd web
+npm.cmd ci
+cd ..
+```
+
+`npm.cmd ci` uses the existing `package-lock.json`.
+
+## Development Mode
+
+```powershell
+python src/web_main.py --dev
+```
+
+Development mode also uses the Vite development server.
+
+Typical local address:
+
+```text
+http://127.0.0.1:5173
+```
+
+This mode is intended for development.
+
+---
+
+# Rebuilding the Frontend
+
+After changes to the React frontend, a new production build must be created.
+
+```powershell
+cd web
+npm.cmd ci
+npm.cmd run build
+```
+
+The new build is then located in:
 
 ```text
 web/dist/
 ```
 
-Vor einem Release sollte dieser Build neu erstellt und vollständig getestet werden.
+This folder is not stored on the **`main` branch**.
+It is used only on the `webapp` branch for Render, where a finished production build is required.
 
-Der fertige `dist`-Ordner kann anschliessend auf einen Webserver wie IIS kopiert werden.
+If a special Render build was created earlier, make sure that no Render-specific `VITE_API_BASE_URL` remains set in the local build environment before creating the company/release build.
 
 ---
 
-# Optionale Desktop-Anwendung
+# Optional Desktop Application
 
-Neben der Webanwendung existiert ein nativer PySide6-Client.
+In addition to the web application, a native PySide6 client is available.
+This application is not the main solution of the diploma thesis.
 
-Diese Anwendung ist **nicht die Hauptlösung der Diplomarbeit**.
-
-Sie bleibt als optionale Alternative bestehen, falls in einem speziellen Fall ein nativer Windows-Client benötigt wird.
+It remains available as an optional alternative if a native Windows client is needed for a specific use case.
 
 Start:
 
@@ -838,104 +857,70 @@ Start:
 python src/main.py
 ```
 
-Für einen Windows-Build steht die PyInstaller-Konfiguration zur Verfügung:
+The PyInstaller configuration is available for a Windows build:
 
 ```text
 ITAssetFlow.spec
 ```
 
-Die Desktop-Anwendung verwendet dieselbe Supabase-Datenbasis und dieselben serverseitigen Berechtigungsregeln.
+The desktop application uses the same Supabase database and the same server-side permission rules.
 
 ---
 
-# Demo-Datenbank
+# Demo Database
 
-Für die Diplomarbeitspräsentation und die öffentliche Demo wird eine separate Supabase-Datenbank verwendet.
+A separate Supabase database is used for the diploma thesis presentation and the public demo.
 
-Die Demo-Umgebung ist von der produktiven Datenbank getrennt.
+The demo environment is separate from the production database and has its own test users and demo data.
+This allows ITAssetFlow to be demonstrated realistically without changing the production environment.
 
-Übernommen werden können unkritische Stammdaten wie:
+Non-sensitive master data can be copied, such as:
 
-- Organisation
-- Standorte
-- Abteilungen
-- Lagerorte
-- Hersteller
-- Produktkategorien
-- Spezifikationsdefinitionen
-- Produktmodelle
-- technische Spezifikationen
+- Organization
+- Sites
+- Departments
+- Storage locations
+- Manufacturers
+- Product categories
+- Specification definitions
+- Product models
+- Technical specifications
 
-Nicht übernommen werden sollen:
+The following are not copied:
 
-- produktive Benutzerpasswörter
-- reale Auth-Sitzungen
-- vertrauliche Mitarbeiterdaten
-- reale Gerätezuordnungen
-- reale Lagerbewegungen
-- personenbezogene oder andere sensible Betriebsdaten
-
-Die Demo verwendet eigene Testbenutzer und eigene Demodaten.
-
-Damit kann ITAssetFlow realistisch demonstriert werden, ohne die produktive Umgebung zu verändern.
+- Production user passwords
+- Real authentication sessions
+- Confidential employee data
+- Real device assignments
+- Real stock movements
+- Personal or other sensitive operational data
 
 ---
 
-# Test und Abnahme
+# Testing and Acceptance
 
-Vor einem Release sollten die wichtigsten Benutzerabläufe mit den vorgesehenen Rollen geprüft werden.
-
-## Rollen
+## Roles
 
 ### Administrator
 
-Der Administrator besitzt die weitreichendsten Rechte und kann administrative Funktionen verwenden.
+The administrator has the broadest permissions and can use administrative functions.
 
-### Bearbeiter
+### Editor
 
-Der Bearbeiter kann Inventardaten lesen und die vorgesehenen Daten bearbeiten.
+The editor can read inventory data and edit the data as intended.
 
-### Leser
+### Viewer
 
-Der Leser besitzt ausschliesslich lesenden Zugriff.
+The viewer has read-only access.
+Write access for this role must be blocked on the server side by RLS.
 
-Schreibende Zugriffe müssen für diese Rolle serverseitig durch RLS blockiert werden.
+# Traceability
 
-## Wichtige Testfälle
+A central goal of ITAssetFlow is to store the current state while also making changes and movements easier to trace.
 
-Vor einem Release sollten mindestens folgende Punkte geprüft werden:
+This includes tracking where a device was located, to whom it was assigned, when material was moved, how a stock level came about, and which relevant changes were made.
 
-- Login mit gültigem Benutzer
-- Login mit falschem Passwort
-- Logout
-- Inventar laden
-- Suche und Filterung
-- Eintrag erstellen
-- Eintrag bearbeiten
-- Eintrag löschen
-- Hersteller verwalten
-- Kategorien verwalten
-- Produktmodelle verwalten
-- technische Spezifikationen erfassen
-- Standort und Lagerort ändern
-- Lagerbewegungen erfassen
-- CSV-Import
-- CSV-Export
-- paralleler Zugriff mit mehreren Benutzern
-- Rollen und Berechtigungen
-- serverseitige RLS-Sperren
-- Neustart des Backends
-- Start über `testserver.bat`
-- Release-Build unter IIS
-- Zugriff auf die DigitalOcean-Demo
-
----
-
-# Nachvollziehbarkeit
-
-Ein zentrales Ziel von ITAssetFlow ist, nicht nur den aktuellen Zustand zu speichern, sondern Änderungen und Bewegungen nachvollziehbarer zu machen.
-
-Dazu gehören unter anderem:
+This includes, among other things:
 
 ```text
 asset_locations
@@ -945,145 +930,62 @@ stock_movements
 audit_log
 ```
 
-Damit kann unter anderem nachvollzogen werden:
 
-- wo sich ein Gerät befand
-- wem ein Gerät zugewiesen war
-- wann Material verschoben wurde
-- wie ein Bestand entstanden ist
-- welche relevanten Änderungen vorgenommen wurden
 
 ---
 
-# Abgrenzung
+# Scope
 
-ITAssetFlow ist eine auf den untersuchten internen Inventar- und Lagerprozess zugeschnittene Lösung.
+The project is not intended to replace a complete ERP system, inventory management system, IT service management system,
+or procurement system. The web application is the primary end product.
 
-Das Projekt soll kein vollständiges:
+The focus is on:
 
-- ERP-System
-- Warenwirtschaftssystem
-- IT-Service-Management-System
-- Beschaffungssystem
-
-ersetzen.
-
-Der Schwerpunkt liegt auf:
-
-- IT-Inventar
-- Lagerbeständen
-- Materialbewegungen
-- Nachvollziehbarkeit
-- zentraler Datenhaltung
-- Rollen und Berechtigungen
-- Mehrbenutzerbetrieb
-- einfacher Bedienbarkeit
-
-Die Webanwendung ist das primäre Endprodukt.
+- IT inventory
+- Stock levels
+- Material movements
+- Centralized data storage
+- Roles and permissions
+- Multi-user operation
+- Ease of use
 
 ---
 
-# Diplomarbeitskontext
+# Diploma Thesis Context
 
-Das Projekt gehört zur TEKO-Diplomarbeit:
+The project is part of the TEKO diploma thesis:
 
-**Prozessoptimierung IT-Inventar**
+**IT Inventory Process Optimization**
 
-**Diplomand:** Sven Döring  
-**Ausbildung:** Dipl. Informatiker HF, Fachrichtung Systemtechnik  
-**Klasse:** S-TIP-23-Di-z  
-**Unternehmen:** DLC-Informatik GmbH
+**Candidate:** Sven Döring  
+**Education:** Dipl. Informatiker HF, specialization in Systems Engineering  
+**Class:** S-TIP-23-Di-z  
+**Company:** DLC-Informatik GmbH
 
-Die offizielle Themeneingabe beschreibt die Analyse und Optimierung des bestehenden Prozesses zur Verwaltung und Lagerung des IT-Inventars.
+The material management department / warehouse of DLC-Informatik GmbH was defined as the internal customer.
+The solution is intended to help:
 
-Als interner Kunde wurde die Materialverwaltung bzw. das Lager der DLC-Informatik GmbH definiert.
+- Save resources
+- Reduce time and costs
+- Improve the traceability of material movements
+- Improve the stock overview
+- Support the planning of material purchases
 
-Die Lösung soll dazu beitragen:
-
-- Ressourcen einzusparen
-- Zeit und Kosten zu reduzieren
-- Materialbewegungen besser nachzuvollziehen
-- die Bestandsübersicht zu verbessern
-- die Planung von Materialbeschaffungen zu unterstützen
-
-Zu den Erfolgskriterien gehören unter anderem:
-
-- bestehenden Inventarprozess dokumentieren
-- Schwachstellen und Optimierungspotenziale identifizieren
-- Verbesserungsvorschläge ausarbeiten
-- eine definitive Lösungsvariante umsetzen
-- praktische Umsetzbarkeit nachweisen
-- Transparenz und Nachvollziehbarkeit verbessern
-- Potenziale für Zeit- und Kostenersparnis aufzeigen
-
-ITAssetFlow ist die technische Umsetzung dieser Lösungsvariante.
 
 ---
 
-# Projektgrundlagen
 
-Für die Diplomarbeit und das Projekt werden insbesondere folgende Unterlagen berücksichtigt:
+## Releases
 
-- Themeneingabe der Diplomarbeit
-- TEKO-Richtlinien Diplomarbeit
-- TEKO-Bewertungsraster Diplomarbeit
-- Prüfungsreglement und Promotionsordnung
-- DA-Ablaufplan TIP-23
-- projektinterne Analyse-, Konzept- und Entwicklungsunterlagen
+The GitHub release includes a separately created ZIP package. It contains the finished `web/dist` folder and the startup files for local testing and IIS/backend operation.
 
-Die eigentliche Diplomarbeitsdokumentation behandelt zusätzlich:
-
-- Ausgangslage
-- Ist-Prozess
-- Schwachstellenanalyse
-- Variantenvergleich
-- Soll-Prozess
-- Begründung der gewählten Lösung
-- Umsetzung
-- Zielerreichung
-- Reflexion und Lessons Learned
-
-Diese README dient dagegen als technische Projekt- und Startdokumentation für ITAssetFlow.
+Alternatively, a demo version of the database can be viewed on Render:
+https://itassetflow-demo.onrender.com/#/
 
 ---
 
-# Hinweise zu Git
+# Usage
 
-Folgende Dateien und Verzeichnisse sollten nicht in das Repository aufgenommen werden:
+The project is intended for internal use by DLC-Informatik GmbH and for educational and diploma thesis purposes.
 
-```text
-.env
-__pycache__/
-*.pyc
-web/node_modules/
-```
-
-Zusätzlich dürfen keine produktiven Datenbankexports, Passwörter oder Secret Keys in Git gespeichert werden.
-
-Der `dist`-Ordner ist ein Build-Artefakt. Für Releases kann er bewusst mitgeliefert werden, damit das Frontend ohne erneuten Node.js-Build auf einem Webserver bereitgestellt werden kann.
-
----
-
-# Projektstatus
-
-ITAssetFlow befindet sich im Diplomarbeitsstand 2026.
-
-Die Hauptanwendung besteht aus:
-
-```text
-React / TypeScript
-        ↓
-FastAPI
-        ↓
-Supabase / PostgreSQL
-```
-
-Zusätzlich bleibt eine native PySide6-Version als optionale Ausweichlösung bestehen.
-
----
-
-# Nutzung
-
-Das Projekt ist für interne Zwecke der DLC-Informatik GmbH sowie für Ausbildungs- und Diplomarbeitszwecke vorgesehen.
-
-Eine weitergehende öffentliche Lizenzierung oder Weitergabe wird durch diese README nicht festgelegt.
+No further public licensing or distribution terms have been specified.

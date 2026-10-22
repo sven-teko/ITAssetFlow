@@ -17,6 +17,7 @@ export type InventoryFilterOptions = {
   groups: FilterOption[];
   categories: FilterOption[];
   conditions: FilterOption[];
+  statuses: FilterOption[];
   sites: FilterOption[];
   departments: FilterOption[];
   storageLocations: FilterOption[];
@@ -28,6 +29,7 @@ export type InventoryFilters = {
   groups: Set<string>;
   categories: Set<string>;
   conditions: Set<string>;
+  statuses: Set<string>;
   sites: Set<string>;
   departments: Set<string>;
   storageLocations: Set<string>;
@@ -38,6 +40,7 @@ const FILTER_FIELDS = [
   { key: "groups", label: "Inventartyp" },
   { key: "categories", label: "Kategorie" },
   { key: "conditions", label: "Zustand" },
+  { key: "statuses", label: "Status" },
   { key: "sites", label: "Standort" },
   { key: "departments", label: "Abteilung" },
   { key: "storageLocations", label: "Lagerort" },
@@ -175,9 +178,10 @@ function MultiSelectDropdown({
       <button
         type="button"
         className="filter-dropdown-button"
+        aria-label={placeholder}
         disabled
       >
-        Keine Daten verfügbar
+        {placeholder}
       </button>
     );
   }
@@ -192,6 +196,8 @@ function MultiSelectDropdown({
       <button
         type="button"
         className="filter-dropdown-button"
+        aria-label={placeholder}
+        aria-expanded={open}
         onClick={() =>
           setOpen(
             (current) =>

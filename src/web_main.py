@@ -16,35 +16,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 
-BACKEND_HOST = os.getenv(
-    "ITASSETFLOW_WEB_HOST",
-    "0.0.0.0",
-).strip() or "0.0.0.0"
-
-BACKEND_PORT = int(
-    os.getenv(
-        "ITASSETFLOW_WEB_PORT",
-        "8000",
-    )
-)
-
-FRONTEND_HOST = os.getenv(
-    "ITASSETFLOW_VITE_HOST",
-    "127.0.0.1",
-).strip() or "127.0.0.1"
-
-FRONTEND_PORT = int(
-    os.getenv(
-        "ITASSETFLOW_VITE_PORT",
-        "5173",
-    )
-)
-
-FORWARDED_ALLOW_IPS = os.getenv(
-    "ITASSETFLOW_FORWARDED_ALLOW_IPS",
-    "127.0.0.1",
-).strip() or "127.0.0.1"
-
 
 # Python-Requirements
 
@@ -259,6 +230,61 @@ ensure_runtime_dependencies()
 
 import uvicorn
 
+from dotenv import load_dotenv
+
+load_dotenv(PROJECT_ROOT / ".env", override=False)
+
+BACKEND_HOST = os.getenv(
+    "ITASSETFLOW_WEB_HOST",
+    "0.0.0.0",
+).strip() or "0.0.0.0"
+
+BACKEND_PORT = int(
+    os.getenv(
+        "ITASSETFLOW_WEB_PORT",
+        "8000",
+    )
+)
+
+FRONTEND_HOST = os.getenv(
+    "ITASSETFLOW_VITE_HOST",
+    "127.0.0.1",
+).strip() or "127.0.0.1"
+
+FRONTEND_PORT = int(
+    os.getenv(
+        "ITASSETFLOW_VITE_PORT",
+        "5173",
+    )
+)
+
+FORWARDED_ALLOW_IPS = os.getenv(
+    "ITASSETFLOW_FORWARDED_ALLOW_IPS",
+    "127.0.0.1",
+).strip() or "127.0.0.1"
+
+
+SSL_CERTFILE = os.getenv("ITASSETFLOW_SSL_CERTFILE", "").strip()
+SSL_KEYFILE = os.getenv("ITASSETFLOW_SSL_KEYFILE", "").strip()
+SSL_KEYFILE_PASSWORD = os.getenv("ITASSETFLOW_SSL_KEYFILE_PASSWORD") or None
+
+
+def ssl_options() -> dict[str, str | None]:
+    if not SSL_CERTFILE and not SSL_KEYFILE:
+        return {}
+    if not SSL_CERTFILE or not SSL_KEYFILE:
+        raise RuntimeError("Für HTTPS müssen ITASSETFLOW_SSL_CERTFILE und ITASSETFLOW_SSL_KEYFILE gesetzt sein.")
+    options: dict[str, str | None] = {}
+    for name, raw_path in (("ssl_certfile", SSL_CERTFILE), ("ssl_keyfile", SSL_KEYFILE)):
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        if not path.is_file():
+            raise RuntimeError(f"HTTPS-Datei wurde nicht gefunden: {path}")
+        options[name] = str(path)
+    options["ssl_keyfile_password"] = SSL_KEYFILE_PASSWORD
+    return options
+
 
 # Optionaler Vite-Entwicklungsserver
 
@@ -417,6 +443,8 @@ def main() -> None:
     frontend_process: subprocess.Popen | None = None
 
     try:
+        tls = ssl_options()
+        scheme = "https" if tls else "http"
         if args.dev:
             frontend_process = (
                 start_frontend_dev_server()
@@ -433,11 +461,11 @@ def main() -> None:
             "=========================================="
         )
         print(
-            f"FastAPI: http://{BACKEND_HOST}:{BACKEND_PORT}"
+            f"FastAPI: {scheme}://{BACKEND_HOST}:{BACKEND_PORT}"
         )
         print(
             f"API-Dokumentation: "
-            f"http://{BACKEND_HOST}:{BACKEND_PORT}/docs"
+            f"{scheme}://{BACKEND_HOST}:{BACKEND_PORT}/docs"
         )
 
         if not args.dev:
@@ -464,6 +492,7 @@ def main() -> None:
             reload=False,
             proxy_headers=True,
             forwarded_allow_ips=FORWARDED_ALLOW_IPS,
+            **tls,
         )
 
     except KeyboardInterrupt:

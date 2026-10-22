@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,8 +23,9 @@ class SettingsService:
     mit einem einzigen Klick auf „Übernehmen“ angelegt werden können.
     """
 
-    def __init__(self, client: Client) -> None:
+    def __init__(self, client: Client, *, actor_email: str = "") -> None:
         self.client = client
+        self.actor_email = actor_email.strip().casefold()
 
     def load(self) -> dict[str, list[dict[str, Any]]]:
         return {
@@ -67,6 +69,8 @@ class SettingsService:
     def save(self, payload: dict[str, Any]) -> dict[str, bool]:
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Einstellungsdaten.")
+
+        self._validate_employees(payload.get("employees"))
 
         # Vor sämtlichen Änderungen prüfen, ob ein zum Löschen markierter
         # Stammdatensatz noch verwendet wird. Dadurch entstehen bei einem
@@ -236,6 +240,54 @@ class SettingsService:
             else:
                 self.client.table("storage_locations").update(row).eq("id", row_id).execute()
 
+    def _validate_employees(self, rows: object) -> None:
+        """Erkennt Eingabefehler und schützt Loginkonten vor Schreibzugriffen."""
+        if not isinstance(rows, list):
+            return
+
+        emails: set[str] = set()
+        numbers: set[str] = set()
+        for item in rows:
+            if not isinstance(item, dict):
+                raise ValueError("Ungültige Mitarbeiterdaten.")
+            if not str(item.get("first_name") or "").strip() or not str(item.get("last_name") or "").strip():
+                raise ValueError("Mitarbeiter benötigen Vorname und Nachname.")
+            email = str(item.get("email") or "").strip().casefold()
+            if email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+                raise ValueError("Bitte eine gültige E-Mail-Adresse für den Mitarbeiter eingeben.")
+            if email and email in emails:
+                raise ValueError(f"Die Mitarbeiter-E-Mail-Adresse „{email}“ ist doppelt vorhanden.")
+            if email:
+                emails.add(email)
+            number = str(item.get("employee_number") or "").strip().casefold()
+            if number and number in numbers:
+                raise ValueError(f"Die Personalnummer „{number}“ ist doppelt vorhanden.")
+            if number:
+                numbers.add(number)
+
+        if not any(item.get("id") is not None for item in rows):
+            return
+        response = self.client.table("employees").select("id,email,auth_user_id,app_role").execute()
+        existing = {str(item["id"]): item for item in (response.data or []) if isinstance(item, dict)}
+        for item in rows:
+            if item.get("id") is None:
+                continue
+            current = existing.get(str(item["id"]))
+            if not current:
+                raise ValueError("Der Mitarbeiter existiert nicht mehr. Bitte Einstellungen neu laden.")
+            if not current.get("auth_user_id"):
+                continue
+            current_email = str(current.get("email") or "").strip().casefold()
+            requested_email = str(item.get("email") or "").strip().casefold()
+            if requested_email != current_email:
+                raise ValueError("Die E-Mail eines verknüpften Benutzerkontos kann hier nicht geändert werden.")
+            role = str(item.get("app_role", current.get("app_role")) or "").strip().casefold()
+            if role not in {"admin", "user", "viewer"}:
+                raise ValueError("Ungültige Benutzerrolle.")
+            if self.actor_email and current_email == self.actor_email:
+                if role != "admin" or not item.get("is_active", True):
+                    raise ValueError("Das eigene Administratorkonto darf weder deaktiviert noch herabgestuft werden.")
+
     def _save_employees(
         self,
         rows: object,
@@ -312,7 +364,7 @@ class SettingsService:
                     "employees"
                 )
                 .select(
-                    "auth_user_id,app_role"
+                    "auth_user_id,app_role,email"
                 )
                 .eq(
                     "id",
@@ -348,6 +400,10 @@ class SettingsService:
                 )
 
             current = current_rows[0]
+
+            if current.get("auth_user_id"):
+                # Die Schreibweise der Auth-E-Mail darf sich nicht vom Login unterscheiden.
+                row["email"] = current.get("email")
 
             # Rollen dürfen nur bei tatsächlich mit Supabase Auth
             # verknüpften Konten geändert werden. auth_user_id selbst wird
@@ -866,60 +922,6 @@ def create_settings_router(
             payload
         )
 
-        employees = database_payload.get(
-            "employees"
-        )
-
-        if isinstance(
-            employees,
-            list,
-        ):
-            current_email = str(
-                getattr(
-                    web_session,
-                    "email",
-                    "",
-                )
-                or ""
-            ).strip().casefold()
-
-            for employee in employees:
-                if not isinstance(
-                    employee,
-                    dict,
-                ):
-                    continue
-
-                employee_email = str(
-                    employee.get(
-                        "email",
-                        "",
-                    )
-                    or ""
-                ).strip().casefold()
-
-                if (
-                    current_email
-                    and employee_email
-                    == current_email
-                ):
-                    requested_role = str(
-                        employee.get(
-                            "app_role",
-                            "admin",
-                        )
-                        or ""
-                    ).strip().casefold()
-
-                    if requested_role != "admin":
-                        raise HTTPException(
-                            status_code=400,
-                            detail=(
-                                "Die eigene Administratorrolle kann in "
-                                "der WebApp nicht geändert werden."
-                            ),
-                        )
-
         # Standardspalten sind keine gemeinsamen Stammdaten.
         # Sie werden pro angemeldetem Web-Benutzer im Browser gespeichert.
         database_payload.pop(
@@ -929,7 +931,8 @@ def create_settings_router(
 
         try:
             result = SettingsService(
-                web_session.client
+                web_session.client,
+                actor_email=web_session.email,
             ).save(
                 database_payload
             )

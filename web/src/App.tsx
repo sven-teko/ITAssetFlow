@@ -1,3 +1,4 @@
+import { API_BASE } from "./api/config";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -8,13 +9,11 @@ import {
 } from "react-router-dom";
 
 import AssetFormPage from "./pages/AssetFormPage";
+import LoadingIndicator from "./components/LoadingIndicator";
 import InventoryPage from "./pages/InventoryPage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ??
-  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 export type AppRole =
   | "admin"
@@ -113,72 +112,40 @@ export default function App() {
     [],
   );
 
-  const checkSession = useCallback(
-    async (): Promise<void> => {
-      try {
-        const response = await fetch(
-          `${API_BASE}/api/auth/session`,
-          {
-            credentials: "include",
-          },
-        );
+  const checkSession = useCallback(async (): Promise<SessionResponse | null> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/session`, { credentials: "include" });
+      if (!response.ok) return null;
+      const data = await response.json() as SessionResponse;
+      return data.authenticated && data.email && data.role
+        && ["admin", "user", "viewer"].includes(data.role) ? data : null;
+    } catch {
+      return null;
+    }
+  }, []);
 
-        if (!response.ok) {
-          clearSession();
-          return;
-        }
+  const applySession = useCallback((data: SessionResponse | null): void => {
+    setEmail(data?.email ?? null);
+    setRole(data?.role ?? null);
+    setCheckingSession(false);
+  }, []);
 
-        const data =
-          (await response.json()) as SessionResponse;
+  useEffect(() => {
+    let active = true;
+    void checkSession().then((data) => { if (active) applySession(data); });
+    return () => { active = false; };
+  }, [applySession, checkSession]);
 
-        if (
-          !data.authenticated ||
-          !data.email ||
-          !data.role ||
-          ![
-            "admin",
-            "user",
-            "viewer",
-          ].includes(data.role)
-        ) {
-          clearSession();
-          return;
-        }
-
-        setEmail(data.email);
-        setRole(data.role);
-      } catch {
-        clearSession();
-      } finally {
-        setCheckingSession(false);
-      }
-    },
-    [clearSession],
-  );
-
-  useEffect(
-    () => {
-      void checkSession();
-    },
-    [checkSession],
-  );
-
-  function handleLogin(
-    loggedInEmail: string,
-  ): void {
-    // Nach dem Setzen der HttpOnly-Cookies lädt /api/auth/session die serverseitige Rolle.
+  function handleLogin(loggedInEmail: string): void {
     setEmail(loggedInEmail);
     setRole(null);
     setCheckingSession(true);
-
-    void checkSession();
+    void checkSession().then(applySession);
   }
 
   if (checkingSession) {
     return (
-      <div className="loading-screen">
-        ITAssetFlow wird geladen ...
-      </div>
+      <LoadingIndicator fullPage label="Anmeldung wird geprüft …" />
     );
   }
 

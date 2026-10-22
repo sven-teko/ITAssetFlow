@@ -1,0 +1,278 @@
+/* QR-, Docking- und Mobilregressionen mit isolierter Test-API.
+   START_VITE=1 PLAYWRIGHT_MODULE=/pfad/playwright CHROMIUM_EXECUTABLE=/pfad/chromium node tests/browser_qr_mobile.cjs */
+const path = require('node:path');
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || require.resolve('playwright', { paths: [path.resolve(__dirname, '../web')] }));
+const run = (async () => {
+  const vite = process.env.START_VITE ? await (await import(require.resolve('vite', { paths: [path.resolve(__dirname, '../web')] })))
+    .createServer({ root: path.resolve(__dirname, '../web'), server: { host: '127.0.0.1', port: 5173 } }) : null;
+  if (vite) await vite.listen();
+  const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? {
+    executablePath: process.env.CHROMIUM_EXECUTABLE,
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-zygote', '--single-process', '--autoplay-policy=no-user-gesture-required'],
+  } : {}) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    page.setDefaultTimeout(10000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin';
+    const meta = {
+      column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
+      default_visible_columns: ['asset_tag', 'product_model_name', 'status', 'site_name'],
+      headers: { asset_tag: 'Produkterkennung', product_model_name: 'Produktmodell', status: 'Status', site_name: 'Standort' },
+      status_labels: { available: 'Verfügbar', in_use: 'Im Einsatz' },
+      condition_labels: { new: 'Neu', used: 'Gebraucht' }, inventory_group_labels: { device: 'Gerät', material: 'Material' },
+    };
+    const location = { id: 11, storage_location_name: 'Lager', site_name: 'Basel', department_name: 'IT' };
+    const data = {
+      sites: [{ id: 1, name: 'Basel', organization_id: 1 }],
+      departments: [{ id: 10, name: 'IT', site_id: 1, organization_id: 1 }],
+      storage_locations: [{ id: 11, name: 'Lager', site_id: 1, department_id: 10, is_active: true, location_type: 'warehouse' }],
+      product_categories: [{ id: 1, name: 'Laptop', code: 'laptop', inventory_group: 'device', specification_schema: { fields: [] } }],
+      manufacturers: [{ id: 1, name: 'Keiner' }],
+      employees: [{ id: 1, first_name: 'Test', last_name: 'Admin', email: 'admin@example.test', department_id: 10, is_active: true, auth_user_id: 'auth-admin', app_role: 'admin' }],
+      product_models: [{ id: 100, name: 'TestBook', category_id: 1, manufacturer_id: 1, is_active: true, tracking_mode: 'serialized', unit_code: 'piece', specifications: {} }],
+      parent_assets: [], ...meta, factory_default_visible_columns: meta.default_visible_columns,
+    };
+    const inventory = () => [
+      { id: 1, _record_type: 'asset', asset_tag: 'PC-001', product_model_name: 'TestBook', status: 'available', condition: 'used', site_name: 'Basel', department_name: 'IT', storage_location: 'Lager', _web_inventory_group: 'device', _web_category_key: 'laptop', _web_condition_key: 'used' },
+      { id: 2, _record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', product_category_name: 'Kabel', storage_location_id: 11, stock_quantity: stock, status: 'available', condition: 'new', site_name: 'Basel', department_name: 'IT', storage_location: 'Lager', _web_inventory_group: 'material', _web_category_key: 'cable', _web_condition_key: 'new' },
+    ];
+    await page.route(url => url.pathname.startsWith('/api/'), async route => {
+      const req = route.request(), url = new URL(req.url()), endpoint = url.pathname;
+      const headers = { 'Access-Control-Allow-Origin': new URL(process.env.UI_BASE_URL || 'http://127.0.0.1:5173').origin, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS' };
+      const json = (body, status = 200) => route.fulfill({ status, headers, contentType: 'application/json', body: JSON.stringify(body) });
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (endpoint === '/api/auth/session') return json({ authenticated: true, email: 'admin@example.test', role });
+      if (endpoint === '/api/inventory/meta') return json(meta);
+      if (endpoint === '/api/inventory/revision') return json({ revision: 1 });
+      if (endpoint === '/api/inventory/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': test\n\n' });
+      if (endpoint === '/api/inventory/form-data') return json(data);
+      if (endpoint === '/api/settings') {
+        if (req.method() === 'PUT') {
+          savedSettings = req.postDataJSON();
+          data.employees = savedSettings.employees.map((row, index) => ({ ...row, id: row.id ?? 50 + index, department_id: 10 }));
+          return json({ saved: true });
+        }
+        return json(data);
+      }
+      if (endpoint === '/api/inventory') {
+        if (req.method() === 'POST') { lastAsset = req.postDataJSON(); return json({ id: 3, entry_type: 'asset' }); }
+        return json(inventory());
+      }
+      if (endpoint === '/api/qr/lookup') {
+        const code = url.searchParams.get('code');
+        const matches = code === 'QR-CABLE' ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
+          : code === 'PC-001' ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
+        return json({ code, matches, locations: [location] });
+      }
+      if (endpoint === '/api/qr/stock') {
+        const payload = req.postDataJSON(); bookings.push(payload);
+        if (uncertain) { uncertain = false; return route.abort('failed'); }
+        if (malformed) { malformed = false; return json({}); }
+        stock += payload.direction === 'add' ? payload.quantity : -payload.quantity;
+        return json({ saved: true, quantity: stock, changed_quantity: payload.quantity });
+      }
+      return json({ detail: `Unbekannter Test-Endpunkt ${endpoint}` }, 404);
+    });
+    const openQr = async () => {
+      await page.getByRole('button', { name: /^(QR-Code einlesen|QR scannen)$/ }).filter({ visible: true }).click();
+      await page.getByRole('dialog', { name: 'QR-Code einlesen' }).waitFor();
+    };
+    const lookup = async code => {
+      await page.getByLabel('Artikelkennung / QR-Code', { exact: true }).fill(code);
+      await page.getByRole('button', { name: 'Prüfen', exact: true }).click();
+    };
+    const closeQr = () => page.getByRole('button', { name: 'QR-Dialog schliessen' }).click();
+    const screenshot = async name => {
+      if (process.env.SCREENSHOT_DIR) {
+        fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, `${name}.png`) });
+      }
+    };
+    const noHorizontalOverflow = async () => {
+      const sizes = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: innerWidth }));
+      assert.ok(sizes.scroll <= sizes.width, JSON.stringify(sizes));
+    };
+    await page.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173') + '/#/inventory');
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+
+    // Der sichtbare Randbereich muss derselbe Bereich sein wie das tatsächliche Dropziel.
+    const workspace = await page.locator('.workspace').boundingBox();
+    const drag = async (panel, x, targetClass) => {
+      const box = await page.locator(`[data-dock-panel="${panel}"] .dock-title`).boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, workspace.y + 100, { steps: 8 });
+      await page.locator(targetClass).waitFor();
+      if (targetClass.includes('dock-drop-zone')) {
+        await page.waitForFunction(() => getComputedStyle(document.querySelector('.dock-drop-zone.active')).opacity === '1');
+        const zone = await page.locator(targetClass).boundingBox();
+        assert.ok(x >= zone.x && x <= zone.x + zone.width);
+      }
+      await screenshot(`dock-${panel}-${x < 200 ? 'left' : 'right'}`);
+      await page.mouse.up();
+    };
+    const order = () => page.locator('.workspace > .dock-shell, .workspace > .inventory-area').evaluateAll(els => els.map(el => el.dataset.dockPanel || 'inventory'));
+    await drag('detail', workspace.x + 10, '.dock-drop-zone-left.active');
+    assert.deepEqual(await order(), ['detail', 'navigation', 'inventory']);
+    await drag('navigation', workspace.x + workspace.width - 10, '.dock-drop-zone-right.active');
+    assert.deepEqual(await order(), ['detail', 'inventory', 'navigation']);
+    await drag('detail', workspace.x + workspace.width - 10, '.dock-drop-zone-right.active');
+    assert.deepEqual(await order(), ['inventory', 'navigation', 'detail']);
+    const navBox = await page.locator('[data-dock-panel="navigation"]').boundingBox();
+    await drag('detail', navBox.x + navBox.width * 0.35, '.dock-navigation-shell.dock-shell-drop-before');
+    assert.deepEqual(await order(), ['inventory', 'detail', 'navigation']);
+    const beforeCancel = await order();
+    const title = await page.locator('[data-dock-panel="detail"] .dock-title').boundingBox();
+    await page.mouse.move(title.x + 30, title.y + 10); await page.mouse.down();
+    await page.mouse.move(5, 5, { steps: 5 }); await page.mouse.up();
+    assert.deepEqual(await order(), beforeCancel);
+    console.log('PASS: Randziele links/rechts, Reihenfolge, Nachbarziel und Abbruch ausserhalb');
+
+    await page.evaluate(() => { location.hash = '/settings?tab=employees'; });
+    await page.getByRole('table', { name: 'Mitarbeiter' }).waitFor();
+    await page.getByRole('button', { name: 'Mitarbeiter hinzufügen' }).click();
+    await page.getByRole('textbox', { name: 'Vorname', exact: true }).fill('Ohne');
+    await page.getByRole('textbox', { name: 'Nachname', exact: true }).fill('Mail');
+    await page.getByRole('button', { name: 'Übernehmen', exact: true }).click();
+    await page.getByText('Einstellungen erfolgreich gespeichert.', { exact: true }).waitFor();
+    assert.equal(savedSettings.employees.find(row => row.first_name === 'Ohne').email, null);
+    console.log('PASS: Mitarbeiter ohne E-Mail im Browser speichern');
+    await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
+
+    await openQr(); await lookup('QR-NEU-42');
+    await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
+    assert.equal(await page.locator('.asset-form-qr-notice').textContent().then(text => text.includes('QR-NEU-42')), true);
+    const row = label => page.locator('.asset-form-row').filter({ has: page.locator('label').filter({ hasText: label }) });
+    assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(), 'QR-NEU-42');
+    assert.equal(await row(/^Produkterkennung \*:/).locator('input').getAttribute('readonly'), '');
+    await row(/^Standort \*:/).locator('select').selectOption('1');
+    await row(/^Abteilung \*:/).locator('select').selectOption('10');
+    await row(/^Lagerort \*:/).locator('select').selectOption('11');
+    await page.getByLabel('Kaufdatum *:', { exact: true }).fill('2026-10-22');
+    await page.getByRole('button', { name: /speichern/i }).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.qr_code, 'QR-NEU-42');
+    assert.equal(lastAsset.asset.asset_tag, 'QR-NEU-42');
+    console.log('PASS: Unbekannter Code öffnet neuen Artikel und bleibt beim Speichern zugeordnet');
+
+    await openQr();
+    await page.getByLabel('QR-Bild öffnen', { exact: true }).setInputFiles(path.join(__dirname, 'fixtures/QR-CABLE.png'));
+    await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
+    assert.match(await page.locator('.qr-stock-balance').textContent(), /5 Stück/);
+    await page.getByLabel('Menge [Stück]', { exact: true }).fill('2');
+    await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: 'Zugang von 2 Stück gespeichert.' }).waitFor();
+    assert.equal(bookings.length, 1); assert.equal(stock, 7);
+    await page.getByLabel('Menge [Stück]', { exact: true }).fill('8');
+    await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'grösser als' }).waitFor();
+    assert.equal(bookings.length, 1);
+    await page.getByLabel('Menge [Stück]', { exact: true }).fill('7');
+    await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: 'Abgang von 7 Stück gespeichert.' }).waitFor();
+    assert.equal(stock, 0); assert.equal(bookings.length, 2);
+    assert.equal(await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Bestand neu prüfen', exact: true }).click();
+    await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
+    assert.match(await page.locator('.qr-stock-balance').textContent(), /0 Stück/);
+    console.log('PASS: Echten QR-Code aus Bild lesen, Zugang/Abgang, Mengenprüfung und Wiedererkennung bei null');
+
+    uncertain = true;
+    await page.getByLabel('Menge [Stück]', { exact: true }).fill('1');
+    await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Buchungsstatus ist unklar' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);
+    assert.equal(bookings.length, 3);
+    await page.getByRole('button', { name: 'Bestand neu prüfen', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('.qr-result .primary-button').disabled);
+    malformed = true;
+    await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Buchungsstatus ist unklar' }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);
+    assert.equal(bookings.length, 4);
+    await closeQr();
+    console.log('PASS: Verbindungsabbruch und ungültige Antwort sperren weitere Buchungen bis zur Bestandsprüfung');
+
+    const imageData = 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'fixtures/QR-CABLE.png')).toString('base64');
+    await page.evaluate(dataUrl => {
+      window.testStreams = [];
+      navigator.mediaDevices.getUserMedia = async constraints => {
+        window.testCameraConstraints = constraints;
+        const image = new Image(); image.src = dataUrl; await image.decode();
+        const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
+        const context = canvas.getContext('2d');
+        const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 640, 480); context.drawImage(image, 130, 50, 380, 380); };
+        paint(); const timer = setInterval(paint, 100);
+        const stream = canvas.captureStream(10); window.testStreams.push(stream);
+        const originalStop = stream.getVideoTracks()[0].stop.bind(stream.getVideoTracks()[0]);
+        stream.getVideoTracks()[0].stop = () => { clearInterval(timer); originalStop(); };
+        return stream;
+      };
+      navigator.mediaDevices.enumerateDevices = async () => [];
+    }, imageData);
+    await openQr(); await page.getByRole('button', { name: 'Kamera starten', exact: true }).click();
+    await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.testStreams.every(s => s.getTracks().every(t => t.readyState === 'ended'))), true);
+    assert.equal(await page.evaluate(() => window.testCameraConstraints.video.facingMode.ideal), 'environment');
+    await closeQr();
+    await page.evaluate(() => { navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Permission denied', 'NotAllowedError'); }; });
+    await openQr(); await page.getByRole('button', { name: 'Kamera starten', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'Kamerazugriff nicht erlaubt' }).waitFor();
+    await closeQr();
+    console.log('PASS: Video-QR-Erkennung mit Kamerabild, Rückkamerawunsch, Freigabe der Tracks und Berechtigungsfehler');
+
+    for (const width of [390, 360]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+      await page.locator('.inventory-card').first().waitFor();
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-inventory`);
+      assert.equal(await page.locator('.inventory-table').count(), 0);
+      await page.getByRole('button', { name: 'Filter', exact: true }).click();
+      await page.getByLabel('Inventar durchsuchen', { exact: true }).waitFor();
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-filter`);
+      await page.getByRole('button', { name: 'Status', exact: true }).click();
+      await page.locator('.filter-dropdown-menu').filter({ visible: true }).waitFor();
+      const popup = await page.locator('.filter-dropdown-menu').filter({ visible: true }).boundingBox();
+      assert.ok(popup.x >= 0 && popup.x + popup.width <= width);
+      await page.getByRole('button', { name: 'Status', exact: true }).click();
+      await page.getByRole('button', { name: 'Inventar', exact: true }).click();
+      await page.locator('.inventory-card-body').first().click();
+      await page.locator('.dock-detail-shell').waitFor({ state: 'visible' });
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-details`);
+      await openQr(); await lookup('QR-CABLE');
+      await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-qr`);
+      const dialog = await page.locator('.qr-dialog').boundingBox();
+      assert.equal(dialog.x, 0); assert.equal(dialog.width, width);
+      await closeQr();
+      await page.getByRole('button', { name: 'Inventar', exact: true }).click();
+      await page.getByRole('button', { name: '+ Neuer Artikel', exact: true }).click();
+      await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-form`);
+      await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
+      await page.evaluate(() => { location.hash = '/settings?tab=employees'; });
+      await page.getByRole('table', { name: 'Mitarbeiter' }).waitFor();
+      await noHorizontalOverflow(); await screenshot(`mobile-${width}-employees`);
+      await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
+    }
+    console.log('PASS: Hochformat 390/360 px: Karten, Filter, Details, QR-Dialog, Artikel und Mitarbeiter');
+
+    role = 'viewer'; await page.reload();
+    await page.locator('.inventory-card').first().waitFor();
+    await openQr(); await lookup('QR-CABLE');
+    await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Weiteren Code scannen', exact: true }).click();
+    await lookup('NEW-VIEWER');
+    await page.getByRole('alert').filter({ hasText: 'Bearbeitungsrechte erforderlich' }).waitFor();
+    assert.ok(page.url().endsWith('/#/inventory'));
+    assert.deepEqual(errors, []);
+    console.log('PASS: Leserrechte geschützt und keine JavaScript-Laufzeitfehler');
+  } finally { await browser.close(); if (vite) await vite.close(); }
+})();
+run.catch(error => { console.error(error); process.exitCode = 1; });
+module.exports = run;

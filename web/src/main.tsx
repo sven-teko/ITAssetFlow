@@ -14,6 +14,7 @@ import "./index.css";
 import "./App.css";
 
 import App from "./App";
+import "./Mobile.css";
 
 
 const rootElement =

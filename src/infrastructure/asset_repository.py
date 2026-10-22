@@ -7,6 +7,9 @@ from typing import Any
 
 from supabase import Client
 
+from infrastructure.date_validation import normalize_inventory_dates
+from infrastructure.qr_service import QrService, normalize_qr_code
+
 from inventory import (
     get_asset_identifier,
     get_category_label,
@@ -504,6 +507,8 @@ class AssetRepository:
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Daten für den Inventareintrag.")
 
+        payload = normalize_inventory_dates(payload)
+
         edit = payload.get("edit")
         if not isinstance(edit, dict):
             raise ValueError("Bearbeitungsinformationen fehlen.")
@@ -611,6 +616,8 @@ class AssetRepository:
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Daten für den neuen Inventareintrag.")
 
+        payload = normalize_inventory_dates(payload)
+
         created_model_id: Any | None = None
         created_manufacturer_id: Any | None = None
         created_asset_id: Any | None = None
@@ -619,6 +626,14 @@ class AssetRepository:
             model_info = payload.get("model")
             if not isinstance(model_info, dict):
                 raise ValueError("Produktmodell fehlt.")
+
+            qr_code = normalize_qr_code(payload["qr_code"]) if payload.get("qr_code") else None
+            model_info = dict(model_info)
+            if qr_code and model_info.get("mode") == "new" and (
+                model_info.get("tracking_mode") == "quantity"
+                or (model_info.get("tracking_mode") == "hybrid" and payload.get("entry_type") == "stock")
+            ):
+                model_info["sku"] = qr_code
 
             model_id, tracking_mode, created_model_id, created_manufacturer_id = (
                 self._resolve_or_create_product_model(model_info)
@@ -662,6 +677,13 @@ class AssetRepository:
             )
 
             if entry_type == "asset":
+                if qr_code:
+                    if len(qr_code) > 50:
+                        raise ValueError("Einzelgeräte benötigen eine QR-Kennung mit höchstens 50 Zeichen.")
+                    asset_data = payload.get("asset")
+                    if not isinstance(asset_data, dict):
+                        raise ValueError("Assetdaten fehlen.")
+                    payload["asset"] = {**asset_data, "asset_tag": qr_code}
                 result = self._create_serialized_asset(
                     model_id=model_id,
                     condition=condition,
@@ -677,6 +699,18 @@ class AssetRepository:
                     "product_model_id": model_id,
                     "asset_tag": result.get("asset_tag"),
                 }
+
+            if qr_code:
+                stock_data = payload.get("stock")
+                if not isinstance(stock_data, dict):
+                    raise ValueError("Bestandsdaten fehlen.")
+                try:
+                    amount = Decimal(str(stock_data.get("quantity")))
+                    if not amount.is_finite() or amount <= 0:
+                        raise ValueError
+                except (ValueError, InvalidOperation) as error:
+                    raise ValueError("Die Bestandsmenge muss grösser als 0 sein.") from error
+                QrService(self.client).bind_model_code(model_id, qr_code)
 
             result = self._create_stock_receipt(
                 model_id=model_id,

@@ -1124,14 +1124,14 @@ input:focus {
 
 .dock-drop-zone {
   position: absolute;
-  top: 12px;
-  bottom: 12px;
+  top: 0;
+  bottom: 0;
   z-index: 2500;
-  width: min(190px, 18%);
+  width: clamp(72px, 8%, 112px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 14px;
+  padding: 6px;
   color: #526170;
   background: rgba(244, 246, 248, 0.82);
   border: 2px dashed #9aa8b6;
@@ -1148,11 +1148,11 @@ input:focus {
 }
 
 .dock-drop-zone-left {
-  left: 12px;
+  left: 0;
 }
 
 .dock-drop-zone-right {
-  right: 12px;
+  right: 0;
 }
 
 .dock-drop-zone.active {
@@ -1272,3 +1272,18 @@ input:focus {
     padding: 10px;
   }
 }
+
+
+.inventory-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e4b2b2;
+  border-radius: 5px;
+  color: #8b2525;
+  background: #fff4f4;
+}
+.inventory-status { flex-shrink: 0; min-height: 25px; padding-top: 8px; color: #66717c; font-size: 12px; }

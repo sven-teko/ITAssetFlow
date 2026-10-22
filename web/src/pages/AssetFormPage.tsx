@@ -1,10 +1,9 @@
+import { API_BASE } from "../api/config";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import "./AssetFormPage.css";
+import { inventoryDateErrors, isValidISODate } from "../utils/dateValidation";
 
-const API_BASE =
-  import.meta.env.VITE_API_BASE_URL ??
-  `${window.location.protocol}//${window.location.hostname}:8000`;
 
 type GenericRow = Record<string, unknown>;
 
@@ -240,6 +239,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     entryKey: string;
   }>();
   const isEditMode = Boolean(entryKey);
+  const [searchParams] = useSearchParams();
+  const qrCode = isEditMode ? "" : (searchParams.get("qr") ?? "").trim();
   const [formData, setFormData] = useState<FormDataResponse | null>(null);
   const [editEntry, setEditEntry] = useState<GenericRow | null>(null);
   const [meta, setMeta] = useState<InventoryMeta | null>(null);
@@ -260,7 +261,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
   const [newPrice, setNewPrice] = useState("");
 
-  const [assetTag, setAssetTag] = useState("");
+  const [assetTag, setAssetTag] = useState(qrCode.length <= 50 ? qrCode : "");
   const [serialNumber, setSerialNumber] = useState("");
   const [warrantyUntil, setWarrantyUntil] = useState("");
   const [assetNote, setAssetNote] = useState("");
@@ -768,6 +769,17 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       );
     }
 
+    const dateErrors = inventoryDateErrors(
+      purchaseDate, currentEntryType === "asset" ? warrantyUntil : "",
+    );
+    if (Object.keys(dateErrors).length > 0) {
+      setInvalidFields(new Set([...errors, ...Object.keys(dateErrors)]));
+      throw new Error(Object.values(dateErrors).join("\n"));
+    }
+
+    if (qrCode && currentEntryType === "asset" && qrCode.length > 50) {
+      throw new Error("Einzelgeräte benötigen eine QR-Kennung mit höchstens 50 Zeichen. Dieser Code kann für einen Mengenartikel verwendet werden.");
+    }
     const price = newPrice.trim() ? parseCHF(newPrice) : 0;
     let modelPayload: Record<string, unknown>;
 
@@ -804,6 +816,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     const departmentOriginalId = originalId(formData.departments, departmentId);
     const payload: Record<string, unknown> = {
       model: modelPayload,
+      ...(qrCode ? { qr_code: qrCode } : {}),
       entry_type: currentEntryType,
       condition,
       storage_location_id: originalId(formData.storage_locations, locationId),
@@ -986,6 +999,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             ← Zurück zum Inventar
           </button>
         </header>
+        {qrCode && <div className="asset-form-qr-notice">
+          <strong>QR-Code: {qrCode}</strong>
+          <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
+        </div>}
         {errorMessage && (
           <div
             className="asset-form-error-message"
@@ -1244,9 +1261,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 </select>
               </div>
               <div className="asset-form-row">
-                <label>Kaufdatum *:</label>
+                <label htmlFor="asset-purchase-date">Kaufdatum *:</label>
                 <input
+                  id="asset-purchase-date"
                   type="date"
+                  min="0001-01-01"
+                  max="9999-12-31"
                   className={fieldClass("purchase_date")}
                   value={purchaseDate}
                   disabled={saving}
@@ -1289,6 +1309,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     className={fieldClass("asset_tag")}
                     placeholder="z. B. IT-000123"
                     value={assetTag}
+                    maxLength={50}
+                    readOnly={Boolean(qrCode)}
                     disabled={saving}
                     onChange={(event) => {
                       setAssetTag(event.target.value);
@@ -1307,13 +1329,20 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   />
                 </div>
                 <div className="asset-form-row">
-                  <label>Garantie bis:</label>
+                  <label htmlFor="asset-warranty-until">Garantie bis:</label>
                   <input
+                    id="asset-warranty-until"
                     type="date"
-                    className="asset-form-control"
+                    min={isValidISODate(purchaseDate) ? purchaseDate : "0001-01-01"}
+                    max="9999-12-31"
+                    className={fieldClass("warranty_until")}
+                    aria-invalid={invalidFields.has("warranty_until")}
                     value={warrantyUntil}
                     disabled={saving}
-                    onChange={(event) => setWarrantyUntil(event.target.value)}
+                    onChange={(event) => {
+                      setWarrantyUntil(event.target.value);
+                      clearInvalid("warranty_until");
+                    }}
                   />
                 </div>
                 <div className="asset-form-row asset-form-row-top">
