@@ -8,6 +8,7 @@ import type {
 } from "react";
 
 import {
+  Link,
   useNavigate,
 } from "react-router-dom";
 
@@ -295,6 +296,8 @@ export default function LoginPage({
             </div>
 
           </fieldset>
+
+          <div className="login-recovery-link"><Link to="/forgot-password">Passwort vergessen?</Link></div>
 
 
           <div className="login-status">

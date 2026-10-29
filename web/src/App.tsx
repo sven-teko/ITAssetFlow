@@ -13,6 +13,7 @@ import LoadingIndicator from "./components/LoadingIndicator";
 import InventoryPage from "./pages/InventoryPage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordRecoveryPage";
 
 
 export type AppRole =
@@ -151,6 +152,8 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage onCompleted={clearSession} />} />
       <Route
         path="/"
         element={

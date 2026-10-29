@@ -15,6 +15,11 @@ import "./App.css";
 
 import App from "./App";
 import "./Mobile.css";
+import { handleRecoveryNavigation, preparePasswordRecovery } from "./api/passwordRecovery";
+
+preparePasswordRecovery();
+window.addEventListener("popstate", handleRecoveryNavigation, true);
+window.addEventListener("hashchange", handleRecoveryNavigation, true);
 
 
 const rootElement =
