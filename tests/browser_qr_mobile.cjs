@@ -15,8 +15,9 @@ const run = (async () => {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, hasTouch: true });
     page.setDefaultTimeout(10000);
-    const errors = [];
+    const errors = [], wasmRequests = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('request', request => { if (request.url().includes('.wasm')) wasmRequests.push(request.url()); });
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
@@ -64,7 +65,7 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
-        const matches = (code === 'QR-CABLE' || code === '4006381333931') ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
+        const matches = (code === 'QR-CABLE' || code === '4006381333931' || code === '87954252804') ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
           : (code === 'PC-001' || code === '96385074') ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
         return json({ code, matches: code === '96385074' ? [...matches, {...matches[0], key:'asset:2', id:2, asset_tag:'PC-002'}] : matches, locations: [location] });
       }
@@ -82,6 +83,8 @@ const run = (async () => {
     const openQr = async () => {
       await page.getByRole('button', { name: /^Scanner$/ }).filter({ visible: true }).click();
       await page.getByRole('dialog', { name: 'Scanner' }).waitFor();
+      assert.equal(await page.locator('#scan-code-type').count(),0);
+      await page.locator('.qr-auto-label').waitFor();
     };
     const lookup = async code => {
       await page.getByLabel('QR-Code / EAN / Artikelkennung', { exact: true }).fill(code);
@@ -145,6 +148,56 @@ const run = (async () => {
     console.log('PASS: Mitarbeiter ohne E-Mail im Browser speichern');
     await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
 
+    await openQr();
+    const labelBounds=await page.locator('.qr-code-form > label').boundingBox();
+    const inputBounds=await page.getByLabel('QR-Code / EAN / Artikelkennung',{exact:true}).boundingBox();
+    assert.ok(labelBounds.y+labelBounds.height <= inputBounds.y,'Die Beschriftung muss oberhalb des Eingabefelds stehen');
+    await screenshot('desktop-scanner-start');
+    await lookup('4006381333931');
+    await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1),{code:'4006381333931',type:'ean'});
+    await page.getByRole('button',{name:'Weiteren Code scannen',exact:true}).click();
+    await lookup('PC-001');
+    await page.getByRole('button',{name:'Gerät bearbeiten',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1),{code:'PC-001',type:'qr'});
+    await page.getByRole('button',{name:'Weiteren Code scannen',exact:true}).click();
+    await lookup('96385074');
+    await page.getByLabel('Gefundenen Artikel auswählen').waitFor();
+    assert.deepEqual(lookups.at(-1),{code:'96385074',type:'ean'});
+    await closeQr();
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/QR-NUMERIC.svg'));
+    await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1),{code:'4006381333931',type:'qr'});
+    await closeQr();
+    console.log('PASS: Keine Codeart-Auswahl, Eingabelabel ohne Überlappung, automatische EAN/QR-Wechsel und numerischer QR-Code');
+
+    for (const [fixture, code, format, heading] of [
+      ['CODE128.svg', '87954252804', 'Code 128', 'USB-C Kabel'],
+      ['CODE39.svg', 'PC-001', 'Code 39', 'TestBook'],
+    ]) {
+      await openQr();
+      await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures',fixture));
+      await page.getByRole('heading',{name:heading,exact:true}).waitFor();
+      assert.deepEqual(lookups.at(-1), {code,type:'auto'});
+      assert.equal(await page.locator('.qr-code-badge').textContent(),format);
+      await page.getByRole('button',{name:'Bestand neu prüfen',exact:true}).click();
+      await page.waitForFunction(()=>!document.querySelector('.qr-refresh-button').disabled);
+      assert.deepEqual(lookups.at(-1), {code,type:'auto'});
+      assert.equal(await page.locator('.qr-code-badge').textContent(),format);
+      await closeQr();
+    }
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/CODE128-NEW.svg'));
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.match(await page.locator('.asset-form-qr-notice').textContent(),/Code 128: PART-128-NEW/);
+    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'PART-128-NEW');
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'');
+    await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
+    assert.ok(wasmRequests.length > 0);
+    assert.ok(wasmRequests.every(url=>url.startsWith(process.env.UI_BASE_URL || 'http://127.0.0.1:5173')),'WASM muss vom Anwendungsserver kommen');
+    console.log('PASS: Code 128 / Code 39 aus Bildern, Format bleibt bei Aktualisierung erhalten, Barcode-Neuanlage und lokaler WASM-Decoder');
+
     await openQr(); await lookup('QR-NEU-42');
     await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
     assert.equal(await page.locator('.asset-form-qr-notice').textContent().then(text => text.includes('QR-NEU-42')), true);
@@ -205,13 +258,26 @@ const run = (async () => {
       navigator.mediaDevices.getUserMedia = async constraints => {
         window.testCameraConstraints = constraints;
         const image = new Image(); image.src = window.testCodeImage || dataUrl; await image.decode();
-        const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
+        const canvas = document.createElement('canvas'); canvas.width = window.testPortraitCamera ? 1080 : 640; canvas.height = window.testPortraitCamera ? 1920 : 480;
         const context = canvas.getContext('2d');
-        const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 640, 480); context.drawImage(image, 130, 50, 380, 380); };
+        const paint = () => {
+          context.fillStyle = 'white'; context.fillRect(0, 0, canvas.width, canvas.height);
+          if (!window.testBlankCamera) {
+            const factor=Math.min(canvas.width*.75/image.naturalWidth,canvas.height*.75/image.naturalHeight);
+            const w=image.naturalWidth*factor,h=image.naturalHeight*factor;
+            context.drawImage(image,(canvas.width-w)/2,(canvas.height-h)/2,w,h);
+          }
+        };
         paint(); const timer = setInterval(paint, 100);
         const stream = canvas.captureStream(10); window.testStreams.push(stream);
-        const originalStop = stream.getVideoTracks()[0].stop.bind(stream.getVideoTracks()[0]);
-        stream.getVideoTracks()[0].stop = () => { clearInterval(timer); originalStop(); };
+        const track=stream.getVideoTracks()[0];
+        const originalStop = track.stop.bind(track);
+        track.stop = () => { clearInterval(timer); originalStop(); };
+        track.getCapabilities = () => ({focusMode:['continuous'],zoom:{min:1,max:4,step:.1},torch:true});
+        track.applyConstraints = async constraints => {
+          (window.testAppliedConstraints ||= []).push(constraints);
+          if (window.testRejectCameraSetting) throw new Error('unsupported');
+        };
         return stream;
       };
       navigator.mediaDevices.enumerateDevices = async () => [];
@@ -227,6 +293,18 @@ const run = (async () => {
     await page.getByRole('alert').filter({ hasText: 'Kamerazugriff nicht erlaubt' }).waitFor();
     await closeQr();
     console.log('PASS: Video-QR-Erkennung mit Kamerabild, Rückkamerawunsch, Freigabe der Tracks und Berechtigungsfehler');
+
+    const code128Data = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/CODE128.svg')).toString('base64');
+    await page.evaluate(dataUrl => { window.testCodeImage=dataUrl; navigator.mediaDevices.getUserMedia=window.fakeScannerGetUserMedia; },code128Data);
+    await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
+    await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1),{code:'87954252804',type:'auto'});
+    assert.equal(await page.locator('.qr-code-badge').textContent(),'Code 128');
+    assert.equal(await page.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true);
+    assert.ok(await page.evaluate(()=>window.testAppliedConstraints.some(c=>c.advanced?.[0]?.focusMode==='continuous')));
+    assert.equal(await page.evaluate(()=>window.testCameraConstraints.video.width.ideal),1920);
+    await closeQr();
+    console.log('PASS: Code-128-Kamerastream mit bestätigter Erkennung, Autofokus, hoher Auflösung und Track-Freigabe');
 
 
     const eanVideo = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/4006381333931.svg')).toString('base64');
@@ -263,7 +341,7 @@ const run = (async () => {
     await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/0012345678905.svg'));
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'0012345678905');
-    assert.equal(await page.getByLabel('QR-Code:',{exact:true}).inputValue(),'');
+    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'');
     assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(),'');
     await page.getByLabel('EAN:',{exact:true}).fill('4006381333932');
     await row(/^Produkterkennung \*:/).locator('input').fill('PC-NEW');
@@ -346,7 +424,27 @@ const run = (async () => {
       await page.getByRole('tab', { name: 'Details', exact: true }).click();
       await page.locator('.dock-detail-shell').waitFor({ state: 'visible' });
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-details`);
-      await openQr(); await lookup('QR-CABLE');
+      await openQr();
+      await screenshot(`mobile-${width}-scanner-start`);
+      assert.equal(await page.locator('.qr-dialog').evaluate(el=>el.scrollWidth > el.clientWidth),false);
+      await page.evaluate(()=>{window.testBlankCamera=true;window.testPortraitCamera=true;});
+      await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
+      await page.getByText('Kamera aktiv',{exact:true}).waitFor();
+      await page.getByLabel('Kamera-Zoom').press('ArrowRight');
+      await page.getByRole('button',{name:'Licht an',exact:true}).click();
+      assert.equal(await page.getByRole('button',{name:'Licht aus',exact:true}).getAttribute('aria-pressed'),'true');
+      const cameraBox=await page.locator('.qr-video-wrap').boundingBox();
+      assert.ok(cameraBox.width > 200 && cameraBox.width <= width && cameraBox.height <= 340);
+      assert.equal(await page.locator('.qr-dialog-body').evaluate(el=>el.scrollWidth > el.clientWidth),false);
+      const manualLabel=await page.locator('.qr-code-form > label').boundingBox();
+      const manualInput=await page.locator('#qr-code-input').boundingBox();
+      assert.ok(manualLabel.y+manualLabel.height <= manualInput.y);
+      await page.locator('.qr-video-wrap').scrollIntoViewIfNeeded();
+      await screenshot(`mobile-${width}-scanner-camera`);
+      await page.getByRole('button',{name:'Kamera stoppen',exact:true}).click();
+      assert.equal(await page.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true);
+      await page.evaluate(()=>{window.testBlankCamera=false;window.testPortraitCamera=false;});
+      await lookup('QR-CABLE');
       await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-qr`);
       const dialog = await page.locator('.qr-dialog').boundingBox();

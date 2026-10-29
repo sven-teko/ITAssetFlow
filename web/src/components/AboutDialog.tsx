@@ -65,7 +65,7 @@ export default function AboutDialog({ open, onClose }: AboutDialogProps) {
           <h2 id="about-dialog-title">ITAssetFlow</h2>
           <p>Version {APP_VERSION} · {RELEASE_DATE}</p>
           <p>Inventarverwaltung für Einzelgeräte und Mengenartikel.</p>
-          <p>QR- und EAN-Scanner mit Lagerbuchungen.</p>
+          <p>Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.</p>
           <p>Mobile Ansicht mit Tabelle, Filtern und Details.</p>
           <p>Mitarbeiterverwaltung und Benutzerrollen.</p>
           <p>React · FastAPI · Supabase</p>

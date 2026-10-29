@@ -317,7 +317,7 @@ export default function ProductModelsPage({
                         <FormRow id="model-part-number" label="Artikelnummer:">
                           <input id="model-part-number" className="asset-form-control" type="text" value={draft.part_number} onChange={event => changeDraft({ part_number: event.target.value })} />
                         </FormRow>
-                        <FormRow id="model-qr" label="QR-Code (optional):">
+                        <FormRow id="model-qr" label="QR-Code / Barcode (optional):">
                           <input id="model-qr" className="asset-form-control" type="text" maxLength={100} value={draft.qr_code} onChange={event => changeDraft({ qr_code: event.target.value })} />
                         </FormRow>
                         <FormRow id="model-ean" label="EAN (optional):">

@@ -29,3 +29,7 @@ Für ein anderes Testziel kann `UI_BASE_URL` gesetzt werden. `PLAYWRIGHT_MODULE`
 `test_scanner_schema.py` prüft die fehlenden optionalen Spalten (42703/PGRST204), das Laden und Speichern bestehender Einträge mit altem Schema, teilweise ergänzte Datenbanken und den Schutz vor verworfenen QR-/EAN-Werten. Der gesamte Python-Testlauf enthält 60 Tests.
 
 Die Browser-Smoke-Prüfung kontrolliert zusätzlich die dunkleren Seitenleisten, die Datensatzanzahl nur unten, das rote Power-Symbol und die aktualisierten Angaben unter Hilfe → Über. Mit `START_PREVIEW=1` starten beide Browser-Testskripte den fertigen dist-Build selbst.
+
+Der Scanner-Test prüft ab 1.1.2 zusätzlich die entfernte Codeart-Auswahl, den automatischen Wechsel EAN → QR → EAN, einen QR-Code mit rein numerischem Inhalt und die Anordnung von Beschriftung und Eingabefeld ohne Überlappung.
+
+Scanner 1.1.3: Der Decoder wird als lokaler WASM-Build ausgeliefert. Unterstützt werden QR, EAN-8, EAN-13, Code 128 und Code 39. Die zusätzlichen SVG-Testbilder CODE128, CODE128-NEW und CODE39 enthalten bekannte Kennungen. Kamera-Prüfungen sollen zwei übereinstimmende Frames für lineare Barcodes, Autofokus, Zoom/Licht bei Unterstützung und Freigabe aller Tracks berücksichtigen.

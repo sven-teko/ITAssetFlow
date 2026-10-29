@@ -244,6 +244,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [searchParams] = useSearchParams();
   const scannedCode = isEditMode ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
   const scannedEan = searchParams.get("code_type") === "ean";
+  const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
   const [qrCode, setQrCode] = useState(scannedEan ? "" : scannedCode);
   const [codesModelId, setCodesModelId] = useState("");
   const [ean, setEan] = useState(scannedEan ? scannedCode : "");
@@ -1016,7 +1017,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           </button>
         </header>
         {scannedCode && <div className="asset-form-qr-notice">
-          <strong>{scannedEan ? "EAN" : "QR-Code"}: {scannedCode}</strong>
+          <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
           <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
         </div>}
         {errorMessage && (
@@ -1317,13 +1318,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             </fieldset>
             <fieldset className="asset-form-group">
               <legend>Scanner-Kennungen (optional)</legend>
-              <div className="asset-form-row"><label htmlFor="item-qr">QR-Code:</label>
+              <div className="asset-form-row"><label htmlFor="item-qr">QR-Code / Barcode:</label>
                 <input id="item-qr" type="text" maxLength={100} className="asset-form-control" value={qrCode} disabled={saving}
                   onChange={event => setQrCode(event.target.value)} /></div>
               <div className="asset-form-row"><label htmlFor="item-ean">EAN:</label>
                 <input id="item-ean" type="text" inputMode="numeric" maxLength={13} className="asset-form-control" value={ean} disabled={saving}
                   placeholder="EAN-8 oder EAN-13" onChange={event => setEan(event.target.value)} /></div>
-              <p className="qr-hint">QR-Code, EAN oder beide Kennungen sind möglich.
+              <p className="qr-hint">QR-Code oder Barcode-Kennung, EAN oder beide Kennungen sind möglich.
                 {currentEntryType === "stock" ? " Bei Mengenartikeln gelten die Kennungen für das gesamte Produktmodell an allen Lagerorten." : " Eine EAN kann bei mehreren Geräten vorkommen."}</p>
             </fieldset>
             {currentEntryType === "asset" ? (
