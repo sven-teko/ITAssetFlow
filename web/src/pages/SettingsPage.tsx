@@ -613,6 +613,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
             is_active: row.is_active !== false,
             auth_user_id: text(row.auth_user_id) || null,
             app_role: appRole,
+            allowed_site_refs: Array.isArray(row.allowed_site_ids) ? row.allowed_site_ids.map((id) => idRef(id as RowId)).filter((ref): ref is string => Boolean(ref)) : [],
           };
         });
         setSites(normalizedSites);
@@ -1260,6 +1261,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
         department_ref: row.department_ref,
         is_active: row.is_active,
         app_role: row.app_role,
+        allowed_site_refs: row.allowed_site_refs,
       })),
       manufacturers: manufacturers.map((row) => ({
         id: row.id,
@@ -2147,7 +2149,8 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           <strong>Benutzerberechtigungen</strong>
           <span>
             Administrator: vollständiger Zugriff · Bearbeiter: Inventar lesen und bearbeiten ·
-            Betrachter: nur lesen.
+            Betrachter: nur lesen. Bearbeiter und Betrachter sehen nur die ausgewählten Standorte.
+            Administratoren haben Zugriff auf alle Standorte. Änderungen mit „Übernehmen“ speichern.
           </span>
         </div>
         <div className="settings-table-wrap settings-table-grow">
@@ -2157,6 +2160,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                 <th>Benutzer</th>
                 <th>E-Mail</th>
                 <th>Rolle</th>
+                <th>Freigegebene Standorte</th>
               </tr>
             </thead>
             <tbody>
@@ -2203,12 +2207,29 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                         <option value="viewer">Betrachter</option>
                       </select>
                     </td>
+                    <td>
+                      <fieldset className="settings-site-permissions" aria-label={`Standorte für ${displayName}`} disabled={saving || row.app_role === "admin"}>
+                        <legend className="sr-only">Freigegebene Standorte</legend>
+                        {sortedSites.map(site => <label key={site.client_key}>
+                          <input type="checkbox" checked={row.app_role === "admin" || row.allowed_site_refs.includes(site.client_key)}
+                            onChange={event => {
+                              const selected = event.target.checked;
+                              setEmployees(current => current.map(employee => employee.client_key === row.client_key ? {
+                                ...employee, allowed_site_refs: selected ? [...employee.allowed_site_refs, site.client_key] : employee.allowed_site_refs.filter(ref => ref !== site.client_key),
+                              } : employee));
+                              showMessage(`Standorte für ${displayName} geändert. Mit „Übernehmen“ speichern.`, "info");
+                            }} />
+                          <span>{site.name || "Neuer Standort"}</span>
+                        </label>)}
+                      </fieldset>
+                      <small className="settings-site-permissions-note">{row.app_role === "admin" ? "Administratoren: alle Standorte" : row.allowed_site_refs.length ? "Nur ausgewählte Standorte sichtbar" : "Kein Standort freigegeben"}</small>
+                    </td>
                   </tr>
                 );
               })}
               {linkedUsers.length === 0 && (
                 <tr>
-                  <td colSpan={3}>
+                  <td colSpan={4}>
                     <div className="settings-cell-text">
                       Keine mit Supabase Auth verknüpften Benutzer vorhanden.
                     </div>

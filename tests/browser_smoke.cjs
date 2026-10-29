@@ -35,7 +35,7 @@ const run = (async () => {
       {id:2,_record_type:'asset',asset_tag:'TEST-002',product_model_name:'TestBook',status:'in_use',condition:'used',site_name:'Bern',department_name:'IT',_web_inventory_group:'device',_web_category_key:'laptop',_web_condition_key:'used'},
     ];
     const data = {
-      sites:[{id:1,name:'Basel',organization_id:1},{id:2,name:'Bern',organization_id:1}],
+      sites:[{id:1,name:'Basel',organization_id:1},{id:2,name:'Bern',organization_id:1},{id:3,name:'Büro Allschwil',organization_id:1}],
       departments:[{id:10,name:'IT',site_id:1,organization_id:1},{id:20,name:'IT',site_id:2,organization_id:1}],
       storage_locations:[{id:11,name:'Lager',site_id:1,department_id:10,is_active:true,location_type:'warehouse'}],
       product_categories:[{id:1,name:'Laptop',code:'laptop',inventory_group:'device',specification_schema:{fields:[]}}],
@@ -43,6 +43,7 @@ const run = (async () => {
       employees:[
         {id:1,first_name:'Test',last_name:'Admin',email:'admin@example.test',department_id:10,is_active:true,auth_user_id:'auth-admin',app_role:'admin'},
         {id:2,first_name:'Maria',last_name:'Muster',email:'maria@example.test',department_id:20,is_active:true,auth_user_id:null,app_role:'viewer'},
+        {id:3,first_name:'Lara',last_name:'Standort',email:'lara@example.test',department_id:10,is_active:true,auth_user_id:'auth-lara',app_role:'user',allowed_site_ids:[1,2,3]},
       ],
       product_models:[{id:100,name:'TestBook',category_id:1,manufacturer_id:1,is_active:true,tracking_mode:'serialized',unit_code:'piece',specifications:{}}],
       parent_assets:[], ...meta, factory_default_visible_columns:meta.default_visible_columns,
@@ -65,6 +66,7 @@ const run = (async () => {
           data.employees=lastSettings.employees.map((row,index)=>({
             ...data.employees.find(old=>String(old.id)===String(row.id)),...row,
             id:row.id??100+index,department_id:row.department_ref?Number(row.department_ref.replace('id:','')):null,
+            allowed_site_ids:row.allowed_site_refs.map(ref=>Number(ref.replace('id:',''))),
           }));
           return json({saved:true});
         }
@@ -94,12 +96,12 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.1.3 · 29.10.2026',{exact:true}).waitFor();
-    await page.getByText('QR- und EAN-Scanner mit Lagerbuchungen.',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.0 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.1.3');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.0');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
@@ -149,6 +151,29 @@ const run = (async () => {
     assert.ok(await page.getByLabel('Aktiv: Test Admin',{exact:true}).isDisabled());
     assert.ok(await page.getByRole('button',{name:'Löschen',exact:true}).isDisabled());
     console.log('PASS: Mitarbeiter anlegen, bearbeiten, deaktivieren, löschen, Standortzuordnung und Kontoschutz');
+
+    await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
+    const permissions=page.getByRole('group',{name:'Standorte für Lara Standort',exact:true});
+    const adminPermissions=page.getByRole('group',{name:'Standorte für Test Admin',exact:true});
+    assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isDisabled(),true);
+    assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),true);
+    await permissions.getByLabel('Büro Allschwil',{exact:true}).uncheck();
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
+    assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1','id:2']);
+    assert.equal(await permissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),false);
+    await permissions.getByLabel('Basel',{exact:true}).uncheck();
+    await permissions.getByLabel('Bern',{exact:true}).uncheck();
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
+    assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,[]);
+    await page.getByText('Kein Standort freigegeben',{exact:true}).waitFor();
+    await permissions.getByLabel('Basel',{exact:true}).check();
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
+    assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1']);
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-permissions.png'});
+    console.log('PASS: Standort-Checkboxen, Büro Allschwil abwählen, leere Auswahl speichern und Administratorzugriff');
 
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/employees.png'});}
     await page.getByRole('button',{name:'Zurück zum Inventar',exact:false}).click();

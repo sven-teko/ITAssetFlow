@@ -1526,33 +1526,9 @@ class AssetRepository:
     ) -> None:
         """Entfernt ein serialisiertes Asset samt direkten Zuordnungen."""
 
-        # Alle aktuell vorhandenen RESTRICT-Fremdschlüssel werden vor dem
-        # eigentlichen Asset-Datensatz bereinigt. stock_movements.related_asset_id
-        # besitzt ON DELETE SET NULL und muss deshalb nicht gelöscht werden.
-        dependencies = (
-            ("asset_component_assignments", "child_asset_id"),
-            ("asset_component_assignments", "parent_asset_id"),
-            ("software_installations", "asset_id"),
-            ("asset_assignments", "asset_id"),
-            ("asset_locations", "asset_id"),
-        )
-
-        for table_name, column_name in dependencies:
-            (
-                self.client
-                .table(table_name)
-                .delete()
-                .eq(column_name, asset_id)
-                .execute()
-            )
-
-        (
-            self.client
-            .table(self.asset_table_name)
-            .delete()
-            .eq("id", asset_id)
-            .execute()
-        )
+        result = self.client.rpc("delete_scoped_asset", {"p_asset_id": asset_id}).execute()
+        if result.data is not True:
+            raise ValueError("Das Gerät wurde nicht gefunden oder konnte nicht gelöscht werden.")
 
     def _delete_stock_level(
         self,

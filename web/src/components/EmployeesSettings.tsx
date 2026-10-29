@@ -11,6 +11,7 @@ export type EmployeeRow = {
   is_active: boolean;
   auth_user_id: string | null;
   app_role: "admin" | "user" | "viewer";
+  allowed_site_refs: string[];
 };
 
 type Props = {
@@ -66,7 +67,7 @@ export default function EmployeesSettings({
     const key = nextKey();
     setEmployees((current) => [...current, {
       id: null, client_key: key, employee_number: "", first_name: "", last_name: "", email: "",
-      department_ref: departmentRef, is_active: true, auth_user_id: null, app_role: "viewer",
+      department_ref: departmentRef, is_active: true, auth_user_id: null, app_role: "viewer", allowed_site_refs: [],
     }]);
     setSearch("");
     setSelectedKey(key);

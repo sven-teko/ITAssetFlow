@@ -28,7 +28,7 @@ class SettingsService:
         self.actor_email = actor_email.strip().casefold()
 
     def load(self) -> dict[str, list[dict[str, Any]]]:
-        return {
+        data = {
             "sites": self._load_rows(
                 "sites",
                 "id,name,street,street_number,postal_code,city,country,organization_id",
@@ -65,12 +65,19 @@ class SettingsService:
                 "id,name",
             ),
         }
+        access = self._load_rows("employee_site_access", "employee_id,site_id", order_column="site_id")
+        for employee in data["employees"]:
+            employee["allowed_site_ids"] = [site["id"] for site in data["sites"]] if employee.get("app_role") == "admin" else [
+                row["site_id"] for row in access if row["employee_id"] == employee["id"]
+            ]
+        return data
 
     def save(self, payload: dict[str, Any]) -> dict[str, bool]:
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Einstellungsdaten.")
 
         self._validate_employees(payload.get("employees"))
+        self._validate_site_permissions(payload)
 
         # Vor sämtlichen Änderungen prüfen, ob ein zum Löschen markierter
         # Stammdatensatz noch verwendet wird. Dadurch entstehen bei einem
@@ -88,6 +95,7 @@ class SettingsService:
             payload.get("employees"),
             department_ids,
         )
+        self._save_site_permissions(payload.get("employees"), site_ids)
         self._save_locations(
             payload.get("storage_locations"),
             site_ids,
@@ -97,6 +105,36 @@ class SettingsService:
         self._save_manufacturers(payload.get("manufacturers"))
         self._delete_marked(payload.get("deleted"))
         return {"saved": True}
+
+    def _validate_site_permissions(self, payload: dict[str, Any]) -> None:
+        employees = payload.get("employees")
+        if not isinstance(employees, list) or not any("allowed_site_refs" in row for row in employees if isinstance(row, dict)):
+            return
+        known = {f"id:{row['id']}" for row in self._load_rows("sites", "id,name")}
+        known.update(str(row.get("client_key")) for row in payload.get("sites", []) if isinstance(row, dict) and row.get("client_key"))
+        for employee in employees:
+            if "allowed_site_refs" not in employee:
+                continue  # Older clients preserve the stored permissions.
+            refs = employee["allowed_site_refs"]
+            if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in known for ref in refs):
+                raise ValueError("Ungültige Standortfreigabe. Bitte die Einstellungen neu laden.")
+            if len(refs) != len(set(refs)):
+                raise ValueError("Standortfreigaben dürfen nicht doppelt vorkommen.")
+
+    def _save_site_permissions(self, employees: object, site_ids: dict[str, Any]) -> None:
+        if not isinstance(employees, list):
+            return
+        for employee in employees:
+            if employee.get("id") is None or "allowed_site_refs" not in employee:
+                continue
+            current = self.client.table("employees").select("auth_user_id").eq("id", employee["id"]).limit(1).execute()
+            if not any(row.get("auth_user_id") for row in (current.data or []) if isinstance(row, dict)):
+                continue
+            allowed = [self._resolve_ref(ref, site_ids, "Freigegebener Standort") for ref in employee["allowed_site_refs"]]
+            # One RPC replaces each user's entire selection in one transaction.
+            response = self.client.rpc("set_employee_site_access", {"p_employee_id": employee["id"], "p_site_ids": allowed}).execute()
+            if response.data is not True:
+                raise RuntimeError("Die Standortberechtigungen wurden nicht bestätigt. Bitte die Einstellungen neu laden.")
 
     def _load_rows(
         self,

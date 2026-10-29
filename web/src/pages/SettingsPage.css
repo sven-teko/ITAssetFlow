@@ -593,3 +593,10 @@ select.settings-cell-editor {
 
 .settings-employee-filters > label:nth-child(3) { flex: 1 1 250px; max-width: 360px; }
 .settings-employee-filters input[type="search"] { width: 100%; max-width: none; }
+
+.settings-site-permissions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 14px; min-width: 220px; max-width: 500px; margin: 6px 0; padding: 8px 0; border: 0; }
+.settings-site-permissions legend { font-size: 12px; color: #64748b; }
+.settings-site-permissions label { display: flex; align-items: start; gap: 8px; min-height: 28px; padding: 4px 0; cursor: pointer; line-height: 1.4; }
+.settings-site-permissions input[type="checkbox"] { flex: 0 0 auto; width: 17px; height: 17px; margin: 1px 0 0; accent-color: #2868ad; }
+.settings-site-permissions:disabled label { cursor: default; }
+.settings-site-permissions-note { display: block; margin-top: 4px; padding-bottom: 8px; color: #64748b; font-size: 12px; }
