@@ -4,6 +4,7 @@ import { UnauthorizedError } from "../api/inventoryApi";
 import { createProductModel, deleteProductModel, loadProductModels, saveProductModel } from "../api/productModelsApi";
 import { createModelDraft, modelChanges, modelSpecificationFields } from "../utils/productModels";
 import type { ModelDraft, ProductModel, ProductModelsData } from "../utils/productModels";
+import LoadingIndicator from "../components/LoadingIndicator";
 import "./AssetFormPage.css";
 import "./ProductModelsPage.css";
 
@@ -237,7 +238,7 @@ export default function ProductModelsPage({
     <form className="product-models-panel" onSubmit={event => void save(event)} aria-busy={loading || saving}>
       <main className="settings-content" id="settings-panel" role="tabpanel" aria-labelledby="settings-tab-product-models">
         <div className="product-models-page">
-          {loading ? <p role="status">Produktmodelle werden geladen …</p> : !data ? (
+          {loading ? <LoadingIndicator label="Produktmodelle werden geladen …" /> : !data ? (
             <button type="button" onClick={retryLoad}>Erneut laden</button>
           ) : (
             <>
@@ -362,16 +363,20 @@ export default function ProductModelsPage({
           )}
         </div>
       </main>
-      {(error || success || pendingSettings) && (
-        <div className={`settings-message ${error ? "error" : success ? "success" : "info"}`} role={error ? "alert" : "status"} tabIndex={-1} ref={errorRef}>
-          {error || success}
+      {(saving || error || success || pendingSettings) && (
+        <div className={`settings-message ${error ? "error" : success ? "success" : "info"}${saving ? " settings-message-busy" : ""}`} role={error ? "alert" : "status"} tabIndex={-1} ref={errorRef}>
+          {saving && <span className="settings-spinner" aria-hidden="true" />}
+          {saving ? deleting ? "Produktmodell wird gelöscht …" : "Produktmodell wird gespeichert …" : error || success}
           {pendingSettings && <div>In anderen Einstellungsreitern sind noch nicht gespeicherte Änderungen vorhanden.</div>}
         </div>
       )}
       <footer className="settings-footer product-models-actions">
         <span>{dirty ? "Nicht gespeicherte Modelländerungen" : ""}</span>
         <button type="button" disabled={saving || !dirty} onClick={discardChanges}>{creating ? "Abbrechen" : "Änderungen verwerfen"}</button>
-        <button type="submit" className="primary-button" disabled={loading || saving || !dirty}>{deleting ? "Wird gelöscht …" : saving ? "Wird gespeichert …" : creating ? "Produktmodell speichern" : "Änderungen speichern"}</button>
+        <button type="submit" className="primary-button" disabled={loading || saving || !dirty} aria-busy={saving}>
+          {saving && <span className="settings-spinner" aria-hidden="true" />}
+          {deleting ? "Wird gelöscht …" : saving ? "Wird gespeichert …" : creating ? "Produktmodell speichern" : "Änderungen speichern"}
+        </button>
       </footer>
     </form>
   );

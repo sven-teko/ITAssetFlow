@@ -22,6 +22,7 @@ const run = (async () => {
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
     let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null, metaFailure = 0;
+    let failSettingsLoad = false, failSettingsSave = false, failModelLoad = false;
     const labels = {available:'Verfügbar', in_use:'Im Einsatz', defective:'Defekt', in_repair:'In Reparatur'};
     const meta = {
       column_order:['asset_tag','product_model_name','status','condition','site_name','department_name'],
@@ -62,7 +63,9 @@ const run = (async () => {
       if(path==='/api/inventory/revision')return json({revision:1});
       if(path==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:': test\n\n'});
       if(path==='/api/settings'){
+        await pause(400);
         if(request.method()==='PUT'){
+          if(failSettingsSave)return json({detail:'Test: Einstellungen konnten nicht gespeichert werden.'},503);
           lastSettings=request.postDataJSON();
           data.employees=lastSettings.employees.map((row,index)=>({
             ...data.employees.find(old=>String(old.id)===String(row.id)),...row,
@@ -71,7 +74,16 @@ const run = (async () => {
           }));
           return json({saved:true});
         }
-        return json(data);
+        return failSettingsLoad?json({detail:'Test: Einstellungen konnten nicht geladen werden.'},503):json(data);
+      }
+      if(path==='/api/product-models'){
+        await pause(400);
+        return failModelLoad?json({detail:'Test: Modellliste nicht erreichbar.'},503):json({product_models:data.product_models,manufacturers:data.manufacturers,product_categories:data.product_categories.map(row=>({...row,fields:[]}))});
+      }
+      if(path==='/api/product-models/100' && request.method()==='PUT'){
+        await pause(400);
+        data.product_models[0]={...data.product_models[0],...request.postDataJSON()};
+        return json(data.product_models[0]);
       }
       if(path==='/api/inventory/form-data')return json(data);
       if(path==='/api/inventory'){
@@ -97,12 +109,12 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.2.5 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.6 · 29.10.2026',{exact:true}).waitFor();
     await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.5');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.6');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
@@ -115,6 +127,11 @@ const run = (async () => {
     console.log('PASS: Statusfilter und Zurücksetzen');
 
     await page.evaluate(()=>{location.hash='/settings?tab=employees';});
+    await page.locator('.settings-content .brand-loading').waitFor({state:'visible'});
+    assert.equal(await page.locator('.settings-content').getAttribute('aria-busy'),'true');
+    assert.equal(await page.getByRole('tab',{name:'Berechtigungen',exact:true}).isDisabled(),true);
+    await page.getByRole('heading',{name:'Einstellungen',exact:true}).waitFor();
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/settings-loading.png'});
     await page.getByRole('tab',{name:'Mitarbeiter',exact:true}).waitFor();
     await page.getByRole('table',{name:'Mitarbeiter',exact:true}).waitFor();
     await page.getByLabel('Mitarbeiter nach Standort filtern').selectOption('id:2');
@@ -125,6 +142,12 @@ const run = (async () => {
     await page.getByRole('textbox',{name:'E-Mail (optional)',exact:true}).fill('anna@example.test');
     await page.getByRole('textbox',{name:'Personalnummer',exact:true}).fill('E-200');
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    const saveProgress=page.getByRole('button',{name:'Wird gespeichert …',exact:true});
+    await saveProgress.waitFor();
+    assert.equal(await saveProgress.isDisabled(),true);
+    assert.equal(await page.locator('.settings-message-busy .settings-spinner').isVisible(),true);
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/settings-saving.png'});
+    await page.getByText('Einstellungen werden aktualisiert …',{exact:true}).waitFor();
     await page.getByText('Anna',{exact:true}).waitFor();
     const newEmployee=lastSettings.employees.find(row=>row.first_name==='Anna');
     assert.equal(newEmployee.department_ref,'id:20');
@@ -159,6 +182,12 @@ const run = (async () => {
     assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isDisabled(),true);
     assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),true);
     await permissions.getByLabel('Büro Allschwil',{exact:true}).uncheck();
+    failSettingsSave=true;
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Test: Einstellungen konnten nicht gespeichert werden.'}).waitFor();
+    assert.equal(await page.locator('.settings-spinner').count(),0);
+    assert.equal(await permissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),false);
+    failSettingsSave=false;
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
     assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1','id:2']);
@@ -189,6 +218,38 @@ const run = (async () => {
     assert.deepEqual(data.employees.find(row=>row.id===3).allowed_site_ids,[1]);
     data.site_permissions_available=true;
     console.log('PASS: Fehlende Standortmigration blockiert andere Einstellungen nicht; keine vorgetäuschten Standortfreigaben');
+
+    failSettingsLoad=true;
+    await page.reload();
+    await page.getByRole('alert').filter({hasText:'Test: Einstellungen konnten nicht geladen werden.'}).waitFor();
+    assert.equal(await page.locator('.settings-content .brand-loading').count(),0);
+    failSettingsLoad=false;
+    await page.setViewportSize({width:390,height:844});
+    await page.getByRole('button',{name:'Erneut laden',exact:true}).click();
+    await page.locator('.settings-content .brand-loading').waitFor({state:'visible'});
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/settings-loading-mobile.png'});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.getByRole('group',{name:'Standorte für Lara Standort',exact:true}).waitFor();
+    await page.setViewportSize({width:1440,height:1000});
+    console.log('PASS: Lade- und Speicheranimationen, gesperrte Aktionen, mobile Anzeige und erneutes Laden nach Fehler');
+
+    failModelLoad=true;
+    await page.getByRole('tab',{name:'Produktmodelle',exact:true}).click();
+    await page.getByText('Produktmodelle werden geladen …',{exact:true}).waitFor();
+    await page.getByRole('alert').filter({hasText:'Test: Modellliste nicht erreichbar.'}).waitFor();
+    assert.equal(await page.locator('.product-models-panel .brand-loading').count(),0);
+    failModelLoad=false;
+    await page.getByRole('button',{name:'Erneut laden',exact:true}).click();
+    await page.getByText('Produktmodelle werden geladen …',{exact:true}).waitFor();
+    await page.getByLabel('Bezeichnung *:',{exact:true}).fill('TestBook aktualisiert');
+    await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+    await page.getByRole('button',{name:'Wird gespeichert …',exact:true}).waitFor();
+    await page.getByRole('status').filter({hasText:'Produktmodell wird gespeichert …'}).waitFor();
+    assert.equal(await page.getByLabel('Bezeichnung *:',{exact:true}).isDisabled(),true);
+    await page.getByText('„TestBook aktualisiert“ wurde gespeichert.',{exact:true}).waitFor();
+    assert.equal(await page.locator('.settings-spinner').count(),0);
+    await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
+    console.log('PASS: Produktmodelle mit Lade-/Speicheranimation, Fehlerzustand und erneutem Abruf');
 
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/employees.png'});}
     await page.getByRole('button',{name:'Zurück zum Inventar',exact:false}).click();
@@ -246,7 +307,14 @@ const run = (async () => {
 
     await page.emulateMedia({reducedMotion:'reduce'});
     await page.evaluate(()=>{location.hash='/settings?tab=employees';});
+    await page.locator('.settings-content .brand-loading-logo').waitFor({state:'visible'});
+    assert.equal(await page.locator('.settings-content .brand-loading-logo').evaluate(el=>getComputedStyle(el).animationName),'none');
     await page.getByRole('table',{name:'Mitarbeiter'}).waitFor();
+    await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.locator('.settings-message-busy .settings-spinner').waitFor();
+    assert.equal(await page.locator('.settings-message-busy .settings-spinner').evaluate(el=>getComputedStyle(el).animationName),'none');
+    await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
     await page.getByRole('button',{name:'Zurück zum Inventar',exact:false}).click();
     await page.locator('.brand-loading-logo').waitFor({state:'visible'});
     assert.equal(await page.locator('.brand-loading-logo').evaluate(el=>getComputedStyle(el).animationName),'none');

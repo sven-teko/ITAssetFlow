@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import ProductModelsPage, { type ProductModelsHandle } from "./ProductModelsPage";
 import "./SettingsPage.css";
 import EmployeesSettings, { type EmployeeRow } from "../components/EmployeesSettings";
+import LoadingIndicator from "../components/LoadingIndicator";
 
 
 const LOCATION_TYPES = {
@@ -408,7 +409,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
 
   function changeTab(tab: SettingsTab): boolean {
     if (tab === activeTab) return true;
-    if (saving || modelSaving || modelEditor.current?.confirmLeave() === false) return false;
+    if (loading || saving || modelSaving || modelEditor.current?.confirmLeave() === false) return false;
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     setSearchParams(next, { replace: true });
@@ -434,7 +435,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
   }
 
   function closeSettings(): void {
-    if (saving || modelSaving || modelEditor.current?.confirmLeave() === false) return;
+    if (loading || saving || modelSaving || modelEditor.current?.confirmLeave() === false) return;
     if (hasSettingsChanges && !window.confirm("Nicht gespeicherte Einstellungen verwerfen?"))
       return;
     navigate("/inventory");
@@ -2153,7 +2154,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           <strong>Benutzerberechtigungen</strong>
           <span>
             Administrator: vollständiger Zugriff · Bearbeiter: Inventar lesen und bearbeiten ·
-            Betrachter: nur lesen. {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die ausgewählten Standorte. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
+            Betrachter: nur lesen. {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die ausgewählten Standorte und deren Daten. Entferne das Häkchen bei einem Standort, um ihn vollständig auszublenden. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
           </span>
         </div>
         {!sitePermissionsAvailable && <p className="settings-permissions-pending" role="status">Die Standortmigration fehlt noch. Rollen und andere Einstellungen bleiben bearbeitbar; Standortfreigaben können erst nach der Aktivierung geändert werden.</p>}
@@ -2288,10 +2289,6 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     );
   }
 
-  if (loading) {
-    return <div className="settings-page settings-loading">Einstellungen werden geladen ...</div>;
-  }
-
   return (
     <div className="settings-page">
       <div className="settings-window">
@@ -2300,7 +2297,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
             <h1>Einstellungen</h1>
             <p>Stammdaten und Darstellung von ITAssetFlow verwalten.</p>
           </div>
-          <button type="button" disabled={saving || modelSaving} onClick={closeSettings}>
+          <button type="button" disabled={loading || saving || modelSaving} onClick={closeSettings}>
             ← Zurück zum Inventar
           </button>
         </header>
@@ -2315,7 +2312,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
               aria-controls="settings-panel"
               tabIndex={activeTab === key ? 0 : -1}
               className={activeTab === key ? "active" : ""}
-              disabled={saving || modelSaving}
+              disabled={loading || saving || modelSaving}
               onClick={() => changeTab(key)}
               onKeyDown={(event) => navigateTabs(event, index)}
             >
@@ -2323,7 +2320,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
             </button>
           ))}
         </nav>
-        {activeTab === "product-models" ? (
+        {activeTab === "product-models" && !loading && savedSettings ? (
           <ProductModelsPage
             ref={modelEditor}
             onSessionExpired={onSessionExpired}
@@ -2334,12 +2331,15 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
         ) : (
           <>
             <main
-              className="settings-content"
+              className={`settings-content${loading ? " settings-content-loading" : ""}`}
               id="settings-panel"
               role="tabpanel"
               aria-labelledby={`settings-tab-${activeTab}`}
+              aria-busy={loading || saving}
             >
-              {!savedSettings ? (
+              {loading ? (
+                <LoadingIndicator label={savedSettings ? "Einstellungen werden aktualisiert …" : "Einstellungen werden geladen …"} />
+              ) : !savedSettings ? (
                 <div className="settings-empty-state">
                   <p>Die Einstellungen konnten nicht geladen werden.</p>
                   <button type="button" onClick={() => setReloadSequence((value) => value + 1)}>
@@ -2367,26 +2367,29 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                 </>
               )}
             </main>
-            <div
-              className={`settings-message ${messageTone}`}
+            {!loading && <div
+              className={`settings-message ${messageTone}${saving ? " settings-message-busy" : ""}`}
               role={messageTone === "error" ? "alert" : "status"}
             >
+              {saving && <span className="settings-spinner" aria-hidden="true" />}
               {message}
-            </div>
+            </div>}
             <footer className="settings-footer">
               <span className="settings-save-state">
-                {hasSettingsChanges ? "Nicht gespeicherte Einstellungen" : ""}
+                {!loading && hasSettingsChanges ? "Nicht gespeicherte Einstellungen" : ""}
               </span>
-              <button type="button" disabled={saving} onClick={closeSettings}>
+              <button type="button" disabled={loading || saving} onClick={closeSettings}>
                 Schliessen
               </button>
               <button
                 type="button"
                 className="primary-button"
-                disabled={saving || !savedSettings}
+                disabled={loading || saving || !savedSettings}
+                aria-busy={saving}
                 onClick={() => void save()}
               >
-                {saving ? "Wird gespeichert …" : "Übernehmen"}
+                {saving && <span className="settings-spinner" aria-hidden="true" />}
+                {saving ? "Wird gespeichert …" : loading && savedSettings ? "Wird aktualisiert …" : "Übernehmen"}
               </button>
             </footer>
           </>

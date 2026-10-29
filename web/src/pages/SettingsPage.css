@@ -27,11 +27,6 @@
   background: #f4f6f8;
 }
 
-.settings-loading {
-  align-items: center;
-  color: #66717c;
-}
-
 .settings-window {
   width: min(1280px, 100%);
   height: 100%;
@@ -121,6 +116,44 @@
   background: #ffffff;
   border: 1px solid #d8dde3;
   border-radius: 0 0 5px 5px;
+}
+
+.settings-content-loading {
+  display: flex;
+}
+
+.settings-content-loading .brand-loading {
+  min-height: min(220px, 100%);
+}
+
+.settings-spinner {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: settings-spin .8s linear infinite;
+}
+
+.settings-message-busy {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings-footer button .settings-spinner {
+  margin-right: 8px;
+}
+
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-spinner { animation: none; }
 }
 
 .settings-page-intro h2 {
