@@ -76,6 +76,18 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class InventoryMetaError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "InventoryMetaError";
+    this.status = status;
+  }
+  get allowsDefaultColumns(): boolean {
+    return this.status === 0 || this.status === 200 || this.status === 404 || this.status >= 500;
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -185,21 +197,27 @@ export async function loadInventoryRevision(): Promise<number> {
 
 
 export async function loadInventoryMeta(): Promise<InventoryMeta> {
-  const response = await fetch(`${API_BASE}/api/inventory/meta`, {
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/inventory/meta`, { credentials: "include" });
+  } catch {
+    throw new InventoryMetaError("Die Tabellenansicht konnte nicht abgerufen werden.", 0);
+  }
 
   ensureAuthorized(response);
   const data = await readJson(response);
 
   if (!response.ok) {
-    throw new Error(
-      errorDetail(data, "Tabelleninformationen konnten nicht geladen werden."),
+    throw new InventoryMetaError(
+      errorDetail(data, `Tabelleninformationen konnten nicht geladen werden (HTTP ${response.status}).`), response.status,
     );
   }
 
-  if (!isRecord(data)) {
-    throw new Error("Ungültige Tabelleninformationen vom Webserver.");
+  if (!isRecord(data)
+      || !Array.isArray(data.column_order) || !data.column_order.length || !data.column_order.every(value => typeof value === "string")
+      || !Array.isArray(data.default_visible_columns) || !data.default_visible_columns.every(value => typeof value === "string")
+      || !["headers", "status_labels", "condition_labels", "inventory_group_labels"].every(key => isRecord(data[key]) && Object.values(data[key]).every(value => typeof value === "string"))) {
+    throw new InventoryMetaError("Die Tabelleninformationen vom Webserver sind unvollständig.", 200);
   }
 
   return data as InventoryMeta;

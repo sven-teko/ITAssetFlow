@@ -124,6 +124,7 @@ type ManufacturerRow = {
 type AppRole = "admin" | "user" | "viewer";
 
 type SettingsResponse = {
+  site_permissions_available: boolean;
   sites: Array<Record<string, unknown>>;
   departments: Array<Record<string, unknown>>;
   storage_locations: Array<Record<string, unknown>>;
@@ -292,6 +293,7 @@ function normalizeResponse(raw: unknown): SettingsResponse {
     : [];
 
   return {
+    site_permissions_available: data.site_permissions_available === true,
     sites: rows("sites"),
     departments: rows("departments"),
     storage_locations: rows("storage_locations"),
@@ -360,6 +362,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
   const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
+  const [sitePermissionsAvailable, setSitePermissionsAvailable] = useState(false);
   const [deleted, setDeleted] = useState<DeletedState>(emptyDeleted);
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set());
 
@@ -540,6 +543,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
         if (cancelled) {
           return;
         }
+        setSitePermissionsAvailable(normalized.site_permissions_available);
 
         const normalizedSites = normalized.sites.map((row): SiteRow => ({
           id: row.id as RowId,
@@ -1261,7 +1265,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
         department_ref: row.department_ref,
         is_active: row.is_active,
         app_role: row.app_role,
-        allowed_site_refs: row.allowed_site_refs,
+        ...(sitePermissionsAvailable ? { allowed_site_refs: row.allowed_site_refs } : {}),
       })),
       manufacturers: manufacturers.map((row) => ({
         id: row.id,
@@ -2149,10 +2153,10 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           <strong>Benutzerberechtigungen</strong>
           <span>
             Administrator: vollständiger Zugriff · Bearbeiter: Inventar lesen und bearbeiten ·
-            Betrachter: nur lesen. Bearbeiter und Betrachter sehen nur die ausgewählten Standorte.
-            Administratoren haben Zugriff auf alle Standorte. Änderungen mit „Übernehmen“ speichern.
+            Betrachter: nur lesen. {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die ausgewählten Standorte. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
           </span>
         </div>
+        {!sitePermissionsAvailable && <p className="settings-permissions-pending" role="status">Die Standortmigration fehlt noch. Rollen und andere Einstellungen bleiben bearbeitbar; Standortfreigaben können erst nach der Aktivierung geändert werden.</p>}
         <div className="settings-table-wrap settings-table-grow">
           <table className="settings-table">
             <thead>
@@ -2208,7 +2212,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                       </select>
                     </td>
                     <td>
-                      <fieldset className="settings-site-permissions" aria-label={`Standorte für ${displayName}`} disabled={saving || row.app_role === "admin"}>
+                      {sitePermissionsAvailable ? <><fieldset className="settings-site-permissions" aria-label={`Standorte für ${displayName}`} disabled={saving || row.app_role === "admin"}>
                         <legend className="sr-only">Freigegebene Standorte</legend>
                         {sortedSites.map(site => <label key={site.client_key}>
                           <input type="checkbox" checked={row.app_role === "admin" || row.allowed_site_refs.includes(site.client_key)}
@@ -2223,6 +2227,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                         </label>)}
                       </fieldset>
                       <small className="settings-site-permissions-note">{row.app_role === "admin" ? "Administratoren: alle Standorte" : row.allowed_site_refs.length ? "Nur ausgewählte Standorte sichtbar" : "Kein Standort freigegeben"}</small>
+                      </> : <span className="settings-cell-text">Noch nicht aktiviert</span>}
                     </td>
                   </tr>
                 );

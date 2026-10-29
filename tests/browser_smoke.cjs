@@ -21,7 +21,7 @@ const run = (async () => {
     page.setDefaultTimeout(10000);
     const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error.message));
-    let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null;
+    let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null, metaFailure = 0;
     const labels = {available:'Verfügbar', in_use:'Im Einsatz', defective:'Defekt', in_repair:'In Reparatur'};
     const meta = {
       column_order:['asset_tag','product_model_name','status','condition','site_name','department_name'],
@@ -35,6 +35,7 @@ const run = (async () => {
       {id:2,_record_type:'asset',asset_tag:'TEST-002',product_model_name:'TestBook',status:'in_use',condition:'used',site_name:'Bern',department_name:'IT',_web_inventory_group:'device',_web_category_key:'laptop',_web_condition_key:'used'},
     ];
     const data = {
+      site_permissions_available:true,
       sites:[{id:1,name:'Basel',organization_id:1},{id:2,name:'Bern',organization_id:1},{id:3,name:'Büro Allschwil',organization_id:1}],
       departments:[{id:10,name:'IT',site_id:1,organization_id:1},{id:20,name:'IT',site_id:2,organization_id:1}],
       storage_locations:[{id:11,name:'Lager',site_id:1,department_id:10,is_active:true,location_type:'warehouse'}],
@@ -57,7 +58,7 @@ const run = (async () => {
       if(request.method()==='OPTIONS')return route.fulfill({status:204,headers});
       if(path==='/api/auth/login'){loggedIn=true; return json({authenticated:true,email:'admin@example.test'});}
       if(path==='/api/auth/session'){await pause(180); return json({authenticated:loggedIn,email:loggedIn?'admin@example.test':null,role:loggedIn?'admin':null});}
-      if(path==='/api/inventory/meta')return json(meta);
+      if(path==='/api/inventory/meta')return metaFailure==='invalid'?json({}):metaFailure?json({detail:'Keine Berechtigung für Tabelleninformationen.'},metaFailure):json(meta);
       if(path==='/api/inventory/revision')return json({revision:1});
       if(path==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:': test\n\n'});
       if(path==='/api/settings'){
@@ -66,7 +67,7 @@ const run = (async () => {
           data.employees=lastSettings.employees.map((row,index)=>({
             ...data.employees.find(old=>String(old.id)===String(row.id)),...row,
             id:row.id??100+index,department_id:row.department_ref?Number(row.department_ref.replace('id:','')):null,
-            allowed_site_ids:row.allowed_site_refs.map(ref=>Number(ref.replace('id:',''))),
+            allowed_site_ids:Array.isArray(row.allowed_site_refs)?row.allowed_site_refs.map(ref=>Number(ref.replace('id:',''))):data.employees.find(old=>String(old.id)===String(row.id))?.allowed_site_ids??[],
           }));
           return json({saved:true});
         }
@@ -96,12 +97,12 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.2.0 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.5 · 29.10.2026',{exact:true}).waitFor();
     await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.0');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.5');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
@@ -175,6 +176,20 @@ const run = (async () => {
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-permissions.png'});
     console.log('PASS: Standort-Checkboxen, Büro Allschwil abwählen, leere Auswahl speichern und Administratorzugriff');
 
+    data.site_permissions_available=false;
+    await page.reload();
+    await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Die Standortmigration fehlt noch.'}).waitFor();
+    assert.equal(await page.locator('.settings-site-permissions').count(),0);
+    await page.locator('.settings-table tbody tr').filter({hasText:'lara@example.test'}).locator('select').selectOption('viewer');
+    await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
+    await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
+    assert.ok(lastSettings.employees.every(row=>!('allowed_site_refs' in row)));
+    assert.equal(lastSettings.employees.find(row=>row.id===3).app_role,'viewer');
+    assert.deepEqual(data.employees.find(row=>row.id===3).allowed_site_ids,[1]);
+    data.site_permissions_available=true;
+    console.log('PASS: Fehlende Standortmigration blockiert andere Einstellungen nicht; keine vorgetäuschten Standortfreigaben');
+
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/employees.png'});}
     await page.getByRole('button',{name:'Zurück zum Inventar',exact:false}).click();
     await page.locator('.brand-loading').waitFor({state:'visible'});
@@ -212,6 +227,22 @@ const run = (async () => {
     await page.getByRole('button',{name:'Erneut laden',exact:true}).click();
     await page.getByText('TEST-001',{exact:true}).waitFor();
     console.log('PASS: Ladefehler sichtbar und erneuter Abruf erfolgreich');
+
+    for(const failure of [500,404,'invalid']) {
+      metaFailure=failure;
+      await page.reload();
+      await page.getByText('TEST-001',{exact:true}).waitFor();
+      assert.equal(await page.locator('.inventory-table tbody tr').count(),2);
+      await page.locator('.inventory-status').filter({hasText:'Standardspalten'}).waitFor();
+    }
+    metaFailure=403;
+    await page.reload();
+    await page.getByRole('alert').filter({hasText:'Keine Berechtigung für Tabelleninformationen.'}).waitFor();
+    assert.equal(await page.getByText('TEST-001',{exact:true}).count(),0);
+    metaFailure=0;
+    await page.reload();
+    await page.getByText('TEST-001',{exact:true}).waitFor();
+    console.log('PASS: Fehlende/fehlerhafte Tabelleninformationen verwenden Standardspalten; HTTP 403 bleibt gesperrt');
 
     await page.emulateMedia({reducedMotion:'reduce'});
     await page.evaluate(()=>{location.hash='/settings?tab=employees';});

@@ -10,6 +10,7 @@ import {
   loadInventoryMeta,
   loadInventoryRevision,
   loadInventoryRows,
+  InventoryMetaError,
   UnauthorizedError,
 } from "../api/inventoryApi";
 
@@ -17,6 +18,7 @@ import type {
   InventoryMeta,
   InventoryRow,
 } from "../types/inventory";
+import { DEFAULT_INVENTORY_META } from "../utils/defaultInventoryMeta";
 
 
 type UseInventoryDataOptions = {
@@ -162,26 +164,23 @@ export default function useInventoryData({
 
             try {
               if (includeMeta) {
-                const [
-                  rows,
-                  metadata,
-                ] = await Promise.all([
+                const [rowResult, metadataResult] = await Promise.allSettled([
                   loadInventoryRows(),
                   loadInventoryMeta(),
                 ]);
-
-                setInventory(
-                  rows,
-                );
-
-                setMeta(
-                  metadata,
-                );
-
-                if (interactive) {
-                  onStatus(
-                    `${rows.length} Inventareinträge geladen.`,
-                  );
+                if (rowResult.status === "rejected") throw rowResult.reason;
+                if (metadataResult.status === "rejected") {
+                  const error = metadataResult.reason;
+                  // Never mask an authentication/authorization failure.
+                  if (!(error instanceof InventoryMetaError) || !error.allowsDefaultColumns) throw error;
+                  setInventory(rowResult.value);
+                  setMeta(current => current ?? DEFAULT_INVENTORY_META);
+                  console.warn("Standardspalten wegen fehlender Tabelleninformationen:", error);
+                  if (interactive) onStatus(`${rowResult.value.length} Inventareinträge geladen. Tabellenansicht mit Standardspalten.`);
+                } else {
+                  setInventory(rowResult.value);
+                  setMeta(metadataResult.value);
+                  if (interactive) onStatus(`${rowResult.value.length} Inventareinträge geladen.`);
                 }
 
               } else {

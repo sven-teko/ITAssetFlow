@@ -9,9 +9,51 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from test_update import FakeClient
 from infrastructure.asset_repository import AssetRepository
 from web_backend.settings_routes import SettingsService
+from postgrest.exceptions import APIError
+
+
+class AccessSchemaClient(FakeClient):
+    def __init__(self, error):
+        super().__init__({'sites': [{'id': 1, 'name': 'Basel'}], 'employees': []})
+        self.error = error
+
+    def table(self, name):
+        if name != 'employee_site_access':
+            return super().table(name)
+        query = Mock()
+        query.select.return_value = query
+        query.order.return_value = query
+        query.execute.side_effect = self.error
+        return query
 
 
 class SitePermissionTests(unittest.TestCase):
+    def test_missing_access_table_keeps_other_settings_available(self):
+        for code, message in [('PGRST205', "Could not find the table 'public.employee_site_access' in the schema cache"),
+                              ('42P01', 'relation "public.employee_site_access" does not exist')]:
+            with self.subTest(code=code):
+                client = AccessSchemaClient(APIError({'code': code, 'message': message, 'hint': None, 'details': None}))
+                data = SettingsService(client).load()
+                self.assertFalse(data['site_permissions_available'])
+                self.assertEqual(data['sites'][0]['name'], 'Basel')
+                self.assertEqual(client.writes, [])
+
+    def test_missing_access_schema_rejects_permission_changes_before_writing(self):
+        client = AccessSchemaClient(APIError({'code': 'PGRST205', 'message': "Could not find the table 'public.employee_site_access' in the schema cache", 'hint': None, 'details': None}))
+        with self.assertRaisesRegex(ValueError, 'noch nicht aktiviert'):
+            SettingsService(client).save({'employees': [{'first_name': 'Test', 'last_name': 'User', 'allowed_site_refs': []}]})
+        self.assertEqual(client.writes, [])
+        # Ordinary settings do not attempt to invent or save site permissions.
+        SettingsService(client).save({'employees': [{'first_name': 'Test', 'last_name': 'User'}]})
+        self.assertEqual(client.writes[0][0:2], ('employees', 'insert'))
+
+    def test_unrelated_database_errors_are_not_swallowed(self):
+        for code, message in [('42501', 'permission denied for table employee_site_access'),
+                              ('PGRST205', "Could not find the table 'public.other_table' in the schema cache")]:
+            client = AccessSchemaClient(APIError({'code': code, 'message': message, 'hint': None, 'details': None}))
+            with self.assertRaises(APIError):
+                SettingsService(client).load()
+
     def test_load_keeps_empty_selection_and_admin_full_access(self):
         client = FakeClient({'sites': [{'id': 1, 'name': 'Basel'}, {'id': 2, 'name': 'Allschwil'}],
             'employees': [{'id': 1, 'app_role': 'admin'}, {'id': 2, 'app_role': 'user'}, {'id': 3, 'app_role': 'viewer'}],
@@ -72,6 +114,23 @@ class SitePermissionTests(unittest.TestCase):
                     app.dependency_overrides[get_web_session] = lambda role=role: WebSession(client, 'test@example.test', role)
                     self.assertEqual(http.get('/api/settings').status_code, 403)
                     self.assertEqual(http.put('/api/settings', json={'employees': []}).status_code, 403)
+            self.assertEqual(client.writes, [])
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_settings_and_table_metadata_load_without_site_migration(self):
+        from fastapi.testclient import TestClient
+        from web_backend.app import app, get_web_session, WebSession
+        client = AccessSchemaClient(APIError({'code': 'PGRST205', 'message': "Could not find the table 'public.employee_site_access' in the schema cache", 'hint': None, 'details': None}))
+        try:
+            app.dependency_overrides[get_web_session] = lambda: WebSession(client, 'admin@example.test', 'admin')
+            with TestClient(app) as http:
+                settings = http.get('/api/settings')
+                self.assertEqual(settings.status_code, 200)
+                self.assertFalse(settings.json()['site_permissions_available'])
+                metadata = http.get('/api/inventory/meta')
+                self.assertEqual(metadata.status_code, 200)
+                self.assertTrue(metadata.json()['column_order'])
             self.assertEqual(client.writes, [])
         finally:
             app.dependency_overrides.clear()

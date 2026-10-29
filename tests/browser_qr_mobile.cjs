@@ -28,6 +28,7 @@ const run = (async () => {
     };
     const location = { id: 11, storage_location_name: 'Lager', site_name: 'Basel', department_name: 'IT' };
     const data = {
+      site_permissions_available:true,
       sites: [{ id: 1, name: 'Basel', organization_id: 1 }],
       departments: [{ id: 10, name: 'IT', site_id: 1, organization_id: 1 }],
       storage_locations: [{ id: 11, name: 'Lager', site_id: 1, department_id: 10, is_active: true, location_type: 'warehouse' }],

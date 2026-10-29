@@ -14,6 +14,19 @@ from inventory import (
 )
 
 
+SITE_ACCESS_SETUP_MESSAGE = "Standortberechtigungen sind noch nicht aktiviert. Die Standortmigration muss zuerst in der Datenbank eingespielt werden."
+
+
+def _missing_site_access_table(error: Exception) -> bool:
+    code = str(getattr(error, "code", ""))
+    message = str(getattr(error, "message", "") or error)
+    if code == "PGRST205":
+        return bool(re.search(r"Could not find the table ['\"](?:public\.)?employee_site_access['\"]", message, re.IGNORECASE))
+    if code == "42P01":
+        return bool(re.search(r"relation ['\"](?:public\.)?employee_site_access['\"] does not exist", message, re.IGNORECASE))
+    return False
+
+
 class SettingsService:
     """Supabase-Zugriffe für Datei > Einstellungen.
 
@@ -27,7 +40,7 @@ class SettingsService:
         self.client = client
         self.actor_email = actor_email.strip().casefold()
 
-    def load(self) -> dict[str, list[dict[str, Any]]]:
+    def load(self) -> dict[str, Any]:
         data = {
             "sites": self._load_rows(
                 "sites",
@@ -65,12 +78,22 @@ class SettingsService:
                 "id,name",
             ),
         }
-        access = self._load_rows("employee_site_access", "employee_id,site_id", order_column="site_id")
+        access, available = self._load_site_access()
+        data["site_permissions_available"] = available
         for employee in data["employees"]:
             employee["allowed_site_ids"] = [site["id"] for site in data["sites"]] if employee.get("app_role") == "admin" else [
                 row["site_id"] for row in access if row["employee_id"] == employee["id"]
             ]
         return data
+
+    def _load_site_access(self) -> tuple[list[dict[str, Any]], bool]:
+        try:
+            return self._load_rows("employee_site_access", "employee_id,site_id", order_column="site_id"), True
+        except Exception as error:
+            if not _missing_site_access_table(error):
+                raise
+            # Keep unrelated settings usable without pretending site rules exist.
+            return [], False
 
     def save(self, payload: dict[str, Any]) -> dict[str, bool]:
         if not isinstance(payload, dict):
@@ -110,6 +133,9 @@ class SettingsService:
         employees = payload.get("employees")
         if not isinstance(employees, list) or not any("allowed_site_refs" in row for row in employees if isinstance(row, dict)):
             return
+        _, available = self._load_site_access()
+        if not available:
+            raise ValueError(SITE_ACCESS_SETUP_MESSAGE)
         known = {f"id:{row['id']}" for row in self._load_rows("sites", "id,name")}
         known.update(str(row.get("client_key")) for row in payload.get("sites", []) if isinstance(row, dict) and row.get("client_key"))
         for employee in employees:
