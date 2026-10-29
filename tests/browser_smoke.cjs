@@ -7,10 +7,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 const run = (async () => {
-  const vite = process.env.START_VITE ? await (await import(require.resolve('vite', {
+  const vite = process.env.START_PREVIEW ? await (await import(require.resolve('vite', {paths:[path.resolve(__dirname,'../web')]}))).preview({root:path.resolve(__dirname,'../web'),preview:{host:'127.0.0.1',port:5173,strictPort:true}}) : process.env.START_VITE ? await (await import(require.resolve('vite', {
     paths:[path.resolve(__dirname,'../web')],
   }))).createServer({root:path.resolve(__dirname,'../web'),server:{host:'127.0.0.1',port:5173}}) : null;
-  if(vite) await vite.listen();
+  if(vite && !process.env.START_PREVIEW) await vite.listen();
   const browser = await chromium.launch({
     headless: true,
     ...(process.env.CHROMIUM_EXECUTABLE ? { executablePath: process.env.CHROMIUM_EXECUTABLE,

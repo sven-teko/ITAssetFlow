@@ -9,6 +9,7 @@ from supabase import Client
 
 from infrastructure.date_validation import normalize_inventory_dates
 from infrastructure.qr_service import QrService, normalize_qr_code
+from infrastructure.scanner_codes import code_values
 
 from inventory import (
     get_asset_identifier,
@@ -228,7 +229,7 @@ class AssetRepository:
             required=True,
             select_expression=(
                 "id,manufacturer_id,category_id,name,part_number,"
-                "specifications,tracking_mode,is_active,sku,unit_code"
+                "specifications,tracking_mode,is_active,sku,unit_code,qr_code,ean"
             ),
         )
         sites = self._load_rows(
@@ -327,7 +328,7 @@ class AssetRepository:
                 .select(
                     "id,product_model_id,asset_tag,serial_number,purchase_date,"
                     "new_price,warranty_until,note,retired_at,status,"
-                    "specifications,condition"
+                    "specifications,condition,qr_code,ean"
                 )
                 .eq("id", asset_id)
                 .limit(1)
@@ -508,6 +509,16 @@ class AssetRepository:
             raise ValueError("Ungültige Daten für den Inventareintrag.")
 
         payload = normalize_inventory_dates(payload)
+        if "scanner_codes" in payload:
+            if not isinstance(payload["scanner_codes"], dict):
+                raise ValueError("Ungültige Scanner-Kennungen.")
+            scanner_codes = code_values(payload["scanner_codes"])
+        else:
+            scanner_codes = {}
+        if isinstance(payload.get("asset"), dict):
+            payload["asset"] = {**payload["asset"], **scanner_codes}
+            code_values(payload["asset"])
+
 
         edit = payload.get("edit")
         if not isinstance(edit, dict):
@@ -589,6 +600,7 @@ class AssetRepository:
                 "asset_tag": result.get("asset_tag"),
             }
 
+        QrService(self.client).save_model_codes(model_id, scanner_codes)
         result = self._update_stock_level(
             original=edit,
             model_id=model_id,
@@ -617,6 +629,16 @@ class AssetRepository:
             raise ValueError("Ungültige Daten für den neuen Inventareintrag.")
 
         payload = normalize_inventory_dates(payload)
+        if "scanner_codes" in payload:
+            if not isinstance(payload["scanner_codes"], dict):
+                raise ValueError("Ungültige Scanner-Kennungen.")
+            scanner_codes = code_values(payload["scanner_codes"])
+        else:
+            scanner_codes = {}
+        if isinstance(payload.get("asset"), dict):
+            payload["asset"] = {**payload["asset"], **scanner_codes}
+            code_values(payload["asset"])
+
 
         created_model_id: Any | None = None
         created_manufacturer_id: Any | None = None
@@ -712,6 +734,7 @@ class AssetRepository:
                     raise ValueError("Die Bestandsmenge muss grösser als 0 sein.") from error
                 QrService(self.client).bind_model_code(model_id, qr_code)
 
+            QrService(self.client).save_model_codes(model_id, scanner_codes, only_empty=True)
             result = self._create_stock_receipt(
                 model_id=model_id,
                 condition=condition,
@@ -916,6 +939,7 @@ class AssetRepository:
         row = {
             "product_model_id": model_id,
             "asset_tag": asset_tag,
+            **code_values(asset_data),
             "serial_number": self._none_if_blank(asset_data.get("serial_number")),
             "purchase_date": asset_data.get("purchase_date"),
             "new_price": asset_data.get("new_price") or 0,
@@ -1081,6 +1105,7 @@ class AssetRepository:
         row = {
             "product_model_id": model_id,
             "asset_tag": asset_tag,
+            **code_values(asset_data),
             "serial_number": self._none_if_blank(
                 asset_data.get("serial_number")
             ),

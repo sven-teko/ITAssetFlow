@@ -33,19 +33,19 @@ export default function useInventoryActions({
   const [transferBusy, setTransferBusy] = useState(false);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function deleteEntries(): Promise<void> {
-    if (selectedRows.length === 0 || dataLoading || deleteBusy) {
+  async function deleteEntries(rows: InventoryRow[] = selectedRows): Promise<void> {
+    if (rows.length === 0 || dataLoading || deleteBusy) {
       return;
     }
 
-    const identifiers = selectedRows.slice(0, 8).map(getIdentifier);
+    const identifiers = rows.slice(0, 8).map(getIdentifier);
     const preview = identifiers.map((identifier) => `• ${identifier}`).join("\n");
-    const moreCount = Math.max(0, selectedRows.length - identifiers.length);
+    const moreCount = Math.max(0, rows.length - identifiers.length);
 
     const message =
-      selectedRows.length === 1
+      rows.length === 1
         ? `Soll dieser Inventareintrag wirklich gelöscht werden?\n\n${preview}`
-        : `Sollen diese ${selectedRows.length} Inventareinträge wirklich gelöscht werden?\n\n`
+        : `Sollen diese ${rows.length} Inventareinträge wirklich gelöscht werden?\n\n`
           + preview
           + (moreCount > 0 ? `\n• … und ${moreCount} weitere` : "");
 
@@ -55,14 +55,14 @@ export default function useInventoryActions({
 
     setDeleteBusy(true);
     onStatus(
-      selectedRows.length === 1
+      rows.length === 1
         ? "Inventareintrag wird gelöscht ..."
-        : `${selectedRows.length} Inventareinträge werden gelöscht ...`,
+        : `${rows.length} Inventareinträge werden gelöscht ...`,
     );
 
     try {
-      const result = await deleteInventoryEntries(selectedRows.map(getRowKey));
-      const deletedCount = Number(result.deleted_count ?? selectedRows.length);
+      const result = await deleteInventoryEntries(rows.map(getRowKey));
+      const deletedCount = Number(result.deleted_count ?? rows.length);
 
       clearSelection();
       await reload();

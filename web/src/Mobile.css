@@ -19,9 +19,9 @@
 .asset-form-qr-notice { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; padding: 12px; background: #edf4fb; border: 1px solid #c6d9ef; border-radius: 6px; overflow-wrap: anywhere; }
 .asset-form-qr-notice span { color: #526171; font-size: 13px; }
 
-@media (max-width: 720px) {
+@media (max-width: 720px) and (orientation: portrait) and (pointer: coarse) {
   html, body, #root { height: 100dvh; }
-  .main-window { height: 100dvh; grid-template-rows: 50px auto minmax(0, 1fr) auto; }
+  .main-window.mobile-portrait { height: 100dvh; grid-template-rows: 50px auto minmax(0, 1fr) auto; }
   button, input, select, textarea { touch-action: manipulation; }
   .menu-bar { padding: 2px 4px; }
   .menu-brand { padding: 0 5px 0 2px; margin-right: 2px; border-right: 0; }
@@ -30,40 +30,40 @@
   .top-menu-button, .menu-logout-button { min-height: 44px; padding: 0 8px; font-size: 13px; }
   .menu-popup { max-width: calc(100vw - 16px); }
   .menu-item { min-height: 42px; }
-  .mobile-inventory-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #d8dde3; background: #fff; }
-  .mobile-inventory-toolbar > div { display: flex; gap: 2px; min-width: 0; }
-  .mobile-inventory-toolbar button { min-height: 44px; min-width: 0; padding: 0 8px; font-size: 13px; }
-  .mobile-inventory-toolbar > div button { flex: 1; border: 0; background: #f1f4f7; }
-  .mobile-inventory-toolbar button[aria-pressed="true"] { color: #205c9d; background: #e2eefb; font-weight: 600; }
-  .workspace { display: block; overflow: hidden; }
-  .workspace .dock-shell, .workspace .inventory-area { display: none; width: 100%; min-width: 0; height: 100%; max-height: none; }
-  .workspace[data-mobile-view="inventory"] .inventory-area { display: flex; padding: 12px 10px 4px; }
-  .workspace[data-mobile-view="navigation"] .dock-navigation-shell,
-  .workspace[data-mobile-view="detail"] .dock-detail-shell { display: flex; }
-  .workspace .navigation, .workspace .details { display: flex; width: 100%; min-width: 0; max-height: none; }
-  .workspace .dock-title { cursor: default; touch-action: auto; }
-  .workspace .dock-title::after { content: none; }
-  .navigation-content { padding: 12px; gap: 12px; }
-  .navigation-content > input, .navigation-content button { min-height: 44px; font-size: 16px; }
-  .sidebar-filter-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-  .sidebar-filter-list > :last-child { grid-column: 1 / -1; }
-  .filter-dropdown { min-width: 0; }
+  .mobile-portrait .mobile-inventory-toolbar { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #d8dde3; background: #fff; }
+  .mobile-portrait .mobile-inventory-toolbar > div { display: flex; gap: 2px; min-width: 0; }
+  .mobile-portrait .mobile-inventory-toolbar button { min-height: 44px; min-width: 0; padding: 0 8px; font-size: 13px; }
+  .mobile-portrait .mobile-inventory-toolbar > div button { flex: 1; border: 0; background: #f1f4f7; }
+  .mobile-portrait .mobile-inventory-toolbar button[aria-selected="true"] { color: #205c9d; background: #e2eefb; font-weight: 600; }
+  .mobile-portrait .workspace { display: block; overflow: hidden; }
+  .mobile-portrait .workspace .dock-shell, .mobile-portrait .workspace .inventory-area { display: none; width: 100%; min-width: 0; height: 100%; max-height: none; }
+  .mobile-portrait .workspace[data-mobile-view="inventory"] .inventory-area { display: flex; padding: 12px 10px 4px; }
+  .mobile-portrait .workspace[data-mobile-view="navigation"] .dock-navigation-shell,
+  .mobile-portrait .workspace[data-mobile-view="detail"] .dock-detail-shell { display: flex; }
+  .mobile-portrait .workspace .navigation, .mobile-portrait .workspace .details { display: flex; width: 100%; min-width: 0; max-height: none; }
+  .mobile-portrait .workspace .dock-title { cursor: default; touch-action: auto; }
+  .mobile-portrait .workspace .dock-title::after { content: none; }
+  .mobile-portrait .navigation-content { padding: 12px; gap: 12px; }
+  .mobile-portrait .navigation-content > input, .navigation-content button { min-height: 44px; font-size: 16px; }
+  .mobile-portrait .sidebar-filter-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+  .mobile-portrait .sidebar-filter-list > :last-child { grid-column: 1 / -1; }
+  .mobile-portrait .filter-dropdown { min-width: 0; }
   .filter-dropdown-button { width: 100%; padding: 0 10px; }
   .filter-dropdown-menu { min-width: min(240px, calc(100vw - 28px)); max-width: calc(100vw - 28px); z-index: 100; }
-  .filter-dropdown:nth-child(even) .filter-dropdown-menu { left: auto; right: 0; }
-  .filter-option { min-height: 44px; }
-  .sidebar-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-  .sidebar-actions > label, .sidebar-product-models-button { grid-column: 1 / -1; }
-  .page-header { flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .page-header h1 { font-size: 21px; }
-  .inventory-header-actions { flex: 1; gap: 8px; justify-content: space-between; }
-  .inventory-header-actions > span { font-size: 12px; }
-  .inventory-header-actions button { min-height: 40px; font-size: 13px; }
-  .desktop-qr-button { display: none; }
-  .inventory-status { font-size: 11px; min-height: 22px; }
-  .status-bar { min-height: 24px; font-size: 11px; padding-bottom: max(3px, env(safe-area-inset-bottom)); }
-  .status-user { overflow: hidden; text-overflow: ellipsis; max-width: 58%; }
-  .details-content { padding: 16px; overflow-x: hidden; }
+  .mobile-portrait .filter-dropdown:nth-child(even) .filter-dropdown-menu { left: auto; right: 0; }
+  .mobile-portrait .filter-option { min-height: 44px; }
+  .mobile-portrait .sidebar-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+  .mobile-portrait .sidebar-actions > label, .sidebar-product-models-button { grid-column: 1 / -1; }
+  .mobile-portrait .page-header { flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .mobile-portrait .page-header h1 { font-size: 21px; }
+  .mobile-portrait .inventory-header-actions { flex: 1; gap: 8px; justify-content: space-between; }
+  .mobile-portrait .inventory-header-actions > span { font-size: 12px; }
+  .mobile-portrait .inventory-header-actions button { min-height: 40px; font-size: 13px; }
+  .mobile-portrait .desktop-qr-button { display: none; }
+  .mobile-portrait .inventory-status { font-size: 11px; min-height: 22px; }
+  .mobile-portrait .status-bar { min-height: 24px; font-size: 11px; padding-bottom: max(3px, env(safe-area-inset-bottom)); }
+  .mobile-portrait .status-user { overflow: hidden; text-overflow: ellipsis; max-width: 58%; }
+  .mobile-portrait .details-content { padding: 16px; overflow-x: hidden; }
   .inventory-load-error { flex-wrap: wrap; font-size: 14px; }
   .login-window { max-width: calc(100vw - 24px); }
   .login-page input, .login-page button { font-size: 16px; min-height: 44px; }
@@ -85,3 +85,14 @@
   .settings-footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
   .settings-message { max-height: 120px; overflow: auto; }
 }
+
+.mobile-portrait [role="tablist"] { touch-action: pan-y; }
+.mobile-portrait .workspace [role="tabpanel"] { animation: mobile-panel-in 140ms ease-out; }
+@keyframes mobile-panel-in { from { opacity: .6; transform: translateX(8px); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .mobile-portrait .workspace [role="tabpanel"] { animation: none; } }
+.entry-context-menu { position: fixed; z-index: 1000; width: 224px; padding: 5px; border: 1px solid #cbd3dd; border-radius: 7px; background: white; box-shadow: 0 7px 24px #18283b30; }
+.entry-context-menu button { display: block; width: 100%; min-height: 44px; padding: 9px 12px; text-align: left; border: 0; border-radius: 4px; background: transparent; }
+.entry-context-menu button:hover, .entry-context-menu button:focus { background: #edf4fb; outline: 2px solid #c6d9ef; }
+.entry-context-menu button:last-child { color: #9b3333; }
+.entry-context-menu button[aria-disabled="true"] { opacity: .45; cursor: default; }
+.inventory-table tbody tr { -webkit-touch-callout: none; }

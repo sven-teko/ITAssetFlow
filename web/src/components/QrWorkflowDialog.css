@@ -13,7 +13,7 @@
 .qr-video-wrap { display: none; position: relative; margin-top: 15px; border-radius: 8px; overflow: hidden; background: #14202b; }
 .qr-video-wrap.active { display: block; }
 .qr-video-wrap video { width: 100%; height: min(40dvh, 340px); object-fit: contain; display: block; }
-.qr-scan-frame { position: absolute; width: 58%; aspect-ratio: 1; max-height: 85%; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 2px solid #fff; border-radius: 12px; box-shadow: 0 0 0 200px #0002; pointer-events: none; }
+.qr-scan-frame { position: absolute; width: 85%; aspect-ratio: 1.7; max-height: 85%; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 2px solid #fff; border-radius: 12px; box-shadow: 0 0 0 200px #0002; pointer-events: none; }
 .qr-hint { color: #66717c; font-size: 13px; line-height: 1.5; }
 .qr-code-form { margin-top: 18px; }
 .qr-code-form > div { display: flex; gap: 8px; margin-top: 6px; }

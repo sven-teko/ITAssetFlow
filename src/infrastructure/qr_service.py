@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from supabase import Client
+from infrastructure.scanner_codes import normalize_ean, code_values
 
 
 def normalize_qr_code(value: Any) -> str:
@@ -38,8 +39,10 @@ class QrService:
         # ilike benötigt maskierte Platzhalter; zusätzlich exakt vergleichen.
         escaped = code.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_").replace("*", r"\*")
         found = {}
-        for field in ("sku", "part_number"):
-            response = self.client.table("product_models").select("id,name,sku,part_number,tracking_mode,is_active").ilike(field, escaped).limit(100).execute()
+        for field in ("qr_code", "ean", "sku", "part_number"):
+            query = self.client.table("product_models").select("id,name,sku,part_number,qr_code,ean,tracking_mode,is_active")
+            query = query.eq(field, code) if field in {"qr_code", "ean"} else query.ilike(field, escaped)
+            response = query.limit(100).execute()
             for row in self._data(response):
                 if str(row.get(field) or "").strip().casefold() == code.casefold():
                     found[row["id"]] = row
@@ -47,16 +50,29 @@ class QrService:
 
     def _assets_for_code(self, code: str) -> list[dict[str, Any]]:
         found = {}
-        for field in ("asset_tag", "serial_number"):
-            response = self.client.table("assets").select("id,asset_tag,serial_number,product_model_id,condition,status").eq(field, code).execute()
+        for field in ("qr_code", "ean", "asset_tag", "serial_number"):
+            response = self.client.table("assets").select("id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status").eq(field, code).execute()
             for row in self._data(response):
                 found[row["id"]] = row
         return list(found.values())
 
-    def lookup(self, value: Any) -> dict[str, Any]:
+    def lookup(self, value: Any, code_type: str = "auto") -> dict[str, Any]:
         code = normalize_qr_code(value)
+        if code_type not in {"auto", "qr", "ean"}:
+            raise ValueError("Unbekannte Codeart.")
+        if code_type == "ean":
+            normalize_ean(code)
         assets = self._assets_for_code(code)
         matched_models = self._models_for_code(code)
+        # Eine EAN kann mehrere Einzelgeräte desselben Modells bezeichnen.
+        seen_assets = {row["id"] for row in assets}
+        for model in matched_models:
+            if model.get("tracking_mode") in {"serialized", "hybrid"}:
+                response = self.client.table("assets").select("id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status").eq("product_model_id", model["id"]).execute()
+                for asset in self._data(response):
+                    if asset["id"] not in seen_assets:
+                        assets.append(asset)
+                        seen_assets.add(asset["id"])
         model_ids = set(row["product_model_id"] for row in assets) | set(row["id"] for row in matched_models)
         models = {}
         if model_ids:
@@ -100,7 +116,26 @@ class QrService:
                     "quantity": float(level["quantity"] or 0)})
 
         active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations if row.get("is_active") is True and row.get("department_id") is not None]
-        return {"code": code, "matches": matches, "locations": active_locations}
+        return {"code": code, "code_type": code_type, "matches": matches, "locations": active_locations}
+
+    def save_model_codes(self, model_id: Any, values: dict[str, Any], *, only_empty: bool = False) -> None:
+        changes = code_values(values)
+        if not changes:
+            return
+        rows = self._data(self.client.table("product_models").select("id,qr_code,ean").eq("id", model_id).limit(1).execute())
+        if not rows:
+            raise ValueError("Das Produktmodell existiert nicht mehr.")
+        current = rows[0]
+        changes = {key: value for key, value in changes.items() if value != current.get(key)}
+        if only_empty and any(current.get(key) for key in changes):
+            raise ValueError("Dieses Modell hat bereits einen anderen Code. Bitte die Kennungen unter Produktmodelle bearbeiten.")
+        if not changes:
+            return
+        query = self.client.table("product_models").update(changes).eq("id", model_id)
+        for key in changes:
+            query = query.is_(key, "null") if current.get(key) is None else query.eq(key, current[key])
+        if not self._data(query.execute()):
+            raise ValueError("Die Kennungen wurden gleichzeitig geändert. Bitte die Seite neu laden.")
 
     def bind_model_code(self, model_id: Any, value: Any) -> None:
         code = normalize_qr_code(value)
@@ -137,7 +172,7 @@ class QrService:
             raise ValueError("Ungültige Buchungsart oder ungültiger Zustand.")
         models = self._models_for_code(code)
         if not any(row["id"] == model_id and row.get("tracking_mode") in {"quantity", "hybrid"} and row.get("is_active") is not False for row in models):
-            raise ValueError("QR-Code und Mengenartikel stimmen nicht überein. Bitte erneut scannen.")
+            raise ValueError("Code und Mengenartikel stimmen nicht überein. Bitte erneut scannen.")
         locations = self._data(self.client.table("storage_locations").select("id,department_id,is_active").eq("id", location_id).limit(1).execute())
         if not locations or not locations[0].get("is_active") or locations[0].get("department_id") is None:
             raise ValueError("Bitte einen aktiven Lagerort mit Abteilung auswählen.")
@@ -164,7 +199,7 @@ class QrService:
             "department_id": locations[0]["department_id"], "performed_by_employee_id": employees[0]["id"],
             "purchase_date": metadata.get("purchase_date") or date.today().isoformat(),
             "new_price": metadata.get("new_price") or 0, "status": metadata.get("status") or "available",
-            "reference": f"QR:{uuid4()}", "note": f"QR-{'Zugang' if incoming else 'Abgang'}: {code}",
+            "reference": f"SCAN:{uuid4()}", "note": f"Scanner-{'Zugang' if incoming else 'Abgang'}: {code}",
         }
         # Eine einzige INSERT-Buchung. Der vorhandene DB-Trigger
         # prevent_negative_stock serialisiert konkurrierende Bestandsänderungen.

@@ -5,19 +5,19 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || require.resolve('playwright', { paths: [path.resolve(__dirname, '../web')] }));
 const run = (async () => {
-  const vite = process.env.START_VITE ? await (await import(require.resolve('vite', { paths: [path.resolve(__dirname, '../web')] })))
+  const vite = process.env.START_PREVIEW ? await (await import(require.resolve('vite', {paths:[path.resolve(__dirname,'../web')]}))).preview({root:path.resolve(__dirname,'../web'),preview:{host:'127.0.0.1',port:5173,strictPort:true}}) : process.env.START_VITE ? await (await import(require.resolve('vite', { paths: [path.resolve(__dirname, '../web')] })))
     .createServer({ root: path.resolve(__dirname, '../web'), server: { host: '127.0.0.1', port: 5173 } }) : null;
-  if (vite) await vite.listen();
+  if (vite && !process.env.START_PREVIEW) await vite.listen();
   const browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_EXECUTABLE ? {
     executablePath: process.env.CHROMIUM_EXECUTABLE,
     args: ['--no-sandbox', '--disable-dev-shm-usage', '--no-zygote', '--single-process', '--autoplay-policy=no-user-gesture-required'],
   } : {}) });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, hasTouch: true });
     page.setDefaultTimeout(10000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin';
+    let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
       default_visible_columns: ['asset_tag', 'product_model_name', 'status', 'site_name'],
@@ -40,7 +40,7 @@ const run = (async () => {
       { id: 1, _record_type: 'asset', asset_tag: 'PC-001', product_model_name: 'TestBook', status: 'available', condition: 'used', site_name: 'Basel', department_name: 'IT', storage_location: 'Lager', _web_inventory_group: 'device', _web_category_key: 'laptop', _web_condition_key: 'used' },
       { id: 2, _record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', product_category_name: 'Kabel', storage_location_id: 11, stock_quantity: stock, status: 'available', condition: 'new', site_name: 'Basel', department_name: 'IT', storage_location: 'Lager', _web_inventory_group: 'material', _web_category_key: 'cable', _web_condition_key: 'new' },
     ];
-    await page.route(url => url.pathname.startsWith('/api/'), async route => {
+    const handleApi = async route => {
       const req = route.request(), url = new URL(req.url()), endpoint = url.pathname;
       const headers = { 'Access-Control-Allow-Origin': new URL(process.env.UI_BASE_URL || 'http://127.0.0.1:5173').origin, 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS' };
       const json = (body, status = 200) => route.fulfill({ status, headers, contentType: 'application/json', body: JSON.stringify(body) });
@@ -62,30 +62,32 @@ const run = (async () => {
         if (req.method() === 'POST') { lastAsset = req.postDataJSON(); return json({ id: 3, entry_type: 'asset' }); }
         return json(inventory());
       }
-      if (endpoint === '/api/qr/lookup') {
-        const code = url.searchParams.get('code');
-        const matches = code === 'QR-CABLE' ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
-          : code === 'PC-001' ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
-        return json({ code, matches, locations: [location] });
+      if (endpoint === '/api/scanner/lookup') {
+        const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
+        const matches = (code === 'QR-CABLE' || code === '4006381333931') ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
+          : (code === 'PC-001' || code === '96385074') ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
+        return json({ code, matches: code === '96385074' ? [...matches, {...matches[0], key:'asset:2', id:2, asset_tag:'PC-002'}] : matches, locations: [location] });
       }
-      if (endpoint === '/api/qr/stock') {
+      if (endpoint === '/api/scanner/stock') {
         const payload = req.postDataJSON(); bookings.push(payload);
         if (uncertain) { uncertain = false; return route.abort('failed'); }
         if (malformed) { malformed = false; return json({}); }
         stock += payload.direction === 'add' ? payload.quantity : -payload.quantity;
         return json({ saved: true, quantity: stock, changed_quantity: payload.quantity });
       }
+      if (endpoint === '/api/inventory/delete') { deletedKeys = req.postDataJSON().entry_keys; return json({deleted_count: deletedKeys.length}); }
       return json({ detail: `Unbekannter Test-Endpunkt ${endpoint}` }, 404);
-    });
+    };
+    await page.route(url => url.pathname.startsWith('/api/'), handleApi);
     const openQr = async () => {
-      await page.getByRole('button', { name: /^(QR-Code einlesen|QR scannen)$/ }).filter({ visible: true }).click();
-      await page.getByRole('dialog', { name: 'QR-Code einlesen' }).waitFor();
+      await page.getByRole('button', { name: /^Scanner$/ }).filter({ visible: true }).click();
+      await page.getByRole('dialog', { name: 'Scanner' }).waitFor();
     };
     const lookup = async code => {
-      await page.getByLabel('Artikelkennung / QR-Code', { exact: true }).fill(code);
+      await page.getByLabel('QR-Code / EAN / Artikelkennung', { exact: true }).fill(code);
       await page.getByRole('button', { name: 'Prüfen', exact: true }).click();
     };
-    const closeQr = () => page.getByRole('button', { name: 'QR-Dialog schliessen' }).click();
+    const closeQr = () => page.getByRole('button', { name: 'Scanner schliessen' }).click();
     const screenshot = async name => {
       if (process.env.SCREENSHOT_DIR) {
         fs.mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true });
@@ -148,19 +150,19 @@ const run = (async () => {
     assert.equal(await page.locator('.asset-form-qr-notice').textContent().then(text => text.includes('QR-NEU-42')), true);
     const row = label => page.locator('.asset-form-row').filter({ has: page.locator('label').filter({ hasText: label }) });
     assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(), 'QR-NEU-42');
-    assert.equal(await row(/^Produkterkennung \*:/).locator('input').getAttribute('readonly'), '');
+    assert.equal(await row(/^Produkterkennung \*:/).locator('input').getAttribute('readonly'), null);
     await row(/^Standort \*:/).locator('select').selectOption('1');
     await row(/^Abteilung \*:/).locator('select').selectOption('10');
     await row(/^Lagerort \*:/).locator('select').selectOption('11');
     await page.getByLabel('Kaufdatum *:', { exact: true }).fill('2026-10-22');
     await page.getByRole('button', { name: /speichern/i }).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
-    assert.equal(lastAsset.qr_code, 'QR-NEU-42');
+    assert.equal(lastAsset.scanner_codes.qr_code, 'QR-NEU-42');
     assert.equal(lastAsset.asset.asset_tag, 'QR-NEU-42');
     console.log('PASS: Unbekannter Code öffnet neuen Artikel und bleibt beim Speichern zugeordnet');
 
     await openQr();
-    await page.getByLabel('QR-Bild öffnen', { exact: true }).setInputFiles(path.join(__dirname, 'fixtures/QR-CABLE.png'));
+    await page.getByLabel('Code-Bild öffnen', { exact: true }).setInputFiles(path.join(__dirname, 'fixtures/QR-CABLE.png'));
     await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
     assert.match(await page.locator('.qr-stock-balance').textContent(), /5 Stück/);
     await page.getByLabel('Menge [Stück]', { exact: true }).fill('2');
@@ -202,7 +204,7 @@ const run = (async () => {
       window.testStreams = [];
       navigator.mediaDevices.getUserMedia = async constraints => {
         window.testCameraConstraints = constraints;
-        const image = new Image(); image.src = dataUrl; await image.decode();
+        const image = new Image(); image.src = window.testCodeImage || dataUrl; await image.decode();
         const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 480;
         const context = canvas.getContext('2d');
         const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 640, 480); context.drawImage(image, 130, 50, 380, 380); };
@@ -213,6 +215,7 @@ const run = (async () => {
         return stream;
       };
       navigator.mediaDevices.enumerateDevices = async () => [];
+      window.fakeScannerGetUserMedia = navigator.mediaDevices.getUserMedia;
     }, imageData);
     await openQr(); await page.getByRole('button', { name: 'Kamera starten', exact: true }).click();
     await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
@@ -225,12 +228,112 @@ const run = (async () => {
     await closeQr();
     console.log('PASS: Video-QR-Erkennung mit Kamerabild, Rückkamerawunsch, Freigabe der Tracks und Berechtigungsfehler');
 
+
+    const eanVideo = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/4006381333931.svg')).toString('base64');
+    await page.evaluate(dataUrl => { window.testCodeImage = dataUrl; navigator.mediaDevices.getUserMedia = window.fakeScannerGetUserMedia; }, eanVideo);
+    await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
+    await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1), {code:'4006381333931',type:'ean'});
+    assert.equal(await page.evaluate(() => window.testStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))),true);
+    await closeQr();
+    console.log('PASS: EAN-13 auch aus simuliertem Kamerabild erkannt und Kamera freigegeben');
+
+    // Gleicher Mengenartikel über EAN-13, echter Barcode-Decoder statt Textsimulation.
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/4006381333931.svg'));
+    await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1), {code:'4006381333931',type:'ean'});
+    await page.getByLabel('Menge [Stück]', {exact:true}).fill('3');
+    await page.getByRole('button',{name:'Bestand erhöhen',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Zugang von 3 Stück gespeichert.'}).waitFor();
+    assert.equal(bookings.at(-1).code,'4006381333931');
+    await closeQr();
+    // EAN-8 mit mehreren Geräten verlangt eine ausdrückliche Auswahl.
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/96385074.svg'));
+    await page.getByLabel('Gefundenen Artikel auswählen').waitFor();
+    assert.equal(await page.getByLabel('Gefundenen Artikel auswählen').inputValue(), '');
+    assert.equal(await page.getByRole('button',{name:'Gerät löschen',exact:true}).count(),0);
+    await page.getByLabel('Gefundenen Artikel auswählen').selectOption('asset:2');
+    await page.getByRole('button',{name:'Gerät bearbeiten',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1), {code:'96385074',type:'ean'});
+    await closeQr();
+    // Unbekannte EAN mit führenden Nullen bleibt getrennt von Asset-Tag und QR.
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/0012345678905.svg'));
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'0012345678905');
+    assert.equal(await page.getByLabel('QR-Code:',{exact:true}).inputValue(),'');
+    assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(),'');
+    await page.getByLabel('EAN:',{exact:true}).fill('4006381333932');
+    await row(/^Produkterkennung \*:/).locator('input').fill('PC-NEW');
+    await row(/^Standort \*:/).locator('select').selectOption('1');
+    await row(/^Abteilung \*:/).locator('select').selectOption('10');
+    await row(/^Lagerort \*:/).locator('select').selectOption('11');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.getByRole('alert').filter({hasText:'gültige EAN'}).waitFor();
+    await page.getByLabel('EAN:',{exact:true}).fill('0012345678905');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.scanner_codes.ean,'0012345678905');
+    assert.equal(lastAsset.scanner_codes.qr_code,null);
+    assert.equal(lastAsset.asset.asset_tag,'PC-NEW');
+    console.log('PASS: EAN-13, EAN-8, Mehrfachtreffer, Prüfziffer und unabhängige optionale Kennungen');
+
+    await page.locator('.inventory-table tbody tr').first().click({button:'right'});
+    await page.getByRole('menu',{name:'Eintrag',exact:true}).waitFor();
+    assert.equal(await page.getByRole('menuitem',{name:'Eintrag bearbeiten'}).count(),1);
+    await page.keyboard.press('Escape');
+    await page.locator('.inventory-table tbody tr').nth(1).click({button:'right'});
+    page.once('dialog',dialog=>dialog.accept());
+    await page.getByRole('menuitem',{name:'Eintrag löschen'}).click();
+    await page.waitForFunction(()=>!document.querySelector('.entry-context-menu'));
+    assert.ok(deletedKeys.length === 1 && deletedKeys[0].startsWith('stock:'));
+
+    // Ein schmales PC-Fenster mit Maus bleibt im normalen Layout.
+    const pc = await browser.newPage({viewport:{width:390,height:844},hasTouch:false});
+    await pc.route(url=>url.pathname.startsWith('/api/'),handleApi);
+    await pc.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173')+'/#/inventory');
+    await pc.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(await pc.getByRole('tablist',{name:'Inventarbereiche'}).count(),0);
+    assert.equal(await pc.locator('.dock-navigation-shell').isVisible(),true);
+    // Unter Chromium --single-process bleiben beide Testkontexte bis zum Testende offen.
+    console.log('PASS: Kontextmenü, Löschen nur des angeklickten Artikels und PC-Layout mit Maus');
+
     for (const width of [390, 360]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
-      await page.locator('.inventory-card').first().waitFor();
+      await page.locator('.inventory-table tbody tr').first().waitFor();
+
+      const cdp = await page.context().newCDPSession(page);
+      const swipe = async (x1,y1,x2,y2) => {
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:x1,y:y1}]});
+        for(let i=1;i<=5;i++) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x1+(x2-x1)*i/5,y:y1+(y2-y1)*i/5}]});
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      };
+      // Wischen auf der Tabellenüberschrift wechselt zum nächsten Bereich.
+      let heading=await page.locator('.inventory-status').boundingBox();
+      await swipe(width-20,heading.y+8,20,heading.y+8);
+      await page.waitForFunction(()=>document.querySelector('#mobile-tab-detail')?.getAttribute('aria-selected') === 'true');
+      const detail=await page.locator('.details-content').boundingBox();
+      await swipe(20,detail.y+70,width-20,detail.y+70);
+      await page.waitForFunction(()=>document.querySelector('#mobile-tab-inventory')?.getAttribute('aria-selected') === 'true');
+      let bounds=await page.locator('.inventory-table tbody tr').first().boundingBox();
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:Math.min(width-20,bounds.x+80),y:bounds.y+15}]});
+      await page.waitForTimeout(650);
+      await page.getByRole('menu',{name:'Eintrag',exact:true}).waitFor();
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await page.keyboard.press('Escape');
+      // Scrollbewegung bricht das lange Drücken ab.
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:80,y:bounds.y+15}]});
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:80,y:bounds.y+60}]});
+      await page.waitForTimeout(650);
+      assert.equal(await page.getByRole('menu',{name:'Eintrag',exact:true}).count(),0);
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await cdp.detach();
+
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-inventory`);
-      assert.equal(await page.locator('.inventory-table').count(), 0);
-      await page.getByRole('button', { name: 'Filter', exact: true }).click();
+      assert.equal(await page.getByRole('tab', { name: 'Tabelle', exact: true }).getAttribute('aria-selected'), 'true');
+      await page.getByRole('tab', { name: 'Filter', exact: true }).click();
       await page.getByLabel('Inventar durchsuchen', { exact: true }).waitFor();
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-filter`);
       await page.getByRole('button', { name: 'Status', exact: true }).click();
@@ -238,8 +341,9 @@ const run = (async () => {
       const popup = await page.locator('.filter-dropdown-menu').filter({ visible: true }).boundingBox();
       assert.ok(popup.x >= 0 && popup.x + popup.width <= width);
       await page.getByRole('button', { name: 'Status', exact: true }).click();
-      await page.getByRole('button', { name: 'Inventar', exact: true }).click();
-      await page.locator('.inventory-card-body').first().click();
+      await page.getByRole('tab', { name: 'Tabelle', exact: true }).click();
+      await page.locator('.inventory-table tbody tr').first().click();
+      await page.getByRole('tab', { name: 'Details', exact: true }).click();
       await page.locator('.dock-detail-shell').waitFor({ state: 'visible' });
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-details`);
       await openQr(); await lookup('QR-CABLE');
@@ -248,7 +352,7 @@ const run = (async () => {
       const dialog = await page.locator('.qr-dialog').boundingBox();
       assert.equal(dialog.x, 0); assert.equal(dialog.width, width);
       await closeQr();
-      await page.getByRole('button', { name: 'Inventar', exact: true }).click();
+      await page.getByRole('tab', { name: 'Tabelle', exact: true }).click();
       await page.getByRole('button', { name: '+ Neuer Artikel', exact: true }).click();
       await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-form`);
@@ -258,10 +362,10 @@ const run = (async () => {
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-employees`);
       await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
     }
-    console.log('PASS: Hochformat 390/360 px: Karten, Filter, Details, QR-Dialog, Artikel und Mitarbeiter');
+    console.log('PASS: Hochformat 390/360 px: Tabelle, Wischen, langes Drücken, Filter, Details, Scanner, Artikel und Mitarbeiter');
 
     role = 'viewer'; await page.reload();
-    await page.locator('.inventory-card').first().waitFor();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
     await openQr(); await lookup('QR-CABLE');
     await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);

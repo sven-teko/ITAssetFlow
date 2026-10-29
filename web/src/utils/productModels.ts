@@ -1,3 +1,5 @@
+import { validateCodes } from "./scannerCodes";
+
 export type ModelField = {
   key: string;
   label: string;
@@ -18,6 +20,8 @@ export type ProductModel = {
   category_id: string | number;
   part_number: string | null;
   sku: string | null;
+  qr_code?: string | null;
+  ean?: string | null;
   tracking_mode: string;
   unit_code: string;
   is_active: boolean;
@@ -36,6 +40,8 @@ export type ModelDraft = {
   manufacturer_id: string;
   part_number: string;
   sku: string;
+  qr_code: string;
+  ean: string;
   specifications: Record<string, string>;
 };
 
@@ -76,15 +82,18 @@ export function createModelDraft(model: ProductModel, fields: ModelField[]): Mod
     manufacturer_id: String(model.manufacturer_id ?? ""),
     part_number: model.part_number ?? "",
     sku: model.sku ?? "",
+    qr_code: model.qr_code ?? "",
+    ean: model.ean ?? "",
     specifications: Object.fromEntries(fields.map(({ key }) => [key, specificationText(model.specifications[key])])),
   };
 }
 
 export function modelChanges(model: ProductModel, fields: ModelField[], draft: ModelDraft): Record<string, unknown> {
   if (!draft.name.trim()) throw new Error("Bitte eine Modellbezeichnung eingeben.");
+  validateCodes(draft.qr_code, draft.ean);
   const original = createModelDraft(model, fields);
   const changes: Record<string, unknown> = {};
-  for (const key of ["name", "part_number", "sku"] as const) {
+  for (const key of ["name", "part_number", "sku", "qr_code", "ean"] as const) {
     if (draft[key] !== original[key]) changes[key] = draft[key].trim() || null;
   }
   if (draft.manufacturer_id !== original.manufacturer_id) {

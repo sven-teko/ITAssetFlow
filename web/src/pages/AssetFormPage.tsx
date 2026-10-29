@@ -233,6 +233,8 @@ function editableSpecifications(value: unknown): Record<string, SpecificationVal
   return result;
 }
 
+import { validateCodes } from "../utils/scannerCodes";
+
 export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) {
   const navigate = useNavigate();
   const { entryKey } = useParams<{
@@ -240,7 +242,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   }>();
   const isEditMode = Boolean(entryKey);
   const [searchParams] = useSearchParams();
-  const qrCode = isEditMode ? "" : (searchParams.get("qr") ?? "").trim();
+  const scannedCode = isEditMode ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
+  const scannedEan = searchParams.get("code_type") === "ean";
+  const [qrCode, setQrCode] = useState(scannedEan ? "" : scannedCode);
+  const [codesModelId, setCodesModelId] = useState("");
+  const [ean, setEan] = useState(scannedEan ? scannedCode : "");
   const [formData, setFormData] = useState<FormDataResponse | null>(null);
   const [editEntry, setEditEntry] = useState<GenericRow | null>(null);
   const [meta, setMeta] = useState<InventoryMeta | null>(null);
@@ -261,7 +267,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
   const [newPrice, setNewPrice] = useState("");
 
-  const [assetTag, setAssetTag] = useState(qrCode.length <= 50 ? qrCode : "");
+  const [assetTag, setAssetTag] = useState(!scannedEan && scannedCode.length <= 50 ? scannedCode : "");
   const [serialNumber, setSerialNumber] = useState("");
   const [warrantyUntil, setWarrantyUntil] = useState("");
   const [assetNote, setAssetNote] = useState("");
@@ -278,6 +284,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   const [specValues, setSpecValues] = useState<Record<string, SpecificationValue>>({});
   const errorMessageRef = useRef<HTMLDivElement>(null);
+
 
   // Fehlermeldungen auch bei langen Formularen sichtbar und fokussierbar machen.
   useEffect(() => {
@@ -392,6 +399,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           setDepartmentId(nextDepartmentId);
           setLocationId(nextLocationId);
 
+          const codeSource = recordType === "asset" ? currentEdit
+            : data.product_models.find(model => String(model.id) === String(currentEdit.product_model_id));
+          setQrCode(String(codeSource?.qr_code ?? ""));
+          setEan(String(codeSource?.ean ?? ""));
           if (recordType === "asset") {
             setAssetTag(String(currentEdit.asset_tag ?? ""));
             setSerialNumber(String(currentEdit.serial_number ?? ""));
@@ -476,6 +487,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
     ? selectedModelId
     : idText(existingModels[0]?.id);
+
+  if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
+    setCodesModelId(availableModelId);
+    const model = rowById(formData.product_models, availableModelId);
+    setQrCode(String((model?.tracking_mode === "quantity" ? model?.qr_code : "") || (!scannedEan ? scannedCode : "")));
+    setEan(String((model?.tracking_mode === "quantity" ? model?.ean : "") || (scannedEan ? scannedCode : "")));
+  }
 
   if (modelMode === "existing" && selectedModelId !== availableModelId) {
     setSelectedModelId(availableModelId);
@@ -777,9 +795,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       throw new Error(Object.values(dateErrors).join("\n"));
     }
 
-    if (qrCode && currentEntryType === "asset" && qrCode.length > 50) {
-      throw new Error("Einzelgeräte benötigen eine QR-Kennung mit höchstens 50 Zeichen. Dieser Code kann für einen Mengenartikel verwendet werden.");
-    }
+    validateCodes(qrCode, ean);
     const price = newPrice.trim() ? parseCHF(newPrice) : 0;
     let modelPayload: Record<string, unknown>;
 
@@ -816,7 +832,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     const departmentOriginalId = originalId(formData.departments, departmentId);
     const payload: Record<string, unknown> = {
       model: modelPayload,
-      ...(qrCode ? { qr_code: qrCode } : {}),
+      scanner_codes: { qr_code: qrCode.trim() || null, ean: ean.trim() || null },
       entry_type: currentEntryType,
       condition,
       storage_location_id: originalId(formData.storage_locations, locationId),
@@ -999,8 +1015,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             ← Zurück zum Inventar
           </button>
         </header>
-        {qrCode && <div className="asset-form-qr-notice">
-          <strong>QR-Code: {qrCode}</strong>
+        {scannedCode && <div className="asset-form-qr-notice">
+          <strong>{scannedEan ? "EAN" : "QR-Code"}: {scannedCode}</strong>
           <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
         </div>}
         {errorMessage && (
@@ -1299,6 +1315,17 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 />
               </div>
             </fieldset>
+            <fieldset className="asset-form-group">
+              <legend>Scanner-Kennungen (optional)</legend>
+              <div className="asset-form-row"><label htmlFor="item-qr">QR-Code:</label>
+                <input id="item-qr" type="text" maxLength={100} className="asset-form-control" value={qrCode} disabled={saving}
+                  onChange={event => setQrCode(event.target.value)} /></div>
+              <div className="asset-form-row"><label htmlFor="item-ean">EAN:</label>
+                <input id="item-ean" type="text" inputMode="numeric" maxLength={13} className="asset-form-control" value={ean} disabled={saving}
+                  placeholder="EAN-8 oder EAN-13" onChange={event => setEan(event.target.value)} /></div>
+              <p className="qr-hint">QR-Code, EAN oder beide Kennungen sind möglich.
+                {currentEntryType === "stock" ? " Bei Mengenartikeln gelten die Kennungen für das gesamte Produktmodell an allen Lagerorten." : " Eine EAN kann bei mehreren Geräten vorkommen."}</p>
+            </fieldset>
             {currentEntryType === "asset" ? (
               <fieldset className="asset-form-group">
                 <legend>Einzelartikel</legend>
@@ -1310,7 +1337,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     placeholder="z. B. IT-000123"
                     value={assetTag}
                     maxLength={50}
-                    readOnly={Boolean(qrCode)}
                     disabled={saving}
                     onChange={(event) => {
                       setAssetTag(event.target.value);

@@ -1,3 +1,4 @@
+import type { CodeType } from "../utils/scannerCodes";
 import { API_BASE } from "./config";
 import { getInventoryClientId } from "./inventoryApi";
 
@@ -25,7 +26,7 @@ export type QrLocation = {
   department_name: string;
 };
 
-export type QrLookup = { code: string; matches: QrMatch[]; locations: QrLocation[] };
+export type QrLookup = { code: string; code_type?: CodeType; matches: QrMatch[]; locations: QrLocation[] };
 
 export class QrRequestError extends Error {
   status: number;
@@ -35,19 +36,19 @@ export class QrRequestError extends Error {
 async function request(path: string, options?: RequestInit): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api/qr/${path}`, { credentials: "include", ...options });
+    response = await fetch(`${API_BASE}/api/scanner/${path}`, { credentials: "include", ...options });
   } catch {
     throw new QrRequestError("Die Verbindung zur API wurde unterbrochen.", 0);
   }
   const data = await response.json().catch(() => null);
-  if (!response.ok) throw new QrRequestError(typeof data?.detail === "string" ? data.detail : "Die QR-Anfrage ist fehlgeschlagen.", response.status);
+  if (!response.ok) throw new QrRequestError(typeof data?.detail === "string" ? data.detail : "Die Scanner-Anfrage ist fehlgeschlagen.", response.status);
   return data;
 }
 
-export async function lookupQr(code: string, signal?: AbortSignal): Promise<QrLookup> {
-  const data = await request(`lookup?code=${encodeURIComponent(code)}`, { signal }) as QrLookup | null;
+export async function lookupQr(code: string, signal?: AbortSignal, codeType: CodeType = "auto"): Promise<QrLookup> {
+  const data = await request(`lookup?code=${encodeURIComponent(code)}&code_type=${codeType}`, { signal }) as QrLookup | null;
   if (!data || !Array.isArray(data.matches) || !Array.isArray(data.locations)) {
-    throw new QrRequestError("Die Antwort zum QR-Code ist unvollständig.", 500);
+    throw new QrRequestError("Die Antwort zum Code ist unvollständig.", 500);
   }
   return data;
 }

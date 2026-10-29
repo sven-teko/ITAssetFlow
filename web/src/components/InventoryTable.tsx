@@ -23,6 +23,7 @@ type HeaderContextMenuState = {
 
 type InventoryTableProps = {
   rows: InventoryRow[];
+  rowBindings?: (row: InventoryRow) => React.HTMLAttributes<HTMLTableRowElement>;
 
   columns: string[];
 
@@ -131,6 +132,7 @@ function clampColumnWidth(
 
 export default function InventoryTable({
   rows,
+  rowBindings,
   columns,
   allColumns,
   visibleColumns,
@@ -964,6 +966,8 @@ export default function InventoryTable({
                 return (
                   <tr
                     key={key}
+                    tabIndex={0}
+                    {...rowBindings?.(row)}
                     className={
                       selectedKeys.has(
                         key,

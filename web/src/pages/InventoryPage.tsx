@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useState,
+  useRef,
 } from "react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
@@ -13,7 +14,8 @@ import LoadingIndicator from "../components/LoadingIndicator";
 import InventoryTable from "../components/InventoryTable";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
-import InventoryCards from "../components/InventoryCards";
+import EntryContextMenu from "../components/EntryContextMenu";
+import useRowContextMenu from "../hooks/useRowContextMenu";
 import useMediaQuery from "../hooks/useMediaQuery";
 import useDocking from "../hooks/useDocking";
 import useInventoryActions from "../hooks/useInventoryActions";
@@ -43,9 +45,21 @@ export default function InventoryPage({
   onLogout,
 }: InventoryPageProps) {
   const navigate = useNavigate();
-  const isMobile = useMediaQuery("(max-width: 720px)");
+  const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [qrOpen, setQrOpen] = useState(false);
+  const swipeStart = useRef<{ x: number; y: number; left?: boolean; right?: boolean } | null>(null);
+  const tabs = ["navigation", "inventory", "detail"] as const;
+  function switchTab(tab: typeof mobileView) { setMobileView(tab); }
+  function swipeEnd(x: number, y: number) {
+    const start = swipeStart.current; swipeStart.current = null;
+    if (!isMobile || !start) return;
+    const dx = x - start.x, dy = y - start.y;
+    if (Math.abs(dx) < 65 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if ((dx > 0 && start.left) || (dx < 0 && start.right)) return;
+    const index = tabs.indexOf(mobileView);
+    switchTab(tabs[Math.max(0, Math.min(2, index + (dx < 0 ? 1 : -1)))]);
+  }
 
   const [
     status,
@@ -96,6 +110,9 @@ export default function InventoryPage({
     formatValue:
       columns.formatValue,
   });
+
+  const rowContext = useRowContextMenu(row => view.setSelectedKeys(new Set([getRowKey(row)])));
+  const closeContext = rowContext.close;
 
   const handleLoggedOut =
     useCallback(
@@ -184,7 +201,7 @@ export default function InventoryPage({
   }
 
   const navigationPanel =
-    docking.navigationVisible ? (
+    (isMobile || docking.navigationVisible) ? (
       <InventorySidebar
         search={view.search}
         filters={view.filters}
@@ -218,7 +235,7 @@ export default function InventoryPage({
     ) : null;
 
   const detailPanel =
-    docking.detailVisible ? (
+    (isMobile || docking.detailVisible) ? (
       <AssetDetailPanel
         rows={view.selectedRows}
         getIdentifier={
@@ -261,6 +278,9 @@ export default function InventoryPage({
             docking.panelRef(panel)
           }
           data-dock-panel={panel}
+          id={isMobile ? `mobile-panel-${panel}` : undefined}
+          role={isMobile ? "tabpanel" : undefined}
+          aria-labelledby={isMobile ? `mobile-tab-${panel}` : undefined}
           className={
             docking.panelClassName(
               panel,
@@ -269,7 +289,7 @@ export default function InventoryPage({
           onPointerDown={(
             event,
           ) =>
-            docking.beginDockPointer(
+            !isMobile && docking.beginDockPointer(
               panel,
               event,
             )
@@ -282,7 +302,7 @@ export default function InventoryPage({
   }
 
   return (
-    <div className="main-window">
+    <div className={`main-window${isMobile ? " mobile-portrait" : ""}`}>
       <input
         ref={
           csvFileInputRef
@@ -391,18 +411,33 @@ export default function InventoryPage({
       />
 
       {isMobile && <nav className="mobile-inventory-toolbar" aria-label="Mobile Inventaransicht">
-        <div>
-          <button type="button" aria-pressed={mobileView === "inventory"} onClick={() => setMobileView("inventory")}>Inventar</button>
-          <button type="button" aria-pressed={mobileView === "navigation"} onClick={() => { docking.setNavigationVisible(true); setMobileView("navigation"); }}>Filter</button>
-          <button type="button" aria-pressed={mobileView === "detail"} onClick={() => { docking.setDetailVisible(true); setMobileView("detail"); }}>Details</button>
+        <div role="tablist" aria-label="Inventarbereiche" onPointerDown={event => { if (event.pointerType !== "mouse") swipeStart.current = { x: event.clientX, y: event.clientY }; }}
+          onPointerUp={event => swipeEnd(event.clientX, event.clientY)} onPointerCancel={() => { swipeStart.current = null; }}>
+          {tabs.map(tab => <button key={tab} id={`mobile-tab-${tab}`} role="tab" type="button" aria-selected={mobileView === tab}
+            aria-controls={`mobile-panel-${tab}`} tabIndex={mobileView === tab ? 0 : -1} onClick={() => switchTab(tab)}
+            onKeyDown={event => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault(); const next = tabs[(tabs.indexOf(tab) + (event.key === "ArrowRight" ? 1 : 2)) % 3];
+              switchTab(next); document.getElementById(`mobile-tab-${next}`)?.focus();
+            } }}>{tab === "navigation" ? "Filter" : tab === "inventory" ? "Tabelle" : "Details"}</button>)}
         </div>
-        <button type="button" className="primary-button" onClick={() => setQrOpen(true)}>QR scannen</button>
+        <button type="button" className="primary-button" onClick={() => setQrOpen(true)}>Scanner</button>
       </nav>}
 
       <div
         className="workspace"
         ref={workspaceRef}
         data-mobile-view={mobileView}
+        onTouchStart={event => {
+          swipeStart.current = null;
+          if (!isMobile || event.touches.length !== 1 || (event.target as Element).closest("input,select,textarea,button")) return;
+          const touch = event.touches[0];
+          const table = (event.target as Element).closest(".table-wrapper");
+          swipeStart.current = { x: touch.clientX, y: touch.clientY,
+            left: !!table && table.scrollLeft > 2,
+            right: !!table && table.scrollLeft + table.clientWidth < table.scrollWidth - 2 };
+        }}
+        onTouchEnd={event => { const touch = event.changedTouches[0]; if (touch) swipeEnd(touch.clientX, touch.clientY); }}
+        onTouchCancel={() => { swipeStart.current = null; }}
       >
         {docking.dockDrag && (
           <>
@@ -454,11 +489,11 @@ export default function InventoryPage({
             ),
           )}
 
-        <main className="inventory-area">
+        <main className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
           <div className="page-header">
             <h1>IT-Inventar</h1>
             <div className="inventory-header-actions"><span>{view.countText}</span>
-              <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>QR-Code einlesen</button>
+              <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>Scanner</button>
               {isMobile && canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
             </div>
           </div>
@@ -473,13 +508,9 @@ export default function InventoryPage({
           )}
           {!data.meta && !data.loadError ? (
             <LoadingIndicator />
-          ) : isMobile ? <InventoryCards rows={view.filteredRows} meta={data.meta} selectedKeys={view.selectedKeys}
-            onSelectionChange={view.setSelectedKeys} onDetails={(row) => {
-              view.setSelectedKeys(new Set([getRowKey(row)]));
-              docking.setDetailVisible(true);
-              setMobileView("detail");
-            }} /> : <InventoryTable
+          ) : <InventoryTable
             rows={view.filteredRows}
+            rowBindings={rowContext.bind}
             columns={
               columns.displayedColumns
             }
@@ -542,9 +573,13 @@ export default function InventoryPage({
       />
 
       {qrOpen && <QrWorkflowDialog canEdit={canEdit} onClose={() => setQrOpen(false)}
-        onCreate={(code) => { setQrOpen(false); navigate(`/inventory/new?qr=${encodeURIComponent(code)}`); }}
+        onCreate={(code, type) => { setQrOpen(false); navigate(`/inventory/new?code=${encodeURIComponent(code)}&code_type=${type}`); }}
         onEdit={(key) => { setQrOpen(false); navigate(`/inventory/${encodeURIComponent(key)}/edit`); }}
         onChanged={data.loadData} />}
+
+      {rowContext.menu && <EntryContextMenu x={rowContext.menu.x} y={rowContext.menu.y} disabled={!canEdit || loading}
+        onClose={closeContext} onEdit={() => navigate(`/inventory/${encodeURIComponent(getRowKey(rowContext.menu!.row))}/edit`)}
+        onDelete={() => void actions.deleteEntries([rowContext.menu!.row])} />}
 
       <div className="status-bar">
         <span>

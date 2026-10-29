@@ -1156,14 +1156,16 @@ def inventory_edit_form_data(
 
 # Inventareintrag erstellen / bearbeiten / löschen
 
+@app.get("/api/scanner/lookup")
 @app.get("/api/qr/lookup")
-def lookup_qr(code: str, web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
+def lookup_qr(code: str, code_type: str = "auto", web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
     try:
-        return QrService(web_session.client, actor_email=web_session.email).lookup(code)
+        return QrService(web_session.client, actor_email=web_session.email).lookup(code, code_type)
     except Exception as error:
         raise _repository_http_exception(error) from error
 
 
+@app.post("/api/scanner/stock")
 @app.post("/api/qr/stock")
 def adjust_qr_stock(
     request: Request,

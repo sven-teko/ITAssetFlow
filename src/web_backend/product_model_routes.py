@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from supabase import Client
+from infrastructure.scanner_codes import code_values
 
 from inventory import (
     fallback_specification_label,
@@ -18,11 +19,11 @@ from inventory import (
 
 
 MODEL_COLUMNS = (
-    "id,manufacturer_id,category_id,name,part_number,sku,"
+    "id,manufacturer_id,category_id,name,part_number,sku,qr_code,ean,"
     "specifications,tracking_mode,unit_code,is_active"
 )
 EDITABLE_COLUMNS = {
-    "name", "manufacturer_id", "part_number", "sku", "is_active", "specifications",
+    "name", "manufacturer_id", "part_number", "sku", "qr_code", "ean", "is_active", "specifications",
 }
 CREATE_COLUMNS = (EDITABLE_COLUMNS - {"is_active"}) | {"category_id", "tracking_mode", "unit_code"}
 LOGGER = logging.getLogger(__name__)
@@ -162,7 +163,7 @@ class ProductModelService:
         }
 
     def _editable_values(self, changes: dict[str, Any]) -> dict[str, Any]:
-        row: dict[str, Any] = {}
+        row: dict[str, Any] = code_values(changes)
         for key in ("name", "part_number", "sku"):
             if key not in changes:
                 continue
