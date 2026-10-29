@@ -37,7 +37,8 @@ const run = (async () => {
     ];
     const data = {
       site_permissions_available:true,
-      sites:[{id:1,name:'Basel',organization_id:1},{id:2,name:'Bern',organization_id:1},{id:3,name:'Büro Allschwil',organization_id:1}],
+      sites:[{id:1,name:'Basel',organization_id:1},{id:2,name:'Bern',organization_id:1},{id:3,name:'Büro Allschwil',organization_id:1},
+        {id:4,name:'Park Lange Erlen',organization_id:1},{id:5,name:'Parterre ONE',organization_id:1},{id:6,name:'Rialto',organization_id:1},{id:7,name:'Werkstatt Allschwil',organization_id:1}],
       departments:[{id:10,name:'IT',site_id:1,organization_id:1},{id:20,name:'IT',site_id:2,organization_id:1}],
       storage_locations:[{id:11,name:'Lager',site_id:1,department_id:10,is_active:true,location_type:'warehouse'}],
       product_categories:[{id:1,name:'Laptop',code:'laptop',inventory_group:'device',specification_schema:{fields:[]}}],
@@ -45,7 +46,8 @@ const run = (async () => {
       employees:[
         {id:1,first_name:'Test',last_name:'Admin',email:'admin@example.test',department_id:10,is_active:true,auth_user_id:'auth-admin',app_role:'admin'},
         {id:2,first_name:'Maria',last_name:'Muster',email:'maria@example.test',department_id:20,is_active:true,auth_user_id:null,app_role:'viewer'},
-        {id:3,first_name:'Lara',last_name:'Standort',email:'lara@example.test',department_id:10,is_active:true,auth_user_id:'auth-lara',app_role:'user',allowed_site_ids:[1,2,3]},
+        {id:3,first_name:'Lara',last_name:'Standort',email:'lara@example.test',department_id:10,is_active:true,auth_user_id:'auth-lara',app_role:'user',allowed_site_ids:[1,2,3,4,5,6,7]},
+        {id:4,first_name:'Noah',last_name:'Sicht',email:'noah@example.test',department_id:10,is_active:true,auth_user_id:'auth-noah',app_role:'viewer',allowed_site_ids:[1]},
       ],
       product_models:[{id:100,name:'TestBook',category_id:1,manufacturer_id:1,is_active:true,tracking_mode:'serialized',unit_code:'piece',specifications:{}}],
       parent_assets:[], ...meta, factory_default_visible_columns:meta.default_visible_columns,
@@ -94,6 +96,23 @@ const run = (async () => {
     });
 
     await page.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173')+'/#/login');
+    await page.getByLabel('E-Mail-Adresse:').waitFor();
+    const logoBox=await page.locator('.login-logo img').boundingBox();
+    const loginBox=await page.locator('.login-group').boundingBox();
+    assert.ok(logoBox.width>=280 && logoBox.x+logoBox.width<loginBox.x);
+    if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/login-desktop.png'});}
+    for(const width of [390,360]){
+      await page.setViewportSize({width,height:844});
+      const logo=await page.locator('.login-logo img').boundingBox(),form=await page.locator('.login-group').boundingBox();
+      assert.ok(logo.width>=170 && logo.y+logo.height<=form.y);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.querySelector('.login-page').scrollWidth<=innerWidth),true);
+      if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+`/login-mobile-${width}.png`});
+    }
+    await page.setViewportSize({width:844,height:390});
+    await page.getByRole('button',{name:'Anmelden',exact:true}).scrollIntoViewIfNeeded();
+    assert.ok(await page.getByRole('button',{name:'Anmelden',exact:true}).isVisible());
+    await page.setViewportSize({width:1440,height:1000});
+    console.log('PASS: Grosses Loginlogo links vom Formular; mobile und niedrige Fenster ohne Überlappungen');
     await page.getByLabel('E-Mail-Adresse:').fill('admin@example.test');
     await page.getByLabel('Passwort:',{exact:true}).fill('test-password');
     await page.getByRole('button',{name:'Anmelden',exact:true}).click();
@@ -109,12 +128,12 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.2.6 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.7 · 29.10.2026',{exact:true}).waitFor();
     await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.6');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.7');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
@@ -178,38 +197,69 @@ const run = (async () => {
 
     await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
     const permissions=page.getByRole('group',{name:'Standorte für Lara Standort',exact:true});
-    const adminPermissions=page.getByRole('group',{name:'Standorte für Test Admin',exact:true});
-    assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isDisabled(),true);
-    assert.equal(await adminPermissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),true);
+    const siteTrigger=page.getByRole('button',{name:'Standorte für Lara Standort auswählen',exact:true});
+    const adminTrigger=page.getByRole('button',{name:'Standorte für Test Admin auswählen',exact:true});
+    assert.equal(await adminTrigger.isDisabled(),true);
+    assert.equal(await adminTrigger.textContent(),'Alle Standorte');
+    assert.equal(await page.locator('.site-access-popup').count(),0);
+    assert.ok((await page.locator('.settings-permissions-table tbody tr').last().boundingBox()).height<70);
+    await siteTrigger.focus();
+    await page.keyboard.press('ArrowDown');
+    await permissions.waitFor();
     await permissions.getByLabel('Büro Allschwil',{exact:true}).uncheck();
+    assert.equal(await siteTrigger.textContent(),'6 von 7 Standorten');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('.site-access-popup').count(),0);
+    assert.equal(await siteTrigger.evaluate(el=>document.activeElement===el),true);
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-dropdown-closed.png'});
+    await siteTrigger.click();
+    await permissions.waitFor();
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-dropdown-open.png'});
+    await page.getByRole('heading',{name:'Einstellungen',exact:true}).click();
+    assert.equal(await page.locator('.site-access-popup').count(),0);
+    await siteTrigger.click();
+    await page.getByRole('button',{name:'Standorte für Noah Sicht auswählen',exact:true}).focus();
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await page.locator('.site-access-popup').count(),1);
+    assert.equal(await permissions.count(),0);
+    assert.equal(await page.getByRole('group',{name:'Standorte für Noah Sicht',exact:true}).getByRole('checkbox',{checked:true}).count(),1);
+    await page.keyboard.press('Escape');
     failSettingsSave=true;
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'Test: Einstellungen konnten nicht gespeichert werden.'}).waitFor();
     assert.equal(await page.locator('.settings-spinner').count(),0);
-    assert.equal(await permissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),false);
+    assert.equal(await siteTrigger.textContent(),'6 von 7 Standorten');
     failSettingsSave=false;
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
-    assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1','id:2']);
+    assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1','id:2','id:4','id:5','id:6','id:7']);
+    assert.deepEqual(lastSettings.employees.find(row=>row.id===4).allowed_site_refs,['id:1']);
+    await siteTrigger.click();
     assert.equal(await permissions.getByLabel('Büro Allschwil',{exact:true}).isChecked(),false);
-    await permissions.getByLabel('Basel',{exact:true}).uncheck();
-    await permissions.getByLabel('Bern',{exact:true}).uncheck();
+    await page.getByRole('button',{name:'Auswahl aufheben',exact:true}).click();
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
     assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,[]);
     await page.getByText('Kein Standort freigegeben',{exact:true}).waitFor();
+    await siteTrigger.click();
     await permissions.getByLabel('Basel',{exact:true}).check();
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
     assert.deepEqual(lastSettings.employees.find(row=>row.id===3).allowed_site_refs,['id:1']);
+    await siteTrigger.click();
+    await page.getByRole('button',{name:'Alle auswählen',exact:true}).click();
+    assert.equal(await permissions.getByRole('checkbox',{checked:true}).count(),7);
+    await page.getByRole('button',{name:'Auswahl aufheben',exact:true}).click();
+    await permissions.getByLabel('Basel',{exact:true}).check();
+    await page.keyboard.press('Escape');
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-permissions.png'});
-    console.log('PASS: Standort-Checkboxen, Büro Allschwil abwählen, leere Auswahl speichern und Administratorzugriff');
+    console.log('PASS: Kompaktes Standortdropdown, Checkboxen, Mehrfachauswahl, Sammelauswahl, Tastatur/Aussenklick, Speichern und Administratorzugriff');
 
     data.site_permissions_available=false;
     await page.reload();
     await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
     await page.getByRole('status').filter({hasText:'Die Standortmigration fehlt noch.'}).waitFor();
-    assert.equal(await page.locator('.settings-site-permissions').count(),0);
+    assert.equal(await page.locator('.site-access-dropdown').count(),0);
     await page.locator('.settings-table tbody tr').filter({hasText:'lara@example.test'}).locator('select').selectOption('viewer');
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('Einstellungen erfolgreich gespeichert.',{exact:true}).waitFor();
@@ -229,7 +279,13 @@ const run = (async () => {
     await page.locator('.settings-content .brand-loading').waitFor({state:'visible'});
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/settings-loading-mobile.png'});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-    await page.getByRole('group',{name:'Standorte für Lara Standort',exact:true}).waitFor();
+    await siteTrigger.click();
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-dropdown-mobile.png'});
+    await permissions.waitFor();
+    const popupBox=await page.locator('.site-access-popup').boundingBox();
+    assert.ok(popupBox.x>=0 && popupBox.x+popupBox.width<=390 && popupBox.y>=0 && popupBox.y+popupBox.height<=844);
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/site-dropdown-mobile.png'});
+    await page.keyboard.press('Escape');
     await page.setViewportSize({width:1440,height:1000});
     console.log('PASS: Lade- und Speicheranimationen, gesperrte Aktionen, mobile Anzeige und erneutes Laden nach Fehler');
 

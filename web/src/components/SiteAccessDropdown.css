@@ -1,0 +1,131 @@
+.site-access-dropdown {
+  min-width: 220px;
+  padding: 6px;
+}
+
+.site-access-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.site-access-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-access-trigger svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.site-access-trigger.site-access-locked:disabled {
+  color: #66717c;
+  background: #f8fafc;
+  border-color: #e1e6eb;
+}
+
+/* Der Dialog liegt ausserhalb der Tabelle, damit Scrollbereiche ihn nicht abschneiden. */
+.site-access-popup {
+  position: fixed;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #111827;
+  background: #fff;
+  border: 1px solid #cbd3dd;
+  border-radius: 7px;
+  box-shadow: 0 10px 28px rgb(15 23 42 / 16%);
+  font-size: 14px;
+}
+
+.site-access-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px 10px;
+}
+
+.site-access-heading > span {
+  color: #66717c;
+  font-size: 12px;
+}
+
+.site-access-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  padding: 0 10px 10px;
+  border-bottom: 1px solid #e7ebef;
+}
+
+.site-access-actions button {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 5px 7px;
+  color: #2868ad;
+  font-size: 12px;
+}
+
+.site-access-options {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 0;
+}
+
+.site-access-options label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.site-access-options label:hover,
+.site-access-options label:focus-within {
+  background: #edf4fc;
+}
+
+.site-access-options input {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #2868ad;
+}
+
+.site-access-popup button:focus-visible,
+.site-access-options input:focus-visible {
+  outline: 2px solid #2868ad;
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .site-access-trigger,
+  .site-access-options label,
+  .site-access-actions button { min-height: 44px; }
+}

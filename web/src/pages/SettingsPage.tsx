@@ -5,6 +5,7 @@ import ProductModelsPage, { type ProductModelsHandle } from "./ProductModelsPage
 import "./SettingsPage.css";
 import EmployeesSettings, { type EmployeeRow } from "../components/EmployeesSettings";
 import LoadingIndicator from "../components/LoadingIndicator";
+import SiteAccessDropdown from "../components/SiteAccessDropdown";
 
 
 const LOCATION_TYPES = {
@@ -364,6 +365,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
   const [manufacturers, setManufacturers] = useState<ManufacturerRow[]>([]);
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [sitePermissionsAvailable, setSitePermissionsAvailable] = useState(false);
+  const [openSitePermissions, setOpenSitePermissions] = useState<string | null>(null);
   const [deleted, setDeleted] = useState<DeletedState>(emptyDeleted);
   const [editingRows, setEditingRows] = useState<Set<string>>(new Set());
 
@@ -410,6 +412,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
   function changeTab(tab: SettingsTab): boolean {
     if (tab === activeTab) return true;
     if (loading || saving || modelSaving || modelEditor.current?.confirmLeave() === false) return false;
+    setOpenSitePermissions(null);
     const next = new URLSearchParams(searchParams);
     next.set("tab", tab);
     setSearchParams(next, { replace: true });
@@ -515,6 +518,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
 
     async function load(): Promise<void> {
       setLoading(true);
+      setOpenSitePermissions(null);
 
       if (!afterSaveRef.current) {
         showMessage("Einstellungen werden geladen ...", "info");
@@ -1281,6 +1285,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     if (saving || loading || !savedSettings) {
       return;
     }
+    setOpenSitePermissions(null);
 
     const errors = validate();
 
@@ -2153,13 +2158,12 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
         <div className="settings-permissions-intro">
           <strong>Benutzerberechtigungen</strong>
           <span>
-            Administrator: vollständiger Zugriff · Bearbeiter: Inventar lesen und bearbeiten ·
-            Betrachter: nur lesen. {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die ausgewählten Standorte und deren Daten. Entferne das Häkchen bei einem Standort, um ihn vollständig auszublenden. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
+            {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die freigegebenen Standorte und deren Daten. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
           </span>
         </div>
         {!sitePermissionsAvailable && <p className="settings-permissions-pending" role="status">Die Standortmigration fehlt noch. Rollen und andere Einstellungen bleiben bearbeitbar; Standortfreigaben können erst nach der Aktivierung geändert werden.</p>}
         <div className="settings-table-wrap settings-table-grow">
-          <table className="settings-table">
+          <table className="settings-table settings-permissions-table">
             <thead>
               <tr>
                 <th>Benutzer</th>
@@ -2198,6 +2202,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                         }
                         onChange={(event) => {
                           const nextRole = event.target.value as AppRole;
+                          setOpenSitePermissions(null);
                           setEmployees((current) =>
                             updateRow(current, row.client_key, { app_role: nextRole }),
                           );
@@ -2213,22 +2218,19 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                       </select>
                     </td>
                     <td>
-                      {sitePermissionsAvailable ? <><fieldset className="settings-site-permissions" aria-label={`Standorte für ${displayName}`} disabled={saving || row.app_role === "admin"}>
-                        <legend className="sr-only">Freigegebene Standorte</legend>
-                        {sortedSites.map(site => <label key={site.client_key}>
-                          <input type="checkbox" checked={row.app_role === "admin" || row.allowed_site_refs.includes(site.client_key)}
-                            onChange={event => {
-                              const selected = event.target.checked;
-                              setEmployees(current => current.map(employee => employee.client_key === row.client_key ? {
-                                ...employee, allowed_site_refs: selected ? [...employee.allowed_site_refs, site.client_key] : employee.allowed_site_refs.filter(ref => ref !== site.client_key),
-                              } : employee));
-                              showMessage(`Standorte für ${displayName} geändert. Mit „Übernehmen“ speichern.`, "info");
-                            }} />
-                          <span>{site.name || "Neuer Standort"}</span>
-                        </label>)}
-                      </fieldset>
-                      <small className="settings-site-permissions-note">{row.app_role === "admin" ? "Administratoren: alle Standorte" : row.allowed_site_refs.length ? "Nur ausgewählte Standorte sichtbar" : "Kein Standort freigegeben"}</small>
-                      </> : <span className="settings-cell-text">Noch nicht aktiviert</span>}
+                      {sitePermissionsAvailable ? <SiteAccessDropdown
+                        name={displayName}
+                        options={sortedSites.map(site => ({ key: site.client_key, label: site.name || "Neuer Standort" }))}
+                        selected={row.allowed_site_refs}
+                        locked={row.app_role === "admin"}
+                        disabled={saving}
+                        open={openSitePermissions === row.client_key}
+                        onOpenChange={open => setOpenSitePermissions(current => open ? row.client_key : current === row.client_key ? null : current)}
+                        onChange={selected => {
+                          setEmployees(current => updateRow(current, row.client_key, { allowed_site_refs: selected }));
+                          showMessage(`Standorte für ${displayName} geändert. Mit „Übernehmen“ speichern.`, "info");
+                        }}
+                      /> : <span className="settings-cell-text">Noch nicht aktiviert</span>}
                     </td>
                   </tr>
                 );
