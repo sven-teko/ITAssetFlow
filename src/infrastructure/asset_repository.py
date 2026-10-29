@@ -915,6 +915,19 @@ class AssetRepository:
         manufacturer_id = rows[0]["id"]
         return manufacturer_id, manufacturer_id
 
+    @staticmethod
+    def _assignment_target(assignment: dict[str, Any]) -> dict[str, Any]:
+        """Die Zuordnung gilt entweder einer Person oder einer Abteilung.
+
+        Die Formularabteilung wird separat für den Lagerort geprüft und darf
+        bei einer Personenzuweisung nicht als zweites Ziel gespeichert werden.
+        """
+        employee_id = assignment.get("employee_id")
+        return {
+            "employee_id": employee_id,
+            "department_id": assignment.get("department_id") if employee_id is None else None,
+        }
+
     def _create_serialized_asset(
         self,
         *,
@@ -978,17 +991,9 @@ class AssetRepository:
                     }
                 ).execute()
 
-            if isinstance(assignment, dict):
-                employee_id = assignment.get("employee_id")
-                department_id = assignment.get("department_id")
-                if employee_id is not None or department_id is not None:
-                    self.client.table("asset_assignments").insert(
-                        {
-                            "asset_id": asset_id,
-                            "employee_id": employee_id,
-                            "department_id": department_id,
-                        }
-                    ).execute()
+            self.client.table("asset_assignments").insert(
+                {"asset_id": asset_id, **self._assignment_target(assignment)}
+            ).execute()
 
             if parent_asset_id is not None:
                 if parent_asset_id == asset_id:
@@ -1215,12 +1220,11 @@ class AssetRepository:
                 }
             ).execute()
 
-        desired_employee_id = assignment.get("employee_id")
-        desired_department_id = assignment.get("department_id")
+        assignment_target = self._assignment_target(assignment)
 
         if (
-            current_employee_id != desired_employee_id
-            or current_department_id != desired_department_id
+            current_employee_id != assignment_target["employee_id"]
+            or current_department_id != assignment_target["department_id"]
         ):
             (
                 self.client.table("asset_assignments")
@@ -1230,11 +1234,7 @@ class AssetRepository:
                 .execute()
             )
             self.client.table("asset_assignments").insert(
-                {
-                    "asset_id": asset_id,
-                    "employee_id": desired_employee_id,
-                    "department_id": desired_department_id,
-                }
+                {"asset_id": asset_id, **assignment_target}
             ).execute()
 
         if current_parent_id != parent_asset_id:

@@ -102,6 +102,7 @@ ALTER TABLE connection_test ADD CONSTRAINT connection_test_pkey PRIMARY KEY (id)
 ALTER TABLE employees ADD CONSTRAINT employees_auth_user_id_key UNIQUE (auth_user_id);
 ALTER TABLE asset_locations ADD CONSTRAINT geraet_lagerort_pkey PRIMARY KEY (id);
 ALTER TABLE asset_assignments ADD CONSTRAINT geraet_zuweisung_pkey PRIMARY KEY (id);
+CREATE UNIQUE INDEX asset_assignments_current_uq ON public.asset_assignments USING btree (asset_id) WHERE (valid_to IS NULL);
 ALTER TABLE departments ADD CONSTRAINT idx_17506_primary PRIMARY KEY (id);
 ALTER TABLE assets ADD CONSTRAINT idx_17525_primary PRIMARY KEY (id);
 ALTER TABLE product_categories ADD CONSTRAINT idx_17536_primary PRIMARY KEY (id);

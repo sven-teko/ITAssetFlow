@@ -137,6 +137,38 @@ input:focus {
   width: 100%;
 }
 
+.login-window--login {
+  display: block;
+}
+
+.login-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 40px;
+}
+
+.login-form > * {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.login-form > .login-logo {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.login-form > .login-group {
+  grid-row: 1;
+  margin: 0;
+}
+
+/* Der transparente Bildrand soll die gemeinsame Zeile nicht vergrössern. */
+.login-form .login-logo img {
+  aspect-ratio: 30 / 19;
+  object-fit: cover;
+}
+
 .login-group {
   padding: 18px 16px 14px;
   background: #ffffff;
@@ -204,6 +236,13 @@ input:focus {
     padding: 24px;
   }
   .login-logo img { width: 180px; }
+  .login-form {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+  .login-form > * { grid-column: 1; }
+  .login-form > .login-logo { margin-bottom: 24px; }
+  .login-form > .login-group { grid-row: auto; }
 }
 
 @media (max-width: 480px) {

@@ -195,19 +195,17 @@ export default function LoginPage({
   return (
     <div className="login-page">
 
-      <div className="login-window">
-
-        <div className="login-logo">
-          <img
-            src="/logo.png"
-            alt="ITAssetFlow"
-          />
-        </div>
-
-
+      <div className="login-window login-window--login">
         <form
+          className="login-form"
           onSubmit={submit}
         >
+          <div className="login-logo">
+            <img
+              src="/logo.png"
+              alt="ITAssetFlow"
+            />
+          </div>
 
           <fieldset className="login-group">
 

@@ -63,6 +63,15 @@ const run=(async()=>{
     assert.equal(Number((await query('SELECT quantity FROM public.stock_levels WHERE storage_location_id=11'))[0].quantity),1);
     await rejected("INSERT INTO public.stock_movements(id,product_model_id,from_storage_location_id,from_condition,quantity,movement_type,department_id) VALUES(4,101,11,'new',2,'issue',10)",'P0001');
     await rejected("INSERT INTO public.stock_movements(id,product_model_id,to_storage_location_id,to_condition,quantity,movement_type,department_id) VALUES(5,101,22,'new',1,'receipt',20)");
+    await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,2,10)','23514');
+    await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,NULL,NULL)','23514');
+    await query('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,2,NULL)');
+    await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,NULL,10)','23505');
+    await query('UPDATE public.asset_assignments SET valid_to=clock_timestamp() WHERE asset_id=10 AND valid_to IS NULL');
+    await query('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,NULL,10)');
+    assert.equal(Number((await query('SELECT count(*) n FROM public.asset_assignments WHERE asset_id=10 AND valid_to IS NULL'))[0].n),1);
+    await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,3,NULL)');
+    console.log('PASS: Mitarbeiter- und Abteilungszuweisung mit echtem CHECK, eindeutiger aktiver Zuordnung und Standortschutz');
     assert.deepEqual(await ids("INSERT INTO public.assets(id,product_model_id,asset_tag,purchase_date) VALUES(30,100,'NEW-30','2026-01-01') RETURNING id"),[30]);
     await query('INSERT INTO public.asset_locations(id,asset_id,storage_location_id) VALUES(30,30,11)');
     await rejected('UPDATE public.assets SET last_storage_location_id=22 WHERE id=30');
