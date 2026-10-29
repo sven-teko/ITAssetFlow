@@ -23,6 +23,7 @@ const run = (async () => {
     page.on('pageerror', error => pageErrors.push(error.message));
     let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null, metaFailure = 0;
     let failSettingsLoad = false, failSettingsSave = false, failModelLoad = false;
+    let failExport = false;
     const labels = {available:'Verfügbar', in_use:'Im Einsatz', defective:'Defekt', in_repair:'In Reparatur'};
     const meta = {
       column_order:['asset_tag','product_model_name','status','condition','site_name','department_name'],
@@ -61,6 +62,12 @@ const run = (async () => {
       if(request.method()==='OPTIONS')return route.fulfill({status:204,headers});
       if(path==='/api/auth/login'){loggedIn=true; return json({authenticated:true,email:'admin@example.test'});}
       if(path==='/api/auth/session'){await pause(180); return json({authenticated:loggedIn,email:loggedIn?'admin@example.test':null,role:loggedIn?'admin':null});}
+      if(path.startsWith('/api/transfer/export/')){
+        await pause(1200);
+        if(failExport)return json({detail:'Test: Export vorübergehend nicht erreichbar.'},503);
+        const sql=path.endsWith('/postgresql'),suffix=sql?'sql':'csv';
+        return route.fulfill({headers:{...headers,'Access-Control-Expose-Headers':'Content-Disposition','Content-Disposition':`attachment; filename="ITAssetFlow_Test.${suffix}"`},contentType:sql?'application/sql':'text/csv',body:sql?'-- ITAssetFlow PostgreSQL Export\nBEGIN;\nCOMMIT;\n':'\uFEFFitassetflow_format,version,table,row_json\r\n'});
+      }
       if(path==='/api/inventory/meta')return metaFailure==='invalid'?json({}):metaFailure?json({detail:'Keine Berechtigung für Tabelleninformationen.'},metaFailure):json(meta);
       if(path==='/api/inventory/revision')return json({revision:1});
       if(path==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:': test\n\n'});
@@ -128,12 +135,43 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.2.10 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.11 · 29.10.2026',{exact:true}).waitFor();
     await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.10');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.11');
+
+    const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
+    async function openExportMenu(){
+      await page.getByRole('button',{name:'Datei',exact:true}).click();
+      await exportMenu().getByRole('button',{name:'Export',exact:false}).hover();
+    }
+    for(const label of ['CSV','PostgreSQL']){
+      await openExportMenu();
+      if(process.env.SCREENSHOT_DIR && label==='CSV')await page.screenshot({path:process.env.SCREENSHOT_DIR+'/export-menu.png'});
+      const downloadEvent=page.waitForEvent('download');
+      await exportMenu().getByRole('button',{name:label,exact:true}).click();
+      await page.getByText(`${label}-Export wird erstellt ...`,{exact:true}).waitFor();
+      await openExportMenu();
+      assert.equal(await exportMenu().getByRole('button',{name:'CSV',exact:true}).isDisabled(),true);
+      assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isDisabled(),true);
+      const download=await downloadEvent;
+      assert.equal(download.suggestedFilename(),`ITAssetFlow_Test.${label==='CSV'?'csv':'sql'}`);
+      const content=fs.readFileSync(await download.path(),'utf8');
+      assert.ok(content.includes(label==='CSV'?'itassetflow_format':'BEGIN;'));
+      await page.getByText(`${label}-Export wurde erstellt.`,{exact:true}).waitFor();
+      await page.locator('.page-header').click();
+    }
+    failExport=true;
+    await openExportMenu();
+    await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).click();
+    await page.getByText('Test: Export vorübergehend nicht erreichbar.',{exact:true}).waitFor();
+    failExport=false;
+    await openExportMenu();
+    assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isEnabled(),true);
+    await page.locator('.page-header').click();
+    console.log('PASS: CSV- und PostgreSQL-Download, Dateinamen, Ladezustand, gesperrte Aktionen und sichtbare Exportfehler');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();

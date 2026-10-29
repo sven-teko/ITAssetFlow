@@ -361,6 +361,9 @@ export default function InventoryPage({
         onExportCsv={() =>
           void actions.exportCsv()
         }
+        onExportPostgresql={() =>
+          void actions.exportPostgresql()
+        }
         onSettings={() => {
           if (
             canManageSettings

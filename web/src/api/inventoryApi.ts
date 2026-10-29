@@ -267,11 +267,13 @@ export async function importInventoryCsv(file: File): Promise<CsvImportResult> {
   return isRecord(data) ? data : {};
 }
 
-export async function exportInventoryCsv(): Promise<{
+export type ExportFormat = "csv" | "postgresql";
+
+export async function exportInventoryFile(format: ExportFormat): Promise<{
   blob: Blob;
   filename: string;
 }> {
-  const response = await fetch(`${API_BASE}/api/transfer/export/csv`, {
+  const response = await fetch(`${API_BASE}/api/transfer/export/${format}`, {
     method: "GET",
     credentials: "include",
   });
@@ -280,7 +282,8 @@ export async function exportInventoryCsv(): Promise<{
 
   if (!response.ok) {
     const data = await readJson(response);
-    throw new Error(errorDetail(data, "CSV-Export ist fehlgeschlagen."));
+    const label = format === "csv" ? "CSV" : "PostgreSQL";
+    throw new Error(errorDetail(data, `${label}-Export ist fehlgeschlagen.`));
   }
 
   const disposition = response.headers.get("Content-Disposition") ?? "";
@@ -288,7 +291,7 @@ export async function exportInventoryCsv(): Promise<{
 
   return {
     blob: await response.blob(),
-    filename: filenameMatch?.[1]?.trim() || "ITAssetFlow.csv",
+    filename: filenameMatch?.[1]?.trim() || `ITAssetFlow.${format === "csv" ? "csv" : "sql"}`,
   };
 }
 

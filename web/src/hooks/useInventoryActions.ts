@@ -2,11 +2,12 @@ import { useRef, useState } from "react";
 
 import {
   deleteInventoryEntries,
-  exportInventoryCsv,
+  exportInventoryFile,
   importInventoryCsv,
   logoutWebSession,
   UnauthorizedError,
 } from "../api/inventoryApi";
+import type { ExportFormat } from "../api/inventoryApi";
 import type { InventoryRow } from "../types/inventory";
 import { getIdentifier, getRowKey } from "../utils/inventory";
 
@@ -31,6 +32,7 @@ export default function useInventoryActions({
 }: UseInventoryActionsOptions) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
+  const transferInProgress = useRef(false);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function deleteEntries(rows: InventoryRow[] = selectedRows): Promise<void> {
@@ -89,7 +91,7 @@ export default function useInventoryActions({
   }
 
   function chooseCsvImport(): void {
-    if (transferBusy || dataLoading) {
+    if (transferInProgress.current || dataLoading) {
       return;
     }
 
@@ -97,6 +99,7 @@ export default function useInventoryActions({
   }
 
   async function importCsvFile(file: File): Promise<void> {
+    if (transferInProgress.current || dataLoading) return;
     const confirmed = window.confirm(
       "CSV-Import starten?\n\n"
       + `${file.name}\n\n`
@@ -107,6 +110,7 @@ export default function useInventoryActions({
       return;
     }
 
+    transferInProgress.current = true;
     setTransferBusy(true);
     onStatus("CSV-Datei wird importiert ...");
 
@@ -126,6 +130,7 @@ export default function useInventoryActions({
         error instanceof Error ? error.message : "CSV-Import ist fehlgeschlagen.",
       );
     } finally {
+      transferInProgress.current = false;
       setTransferBusy(false);
       if (csvFileInputRef.current) {
         csvFileInputRef.current.value = "";
@@ -133,16 +138,18 @@ export default function useInventoryActions({
     }
   }
 
-  async function exportCsv(): Promise<void> {
-    if (transferBusy || dataLoading) {
+  async function exportFile(format: ExportFormat): Promise<void> {
+    if (transferInProgress.current || dataLoading) {
       return;
     }
 
+    transferInProgress.current = true;
     setTransferBusy(true);
-    onStatus("CSV-Export wird erstellt ...");
+    const label = format === "csv" ? "CSV" : "PostgreSQL";
+    onStatus(`${label}-Export wird erstellt ...`);
 
     try {
-      const { blob, filename } = await exportInventoryCsv();
+      const { blob, filename } = await exportInventoryFile(format);
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
 
@@ -151,9 +158,9 @@ export default function useInventoryActions({
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(objectUrl);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 
-      onStatus("CSV-Export wurde erstellt.");
+      onStatus(`${label}-Export wurde erstellt.`);
     } catch (error) {
       if (error instanceof UnauthorizedError) {
         onUnauthorized();
@@ -161,9 +168,10 @@ export default function useInventoryActions({
       }
 
       onStatus(
-        error instanceof Error ? error.message : "CSV-Export ist fehlgeschlagen.",
+        error instanceof Error ? error.message : `${label}-Export ist fehlgeschlagen.`,
       );
     } finally {
+      transferInProgress.current = false;
       setTransferBusy(false);
     }
   }
@@ -182,7 +190,8 @@ export default function useInventoryActions({
     transferBusy,
     chooseCsvImport,
     importCsvFile,
-    exportCsv,
+    exportCsv: () => exportFile("csv"),
+    exportPostgresql: () => exportFile("postgresql"),
     deleteEntries,
     logout,
   };

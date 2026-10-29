@@ -34,6 +34,7 @@ type MainMenuProps = {
 
   onImportCsv: () => void;
   onExportCsv: () => void;
+  onExportPostgresql: () => void;
 
   onSettings: () => void;
   onAbout: () => void;
@@ -153,6 +154,7 @@ export default function MainMenu({
   onRefresh,
   onImportCsv,
   onExportCsv,
+  onExportPostgresql,
   onSettings,
   onAbout,
   onLogout,
@@ -400,10 +402,7 @@ export default function MainMenu({
                     disabled={transferBusy}
                     onClick={() =>
                       action(
-                        () =>
-                          onStatus(
-                            "PostgreSQL-Export ist in der WebApp noch nicht aktiviert.",
-                          ),
+                        onExportPostgresql,
                       )
                     }
                   >

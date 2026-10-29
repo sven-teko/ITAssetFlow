@@ -8,7 +8,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     Depends,
@@ -52,7 +52,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.2.10",
+    version="1.2.11",
 )
 
 
@@ -159,6 +159,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -1329,10 +1330,11 @@ def delete_inventory_entries(
         ) from error
 
 
-# CSV Import / Export
+# Datenexport / CSV-Import
 
-@app.get("/api/transfer/export/csv")
-def export_csv(
+@app.get("/api/transfer/export/{export_format}")
+def export_data(
+    export_format: Literal["csv", "postgresql"],
     web_session: WebSession = Depends(
         get_web_session
     ),
@@ -1345,25 +1347,25 @@ def export_csv(
         "%Y-%m-%d_%H-%M-%S"
     )
 
-    filename = (
-        f"ITAssetFlow_{timestamp}.csv"
-    )
+    suffix = ".csv" if export_format == "csv" else ".sql"
+    filename = f"ITAssetFlow_{timestamp}{suffix}"
 
     temporary_path: Path | None = None
 
     try:
         with tempfile.NamedTemporaryFile(
             prefix="itassetflow_export_",
-            suffix=".csv",
+            suffix=suffix,
             delete=False,
         ) as handle:
             temporary_path = Path(
                 handle.name
             )
 
-        service.export_csv(
-            temporary_path
-        )
+        if export_format == "csv":
+            service.export_csv(temporary_path)
+        else:
+            service.export_postgresql(temporary_path)
 
         content = temporary_path.read_bytes()
 
@@ -1385,13 +1387,15 @@ def export_csv(
     return Response(
         content=content,
         media_type=(
-            "text/csv; charset=utf-8"
+            "text/csv; charset=utf-8" if export_format == "csv"
+            else "application/sql; charset=utf-8"
         ),
         headers={
             "Content-Disposition": (
                 f'attachment; filename="{filename}"'
             ),
             "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

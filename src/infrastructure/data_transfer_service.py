@@ -13,6 +13,10 @@ from supabase import Client
 
 FORMAT_NAME = "ITAssetFlow"
 FORMAT_VERSION = 1
+EXPORT_PAGE_SIZE = 500
+
+# PostgreSQL berechnet diesen Wert beim Einfügen selbst.
+GENERATED_COLUMNS = {"stock_counts": {"difference_quantity"}}
 
 # System-/Protokolltabellen werden bewusst nicht importiert/exportiert:
 # - audit_log: wird durch normale Schreibvorgänge erneut erzeugt
@@ -29,6 +33,7 @@ TABLE_ORDER: tuple[str, ...] = (
     "site_departments",
     "storage_locations",
     "employees",
+    "employee_site_access",
     "product_models",
     "software_products",
     "software_licenses",
@@ -52,6 +57,7 @@ PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "site_departments": ("site_id", "department_id"),
     "storage_locations": ("id",),
     "employees": ("id",),
+    "employee_site_access": ("employee_id", "site_id"),
     "product_models": ("id",),
     "software_products": ("id",),
     "software_licenses": ("id",),
@@ -168,6 +174,7 @@ class DataTransferService:
             ),
             "",
             "BEGIN;",
+            "SET LOCAL standard_conforming_strings = on;",
             "",
         ]
 
@@ -179,6 +186,11 @@ class DataTransferService:
             lines.append(
                 f"-- Tabelle: {table_name} ({len(rows)} Datensätze)"
             )
+
+            if table_name == "stock_counts":
+                # Die bereits exportierten Korrekturbuchungen und historischen
+                # Sollmengen dürfen beim Wiederherstellen nicht neu entstehen.
+                lines.append("ALTER TABLE public.stock_counts DISABLE TRIGGER stock_counts_prepare_trg;")
 
             for row in rows:
                 lines.append(
@@ -193,10 +205,16 @@ class DataTransferService:
                 lines.append(
                     self._postgres_upsert_sql(
                         table_name,
-                        row,
+                        {**row, "parent_location_id": None} if table_name == "storage_locations" else row,
                     )
                 )
 
+            if table_name == "storage_locations":
+                for row in rows:
+                    if row.get("parent_location_id") is not None:
+                        lines.append(self._postgres_upsert_sql(table_name, row))
+            if table_name == "stock_counts":
+                lines.append("ALTER TABLE public.stock_counts ENABLE TRIGGER stock_counts_prepare_trg;")
             lines.append("")
 
         # Wird die .sql-Datei direkt in PostgreSQL ausgeführt, bleiben auch
@@ -436,27 +454,26 @@ class DataTransferService:
         ] = {}
 
         for table_name in TABLE_ORDER:
-            response = (
-                self.client.table(table_name)
-                .select("*")
-                .execute()
-            )
-            data = getattr(
-                response,
-                "data",
-                None,
-            )
-
-            rows = (
-                [
-                    dict(row)
-                    for row in data
-                    if isinstance(row, dict)
-                ]
-                if isinstance(data, list)
-                else []
-            )
-
+            rows: list[dict[str, Any]] = []
+            offset = 0
+            while True:
+                # Der angemeldete Client und seine RLS-Policies bestimmen die
+                # sichtbaren Datensätze, auch auf jeder weiteren Seite.
+                query = self.client.table(table_name).select("*", count="exact")
+                for column in PRIMARY_KEYS[table_name]:
+                    query = query.order(column)
+                response = query.range(offset, offset + EXPORT_PAGE_SIZE - 1).execute()
+                data = response.data
+                if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+                    raise RuntimeError(f"Ungültige Exportdaten für Tabelle {table_name}.")
+                if not data:
+                    break
+                excluded = GENERATED_COLUMNS.get(table_name, set())
+                rows.extend({key: value for key, value in row.items() if key not in excluded} for row in data)
+                offset += len(data)
+                count = getattr(response, "count", None)
+                if isinstance(count, int) and offset >= count:
+                    break
             result[table_name] = rows
 
         return result
@@ -651,6 +668,20 @@ class DataTransferService:
         else:
             on_conflict = (
                 f"ON CONFLICT ({conflict}) DO NOTHING"
+            )
+
+        if table_name == "stock_movements":
+            # Historische Bewegungen sind unveränderlich. Auch BEFORE-INSERT-
+            # Prüfungen sollen bei schon vorhandenen IDs nicht erneut buchen.
+            predicate = " AND ".join(
+                f"{DataTransferService._quote_identifier(key)} = {DataTransferService._sql_literal(row[key])}"
+                for key in primary_key
+            )
+            return (
+                f"INSERT INTO public.{DataTransferService._quote_identifier(table_name)} "
+                f"({quoted_columns}) SELECT {values} WHERE NOT EXISTS "
+                f"(SELECT 1 FROM public.{DataTransferService._quote_identifier(table_name)} WHERE {predicate}) "
+                f"ON CONFLICT ({conflict}) DO NOTHING;"
             )
 
         return (
