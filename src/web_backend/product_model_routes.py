@@ -9,6 +9,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, Depends, HTTPException, Request
 from supabase import Client
 from infrastructure.scanner_codes import code_values
+from infrastructure.scanner_schema import select_scanner_compatible, write_scanner_compatible
 
 from inventory import (
     fallback_specification_label,
@@ -138,16 +139,19 @@ class ProductModelService:
     def _load_rows(self, table: str, columns: str) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         while True:
-            page = (
-                self.client.table(table).select(columns).order("name").order("id")
-                .range(len(rows), len(rows) + 999).execute().data
-            )
+            page = select_scanner_compatible(
+                lambda selected: self.client.table(table).select(selected).order("name").order("id")
+                .range(len(rows), len(rows) + 999), table, columns,
+            ).data
             if not page:
                 return rows
             rows.extend(page)
 
     def _get_row(self, table: str, row_id: Any, columns: str) -> dict[str, Any] | None:
-        rows = self.client.table(table).select(columns).eq("id", row_id).limit(1).execute().data
+        rows = select_scanner_compatible(
+            lambda selected: self.client.table(table).select(selected).eq("id", row_id).limit(1),
+            table, columns,
+        ).data
         return rows[0] if rows else None
 
     def load(self) -> dict[str, Any]:
@@ -216,7 +220,9 @@ class ProductModelService:
             "unit_code": unit_code, "is_active": True,
             "specifications": self._merge_specifications({}, values.get("specifications", {}), fields),
         })
-        rows = self.client.table("product_models").insert(row).execute().data
+        rows = write_scanner_compatible(
+            lambda values: self.client.table("product_models").insert(values), "product_models", row,
+        ).data
         if not rows or rows[0].get("id") is None:
             raise HTTPException(500, "Keine vollständige Speicherbestätigung erhalten. Bitte die Seite neu laden und die Modellliste prüfen.")
         return public_model(rows[0], fields)
@@ -228,6 +234,8 @@ class ProductModelService:
         if current is None:
             raise HTTPException(404, "Das Produktmodell existiert nicht mehr oder ist nicht zugänglich.")
         row = self._editable_values(changes)
+        row = {key: value for key, value in row.items()
+               if not (key in {"qr_code", "ean"} and key not in current and value is None)}
 
         category = self._get_row("product_categories", current["category_id"], "specification_schema")
         fields = model_fields(category.get("specification_schema")) if category else []
@@ -238,7 +246,10 @@ class ProductModelService:
 
         if not row:
             return public_model(current, fields)
-        rows = self.client.table("product_models").update(row).eq("id", current["id"]).execute().data
+        rows = write_scanner_compatible(
+            lambda values: self.client.table("product_models").update(values).eq("id", current["id"]),
+            "product_models", row,
+        ).data
         if not rows:
             raise HTTPException(403, "Das Modell wurde nicht gespeichert. Bitte die Schreibrechte prüfen und die Liste neu laden.")
         return public_model(rows[0], fields)

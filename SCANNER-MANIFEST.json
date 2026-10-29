@@ -1,14 +1,17 @@
 {
-  "base_commit": "9fe12475af31c40c37483676869aa54fc9cab188",
-  "build": "2026-10-22-scanner-v2",
-  "database_setup_applied_to": "ITAssetFlow",
-  "checks": {
-    "python_tests": 50,
+  "version": "1.1.1",
+  "date": "2026-10-29",
+  "base_commit": "35f85cdf5618da7872db551b2032feca84b20c1e",
+  "target_supabase_organization": "DLC-Informatik",
+  "live_database_changes_applied": false,
+  "database_connection_status": "Only Sven-Teko visible; DLC-Informatik connection required",
+  "validation": {
+    "python_tests": 60,
     "eslint": "passed",
-    "typescript_vite": "passed",
-    "browser_scanner_mobile_dist": "passed",
+    "vite_typescript": "passed",
     "browser_smoke_dist": "passed",
-    "backend_all_dist_files": "passed"
+    "browser_scanner_mobile_dist": "passed",
+    "all_dist_files_via_backend": "passed"
   },
   "files": [
     {
@@ -16,72 +19,48 @@
       "sha256": "b67b1d9dada4dc59955c7d679a646f9259f21ef066279e48d8a780ebfb30a56a"
     },
     {
+      "path": "UPDATE-HINWEISE.md",
+      "sha256": "8e47413e81287d5ffde6125c12c5dc22909f13f7b6eb04ba1a1390de1596d93a"
+    },
+    {
       "path": "UPDATE-SCANNER.md",
-      "sha256": "7081c901a1c7c879843cfff842f756104c889aa65d59e380aea6b5d923e5059d"
+      "sha256": "03da7dee6323de338c61624d572c6acb6646d067ce8233d3278a16aa55322adc"
     },
     {
       "path": "database/scanner_codes.sql",
-      "sha256": "b449e7f5c40035b4ad94a419972b1649eacb57f800020e774dd2b4abb6c53002"
+      "sha256": "43aa7d85f285f0601ec706b1a77e6aa7a78e0f6d13513c58cb30336e8d7f4133"
     },
     {
       "path": "src/infrastructure/asset_repository.py",
-      "sha256": "9014d82020af47dec3921947c1a04b177a186eeb34dee8c918ca9ce6723a823a"
+      "sha256": "761fe569d2cae7112420c61fa07a0853265cbe55de2d82960ab8fc9104935951"
     },
     {
       "path": "src/infrastructure/qr_service.py",
-      "sha256": "56c5b5abc9c6d19b0aa7a76f8cb2c5668554fa737d7ec60deb439ecc1165cc16"
+      "sha256": "e4781b947172f25d91aa03eb297ae8f61ba113003dad60cb1b13359ca7c42fcc"
     },
     {
-      "path": "src/infrastructure/scanner_codes.py",
-      "sha256": "be3026ca1a0f417688b4515fd7ca799d1e8175c56748c56093d81f446ce465f4"
+      "path": "src/infrastructure/scanner_schema.py",
+      "sha256": "4d7c4bf995c549baac9b498e577efe6b3ac936b648200054a56f872683ba6e18"
     },
     {
       "path": "src/web_backend/app.py",
-      "sha256": "7f39782af4dc30a768cfb0be9833937e63376dc1db617e1f8fc95a65ac2eb8c0"
+      "sha256": "6a297290f07223833c448c42c3c191d8efcbd0fedf1f0e8d9f207bbab0da0264"
     },
     {
       "path": "src/web_backend/product_model_routes.py",
-      "sha256": "9fee4942ad401c32bb1136961a0e7998b743755516e36ad687d45c1df1895e56"
+      "sha256": "be4a6ffdc74e12a4a7450a4b1d109c95c52ea429cd7093da16f8eb33ffc7447e"
     },
     {
       "path": "tests/README.md",
-      "sha256": "5e618d0a78fba3bbe6a5ac134bda01d31a42b2867acf54b3695ddad428ba8701"
-    },
-    {
-      "path": "tests/browser_qr_mobile.cjs",
-      "sha256": "a85ec2b6f07b3767ba90eb5af6499b418f3191b7385f494a7d11b29d3f248326"
+      "sha256": "77ab04325d2146ac1c552022f8304f61217780cc7d66cb1e76c4ac45d12d249e"
     },
     {
       "path": "tests/browser_smoke.cjs",
-      "sha256": "4ad0bd53937065e2f8e3c410e93c2a8d69e96625e6b597d3edf9ecc3ac38a901"
+      "sha256": "01e71da35f4bfb35d9d4c82a6754ba6822e6a591c15b6d7d73c0dfc24a0b0fcc"
     },
     {
-      "path": "tests/fixtures/0012345678905.svg",
-      "sha256": "70a042e4c5d152e861ddce078e9a11b5b936c6fe99a6cb18d83eb3da8edcc504"
-    },
-    {
-      "path": "tests/fixtures/4006381333931.svg",
-      "sha256": "3b3021e9a86b9e910a2c6cc8aaf81e71e52a9985d2144e80fb66816d8140181c"
-    },
-    {
-      "path": "tests/fixtures/96385074.svg",
-      "sha256": "2c5f8f4cbb309125cc4d1369bc6bc1270fc0a59de29498cbc72450ae6a0e9bfd"
-    },
-    {
-      "path": "tests/fixtures/QR-CABLE.png",
-      "sha256": "1d06c1f5ab22b5c751d364443459eed1c2a9144fab88c9d36a1b7361f4937993"
-    },
-    {
-      "path": "tests/test_qr_update.py",
-      "sha256": "6848b3da26dc668cf01d0717d686820e24c2656caded30e568e355f94d4f0a80"
-    },
-    {
-      "path": "tests/test_scanner.py",
-      "sha256": "bde79c09d3958618e406ddb9edeb6da247689dde0f35905c0f6aa8f10e2f789b"
-    },
-    {
-      "path": "tests/test_update.py",
-      "sha256": "160ecee237d9a4681676d6f1870a091141854a87c38d11d227269a39752155b8"
+      "path": "tests/test_scanner_schema.py",
+      "sha256": "25ebe09afcf4082e3ccfb23c6b42b65111b69124ae08c4f7fab98263364b1f98"
     },
     {
       "path": "web/dist/QR-LICENSES.txt",
@@ -96,12 +75,12 @@
       "sha256": "e7f733ee579433833278066c5af88bde9ec676902179111781994fad4b79382a"
     },
     {
-      "path": "web/dist/assets/index-BmEs3is2.js",
-      "sha256": "327c52f5926da4b32a2a7272eb141476476e773a9c53e4f38739479f8239914d"
+      "path": "web/dist/assets/index-CBgmHP0B.css",
+      "sha256": "18050e6489ed752cf21e96d0c14c846ebb8068e2efb3e63c876a5babb4ec3dee"
     },
     {
-      "path": "web/dist/assets/index-D-GsArLP.css",
-      "sha256": "2c7c57b3f6538f500c4af17c5f0b97f74a37f7163ef1a4dceb82ceb5fe6768e6"
+      "path": "web/dist/assets/index-D5d9Auj_.js",
+      "sha256": "ca4d7a26408f42d775c6e304dd8145c14f2249b72831367b83e849995bbeb705"
     },
     {
       "path": "web/dist/favicon.svg",
@@ -113,7 +92,7 @@
     },
     {
       "path": "web/dist/index.html",
-      "sha256": "49c4e13a1dcc83d6b7120706024482dd296de5e44b9e614b36f64aaa484646ed"
+      "sha256": "7442c6f1d753b7abad4c321448a1f55799266096e39ffabbf7a605d0af17a901"
     },
     {
       "path": "web/dist/logo.png",
@@ -121,75 +100,35 @@
     },
     {
       "path": "web/index.html",
-      "sha256": "bf713e56cadc6e33eef4e223add368396eae100022aa8e0ae5a2a355d5964ae8"
+      "sha256": "a88c4e0539787e8787cd4d1e45cc849ed4d9fd581328e6deca5c91a69192d6de"
     },
     {
       "path": "web/package-lock.json",
-      "sha256": "090aeb6a2e3a1d211d359cc9fbd94ea818d266c33a50d16f933acb7bf79cbba5"
+      "sha256": "210fa32118eab5b67f4917e6505e22a89599d4cb9cad0c44d1fa7b1352e574c7"
     },
     {
       "path": "web/package.json",
-      "sha256": "e6ade1bf28f84cd736b3bc9a9226afc41f8349c2f864414892355d794b8578a8"
+      "sha256": "d309f47b5c0b71e36205bb5fb8957376bf198cb9d807a50c2642d32789863421"
     },
     {
-      "path": "web/src/Mobile.css",
-      "sha256": "abb46f2e6d453f3483c9d861517b2c769a97d4c8c03f9983612a23a2e784606f"
+      "path": "web/src/App.css",
+      "sha256": "06d25092aaffd9ab82bbf096bda332d3326415371767d50a46ccd4dde3e0e625"
     },
     {
-      "path": "web/src/api/config.ts",
-      "sha256": "e32eb278487c92fee5c0dc4ddb1c4970dc909927e6966c67b54ffd6a2384c67e"
+      "path": "web/src/components/AboutDialog.tsx",
+      "sha256": "1ee959c5898b0802cd836fe7343743efa876ea3d1324a850256bdbcc46aa6d4a"
     },
     {
-      "path": "web/src/api/qrApi.ts",
-      "sha256": "925d2f3ae27d78c639e031e0adf3e03ca1adadbdb42aa3eb852f89470a1ba1a7"
-    },
-    {
-      "path": "web/src/components/EntryContextMenu.tsx",
-      "sha256": "ef1affbdb8d0b9a08fe3a4d35319b908a0209ee9d60324050f5859b69952859e"
-    },
-    {
-      "path": "web/src/components/InventoryTable.tsx",
-      "sha256": "aa58aef775cef4e1712301d654ae51db1d8b2f8b8ebf1e5a686a816519b0bc5b"
-    },
-    {
-      "path": "web/src/components/QrScanner.tsx",
-      "sha256": "bd50cb1574c9d812d46d680f06cf032aa0341a0ea1d2abc60a7ab29f6484116d"
-    },
-    {
-      "path": "web/src/components/QrWorkflowDialog.css",
-      "sha256": "8875103b7b3e21eb537aa882fd3b49ba60396044751e6970412a181b8b863a8c"
-    },
-    {
-      "path": "web/src/components/QrWorkflowDialog.tsx",
-      "sha256": "4928c006066920a478ebc64917d65c1140c95307567c31e61873d91a2df3999f"
-    },
-    {
-      "path": "web/src/hooks/useInventoryActions.ts",
-      "sha256": "70428a538aec40350807c6c92e0cf1e273bddcfe5b999574c56c881422dbc560"
-    },
-    {
-      "path": "web/src/hooks/useRowContextMenu.ts",
-      "sha256": "77116326e6e1321514ee9df5e8de96c860c99cc50edef35736c1c0862caf47b4"
-    },
-    {
-      "path": "web/src/pages/AssetFormPage.tsx",
-      "sha256": "cbeb05eaad9763d57e4e5d1cc599f6e58182bd29008bacb3158962d45905aa56"
+      "path": "web/src/components/MainMenu.tsx",
+      "sha256": "ec99335a9cea4dc8449899ddb8980be41eb96f0fcf6994073ee177d5728dee31"
     },
     {
       "path": "web/src/pages/InventoryPage.tsx",
-      "sha256": "7813f925c2690423d290aa84c275bdc6679cf4063ee9488e9e727f7bf43e33be"
+      "sha256": "d8ed2fb7430e83a624449a009c3e63a65d002f1e3b52bab14015ec7e0d1edb6b"
     },
     {
-      "path": "web/src/pages/ProductModelsPage.tsx",
-      "sha256": "f11669fc1a553cc483f2dc3fae5b50fe0f320d7b11d95bdc957efc4757cf92fd"
-    },
-    {
-      "path": "web/src/utils/productModels.ts",
-      "sha256": "babf2284e8899d5bf4d4b62b9ad4c0326270763b0ddc2697c8bf33dd82c17312"
-    },
-    {
-      "path": "web/src/utils/scannerCodes.ts",
-      "sha256": "16aba4edc280417fcabf8fe04ca92a1bb0adfd746997111a58ea4aea0a0c0ca5"
+      "path": "web/src/release.ts",
+      "sha256": "4b4213036340b9e86d61926c205a6ee7af7966555795cada80826c70c463117a"
     }
   ]
 }

@@ -333,7 +333,7 @@ input:focus {
   display: flex;
   flex-direction: column;
   color: #1f2937;
-  background: #f1f3f5;
+  background: #e2e7ec;
 }
 
 .navigation {
@@ -356,7 +356,7 @@ input:focus {
   align-items: center;
   padding: 8px 10px;
   color: #111827;
-  background: #e7eaee;
+  background: #d0d8e1;
   border-bottom: 1px solid #d5d9df;
   font-weight: 600;
 }
@@ -1032,6 +1032,9 @@ input:focus {
 }
 
 .menu-logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   min-height: 29px;
   flex: 0 0 auto;
   margin-right: 3px;
@@ -1060,6 +1063,13 @@ input:focus {
   .menu-logout-button {
     padding: 0 9px;
   }
+}
+
+.menu-power-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: #c83232;
 }
 
 /* Drag-Docking der Seitenleisten */
@@ -1109,7 +1119,7 @@ input:focus {
 }
 
 .dock-shell .dock-title:hover {
-  background: #dfe4e9;
+  background: #c5ced9;
 }
 
 .dock-shell-dragging {

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from supabase import Client
 from infrastructure.scanner_codes import normalize_ean, code_values
+from infrastructure.scanner_schema import missing_scanner_column, select_scanner_compatible, write_scanner_compatible
 
 
 def normalize_qr_code(value: Any) -> str:
@@ -40,9 +41,16 @@ class QrService:
         escaped = code.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_").replace("*", r"\*")
         found = {}
         for field in ("qr_code", "ean", "sku", "part_number"):
-            query = self.client.table("product_models").select("id,name,sku,part_number,qr_code,ean,tracking_mode,is_active")
-            query = query.eq(field, code) if field in {"qr_code", "ean"} else query.ilike(field, escaped)
-            response = query.limit(100).execute()
+            def query(columns: str):
+                result = self.client.table("product_models").select(columns)
+                result = result.eq(field, code) if field in {"qr_code", "ean"} else result.ilike(field, escaped)
+                return result.limit(100)
+            try:
+                response = select_scanner_compatible(query, "product_models", "id,name,sku,part_number,qr_code,ean,tracking_mode,is_active")
+            except Exception as error:
+                if missing_scanner_column(error, "product_models") == field:
+                    continue
+                raise
             for row in self._data(response):
                 if str(row.get(field) or "").strip().casefold() == code.casefold():
                     found[row["id"]] = row
@@ -51,7 +59,15 @@ class QrService:
     def _assets_for_code(self, code: str) -> list[dict[str, Any]]:
         found = {}
         for field in ("qr_code", "ean", "asset_tag", "serial_number"):
-            response = self.client.table("assets").select("id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status").eq(field, code).execute()
+            try:
+                response = select_scanner_compatible(
+                    lambda columns: self.client.table("assets").select(columns).eq(field, code),
+                    "assets", "id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status",
+                )
+            except Exception as error:
+                if missing_scanner_column(error, "assets") == field:
+                    continue
+                raise
             for row in self._data(response):
                 found[row["id"]] = row
         return list(found.values())
@@ -68,7 +84,10 @@ class QrService:
         seen_assets = {row["id"] for row in assets}
         for model in matched_models:
             if model.get("tracking_mode") in {"serialized", "hybrid"}:
-                response = self.client.table("assets").select("id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status").eq("product_model_id", model["id"]).execute()
+                response = select_scanner_compatible(
+                    lambda columns: self.client.table("assets").select(columns).eq("product_model_id", model["id"]),
+                    "assets", "id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status",
+                )
                 for asset in self._data(response):
                     if asset["id"] not in seen_assets:
                         assets.append(asset)
@@ -122,7 +141,10 @@ class QrService:
         changes = code_values(values)
         if not changes:
             return
-        rows = self._data(self.client.table("product_models").select("id,qr_code,ean").eq("id", model_id).limit(1).execute())
+        rows = self._data(select_scanner_compatible(
+            lambda columns: self.client.table("product_models").select(columns).eq("id", model_id).limit(1),
+            "product_models", "id,qr_code,ean",
+        ))
         if not rows:
             raise ValueError("Das Produktmodell existiert nicht mehr.")
         current = rows[0]
@@ -131,10 +153,12 @@ class QrService:
             raise ValueError("Dieses Modell hat bereits einen anderen Code. Bitte die Kennungen unter Produktmodelle bearbeiten.")
         if not changes:
             return
-        query = self.client.table("product_models").update(changes).eq("id", model_id)
-        for key in changes:
-            query = query.is_(key, "null") if current.get(key) is None else query.eq(key, current[key])
-        if not self._data(query.execute()):
+        def query(values: dict[str, Any]):
+            result = self.client.table("product_models").update(values).eq("id", model_id)
+            for key in values:
+                result = result.is_(key, "null") if current.get(key) is None else result.eq(key, current[key])
+            return result
+        if not self._data(write_scanner_compatible(query, "product_models", changes)):
             raise ValueError("Die Kennungen wurden gleichzeitig geändert. Bitte die Seite neu laden.")
 
     def bind_model_code(self, model_id: Any, value: Any) -> None:

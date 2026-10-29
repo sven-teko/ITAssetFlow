@@ -25,3 +25,7 @@ Für den Test des fertigen Builds zunächst `npm.cmd run build -- --emptyOutDir`
 Für ein anderes Testziel kann `UI_BASE_URL` gesetzt werden. `PLAYWRIGHT_MODULE` und `CHROMIUM_EXECUTABLE` sind optionale Pfade für bestehende Testumgebungen.
 
 `test_scanner.py` prüft optionale QR-/EAN-Kennungen, Prüfziffern, Mehrfachtreffer, Bestand über EAN, Altschnittstellen und Rechte. Alle Buchungen in den Tests verwenden simulierte Daten.
+
+`test_scanner_schema.py` prüft die fehlenden optionalen Spalten (42703/PGRST204), das Laden und Speichern bestehender Einträge mit altem Schema, teilweise ergänzte Datenbanken und den Schutz vor verworfenen QR-/EAN-Werten. Der gesamte Python-Testlauf enthält 60 Tests.
+
+Die Browser-Smoke-Prüfung kontrolliert zusätzlich die dunkleren Seitenleisten, die Datensatzanzahl nur unten, das rote Power-Symbol und die aktualisierten Angaben unter Hilfe → Über. Mit `START_PREVIEW=1` starten beide Browser-Testskripte den fertigen dist-Build selbst.

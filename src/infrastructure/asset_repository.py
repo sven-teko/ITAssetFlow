@@ -10,6 +10,7 @@ from supabase import Client
 from infrastructure.date_validation import normalize_inventory_dates
 from infrastructure.qr_service import QrService, normalize_qr_code
 from infrastructure.scanner_codes import code_values
+from infrastructure.scanner_schema import select_scanner_compatible, write_scanner_compatible
 
 from inventory import (
     get_asset_identifier,
@@ -323,16 +324,13 @@ class AssetRepository:
             if asset_id is None:
                 raise ValueError("Asset-ID fehlt.")
 
-            response = (
-                self.client.table(self.asset_table_name)
-                .select(
-                    "id,product_model_id,asset_tag,serial_number,purchase_date,"
-                    "new_price,warranty_until,note,retired_at,status,"
-                    "specifications,condition,qr_code,ean"
-                )
-                .eq("id", asset_id)
-                .limit(1)
-                .execute()
+            response = select_scanner_compatible(
+                lambda columns: self.client.table(self.asset_table_name)
+                .select(columns).eq("id", asset_id).limit(1),
+                self.asset_table_name,
+                "id,product_model_id,asset_tag,serial_number,purchase_date,"
+                "new_price,warranty_until,note,retired_at,status,"
+                "specifications,condition,qr_code,ean",
             )
             rows = [
                 row
@@ -960,7 +958,10 @@ class AssetRepository:
         if not isinstance(assignment, dict) or assignment.get("department_id") is None:
             raise ValueError("Abteilung fehlt.")
 
-        response = self.client.table(self.asset_table_name).insert(row).execute()
+        response = write_scanner_compatible(
+            lambda values: self.client.table(self.asset_table_name).insert(values),
+            self.asset_table_name, row,
+        )
         rows = [item for item in (response.data or []) if isinstance(item, dict)]
         if not rows or rows[0].get("id") is None:
             raise RuntimeError("Supabase hat für das neue Asset keine ID zurückgegeben.")
@@ -1189,11 +1190,9 @@ class AssetRepository:
 
         # Erst den Hauptdatensatz aktualisieren; alle Pflichtdaten und
         # Duplikate wurden vorher validiert.
-        response = (
-            self.client.table(self.asset_table_name)
-            .update(row)
-            .eq("id", asset_id)
-            .execute()
+        response = write_scanner_compatible(
+            lambda values: self.client.table(self.asset_table_name).update(values).eq("id", asset_id),
+            self.asset_table_name, row,
         )
         rows = [
             item
@@ -1696,10 +1695,10 @@ class AssetRepository:
         select_expression: str = "*",
     ) -> list[dict[str, Any]]:
         try:
-            query = self.client.table(table_name).select(select_expression)
-            if order_column:
-                query = query.order(order_column)
-            response = query.execute()
+            def query(columns: str):
+                result = self.client.table(table_name).select(columns)
+                return result.order(order_column) if order_column else result
+            response = select_scanner_compatible(query, table_name, select_expression)
         except Exception as error:
             message = f"Tabelle/View {table_name!r} konnte nicht gelesen werden: {error}"
             if required:

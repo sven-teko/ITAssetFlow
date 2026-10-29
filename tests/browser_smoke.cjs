@@ -85,6 +85,22 @@ const run = (async () => {
     await page.locator('.brand-loading').waitFor({state:'visible'});
     await page.getByText('TEST-001',{exact:true}).waitFor();
     console.log('PASS: Anmeldung und Logo-Ladeanzeige');
+    assert.equal(await page.locator('.inventory-header-actions').getByText(/Datensätze?/).count(),0);
+    assert.equal(await page.locator('.status-bar').getByText('2 Datensätze',{exact:true}).count(),1);
+    assert.equal(await page.locator('.menu-logout-button .menu-power-icon').evaluate(el=>getComputedStyle(el).color),'rgb(200, 50, 50)');
+    assert.equal(await page.getByRole('button',{name:'Abmelden',exact:true}).count(),1);
+    assert.equal(await page.locator('.navigation').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(226, 231, 236)');
+    assert.equal(await page.locator('.details').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(226, 231, 236)');
+    await page.getByRole('button',{name:'Hilfe',exact:true}).click();
+    await page.getByRole('button',{name:'Über',exact:true}).click();
+    await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
+    await page.getByText('Version 1.1.1 · 29.10.2026',{exact:true}).waitFor();
+    await page.getByText('QR- und EAN-Scanner mit Lagerbuchungen.',{exact:true}).waitFor();
+    if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
+    await page.getByRole('button',{name:'OK',exact:true}).click();
+    if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.1.1');
+
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
     await page.locator('.filter-option').filter({hasText:'Verfügbar'}).locator('input').check();

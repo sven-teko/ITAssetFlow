@@ -641,7 +641,12 @@ export default function MainMenu({
           )
         }
       >
-        Abmelden
+        <span>Abmelden</span>
+        <svg className="menu-power-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+          <path d="M12 3v9" />
+          <path d="M6.3 5.7a9 9 0 1 0 11.4 0" />
+        </svg>
       </button>
 
     </div>

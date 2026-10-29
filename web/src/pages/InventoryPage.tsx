@@ -492,7 +492,7 @@ export default function InventoryPage({
         <main className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
           <div className="page-header">
             <h1>IT-Inventar</h1>
-            <div className="inventory-header-actions"><span>{view.countText}</span>
+            <div className="inventory-header-actions">
               <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>Scanner</button>
               {isMobile && canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
             </div>

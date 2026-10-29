@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { APP_VERSION, RELEASE_DATE } from "../release";
 
 type AboutDialogProps = {
   open: boolean;
@@ -62,9 +63,12 @@ export default function AboutDialog({ open, onClose }: AboutDialogProps) {
 
         <div className="about-dialog-content">
           <h2 id="about-dialog-title">ITAssetFlow</h2>
-          <p>Version 0.3.5</p>
-          <p>Inventarverwaltung für IT-Materialien.</p>
-          <p>Datenbank und Authentifizierung über Supabase.</p>
+          <p>Version {APP_VERSION} · {RELEASE_DATE}</p>
+          <p>Inventarverwaltung für Einzelgeräte und Mengenartikel.</p>
+          <p>QR- und EAN-Scanner mit Lagerbuchungen.</p>
+          <p>Mobile Ansicht mit Tabelle, Filtern und Details.</p>
+          <p>Mitarbeiterverwaltung und Benutzerrollen.</p>
+          <p>React · FastAPI · Supabase</p>
           <p className="about-company">DLC-Informatik GmbH</p>
         </div>
 
