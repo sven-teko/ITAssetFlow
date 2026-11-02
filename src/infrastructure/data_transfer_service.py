@@ -38,6 +38,8 @@ TABLE_ORDER: tuple[str, ...] = (
     "software_products",
     "software_licenses",
     "assets",
+    "inventory_images",
+    "inventory_archive",
     "asset_locations",
     "asset_assignments",
     "asset_component_assignments",
@@ -62,6 +64,8 @@ PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
     "software_products": ("id",),
     "software_licenses": ("id",),
     "assets": ("id",),
+    "inventory_images": ("id",),
+    "inventory_archive": ("id",),
     "asset_locations": ("id",),
     "asset_assignments": ("id",),
     "asset_component_assignments": ("id",),
@@ -75,7 +79,7 @@ PRIMARY_KEYS: dict[str, tuple[str, ...]] = {
 SEQUENCE_TABLES: tuple[str, ...] = tuple(
     table
     for table, key in PRIMARY_KEYS.items()
-    if key == ("id",)
+    if key == ("id",) and table not in {"inventory_images", "inventory_archive"}
 )
 
 

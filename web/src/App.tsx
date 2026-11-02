@@ -11,6 +11,7 @@ import {
 import AssetFormPage from "./pages/AssetFormPage";
 import LoadingIndicator from "./components/LoadingIndicator";
 import InventoryPage from "./pages/InventoryPage";
+import ArchivePage from "./pages/ArchivePage";
 import LoginPage from "./pages/LoginPage";
 import SettingsPage from "./pages/SettingsPage";
 import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordRecoveryPage";
@@ -201,6 +202,7 @@ export default function App() {
         }
       />
 
+      <Route path="/archive" element={<ProtectedPage email={email} role={role}><ArchivePage onSessionExpired={clearSession}/></ProtectedPage>} />
       <Route
         path="/inventory/new"
         element={

@@ -130,6 +130,7 @@ INVENTORY_GROUP_ALIASES = {
 PREFERRED_COLUMN_ORDER = [
     "asset_tag",
     "serial_number",
+    "mac_address",
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
@@ -166,6 +167,7 @@ DEFAULT_VISIBLE_COLUMNS = {
 HEADER_LABELS = {
     "asset_tag": "Asset-Tag",
     "serial_number": "Seriennummer",
+    "mac_address": "MAC-Adresse",
     "product_model_name": "Produktmodell",
     "manufacturer_name": "Hersteller",
     "product_category_name": "Produktkategorie",

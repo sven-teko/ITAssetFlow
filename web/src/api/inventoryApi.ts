@@ -1,4 +1,5 @@
 import { API_BASE } from "./config";
+import type { ArchiveReason } from "./archiveApi";
 import type {
   CsvImportResult,
   DeleteInventoryResult,
@@ -224,7 +225,7 @@ export async function loadInventoryMeta(): Promise<InventoryMeta> {
 }
 
 export async function deleteInventoryEntries(
-  entryKeys: string[],
+  entryKeys: string[], reason: ArchiveReason,
 ): Promise<DeleteInventoryResult> {
   const response = await fetch(`${API_BASE}/api/inventory/delete`, {
     method: "POST",
@@ -232,7 +233,7 @@ export async function deleteInventoryEntries(
     headers: mutationHeaders({
       "Content-Type": "application/json",
     }),
-    body: JSON.stringify({ entry_keys: entryKeys }),
+    body: JSON.stringify({ entry_keys: entryKeys, reason }),
   });
 
   ensureAuthorized(response);

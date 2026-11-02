@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 from supabase import Client
-from infrastructure.scanner_codes import normalize_ean, code_values
+from infrastructure.scanner_codes import normalize_ean, code_values, normalize_mac
 from infrastructure.scanner_schema import missing_scanner_column, select_scanner_compatible, write_scanner_compatible
 
 
@@ -58,23 +58,29 @@ class QrService:
 
     def _assets_for_code(self, code: str) -> list[dict[str, Any]]:
         found = {}
-        for field in ("qr_code", "ean", "asset_tag", "serial_number"):
+        for field in ("qr_code", "ean", "asset_tag", "serial_number", "mac_address"):
+            try:
+                searched = normalize_mac(code) if field == "mac_address" else code
+            except ValueError:
+                continue
             try:
                 response = select_scanner_compatible(
-                    lambda columns: self.client.table("assets").select(columns).eq(field, code),
-                    "assets", "id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status",
+                    lambda columns: self.client.table("assets").select(columns).eq(field, searched).is_("archived_at", "null"),
+                    "assets", "id,asset_tag,serial_number,mac_address,qr_code,ean,product_model_id,condition,status",
                 )
             except Exception as error:
                 if missing_scanner_column(error, "assets") == field:
                     continue
                 raise
             for row in self._data(response):
+                if field in {"serial_number", "mac_address"}:
+                    row["matched_identifier"] = "mac" if field == "mac_address" else "serial"
                 found[row["id"]] = row
         return list(found.values())
 
     def lookup(self, value: Any, code_type: str = "auto") -> dict[str, Any]:
         code = normalize_qr_code(value)
-        if code_type not in {"auto", "qr", "ean"}:
+        if code_type not in {"auto", "qr", "ean", "mac", "serial"}:
             raise ValueError("Unbekannte Codeart.")
         if code_type == "ean":
             normalize_ean(code)
@@ -85,7 +91,7 @@ class QrService:
         for model in matched_models:
             if model.get("tracking_mode") in {"serialized", "hybrid"}:
                 response = select_scanner_compatible(
-                    lambda columns: self.client.table("assets").select(columns).eq("product_model_id", model["id"]),
+                    lambda columns: self.client.table("assets").select(columns).eq("product_model_id", model["id"]).is_("archived_at", "null"),
                     "assets", "id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status",
                 )
                 for asset in self._data(response):
@@ -135,7 +141,8 @@ class QrService:
                     "quantity": float(level["quantity"] or 0)})
 
         active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations if row.get("is_active") is True and row.get("department_id") is not None]
-        return {"code": code, "code_type": code_type, "matches": matches, "locations": active_locations}
+        detected = next((row.get("matched_identifier") for row in assets if row.get("matched_identifier")), code_type)
+        return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations}
 
     def save_model_codes(self, model_id: Any, values: dict[str, Any], *, only_empty: bool = False) -> None:
         changes = code_values(values)

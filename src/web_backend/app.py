@@ -36,6 +36,7 @@ from web_backend.settings_routes import create_settings_router
 from web_backend.product_model_routes import create_product_models_router
 from web_backend.recovery_routes import create_recovery_router
 from web_backend.preferences_routes import create_preferences_router
+from web_backend.archive_routes import ArchiveReason, create_archive_router
 
 from inventory import (
     CONDITION_LABELS,
@@ -330,6 +331,7 @@ class LoginPayload(BaseModel):
 
 class DeleteInventoryPayload(BaseModel):
     entry_keys: list[str]
+    reason: ArchiveReason
 
 
 APP_ROLES = {
@@ -1313,9 +1315,13 @@ def delete_inventory_entries(
                 "Bitte die Tabelle aktualisieren."
             )
 
-        result = repository.delete_inventory_entries(
-            selected
-        )
+        result = web_session.client.rpc("archive_inventory_items", {
+            "p_keys": list(dict.fromkeys(
+                f"stock:{row['product_model_id']}:{row['storage_location_id']}:{row['condition']}"
+                if row.get("_record_type") == "stock" else f"asset:{row['id']}"
+                for row in selected
+            )), "p_reason": payload.reason.model_dump(),
+        }).execute().data
 
         INVENTORY_CHANGES.publish(
             _request_client_id(
@@ -1509,6 +1515,7 @@ def inventory_meta(
 
 app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
 app.include_router(create_preferences_router(get_web_session))
+app.include_router(create_archive_router(get_web_session, require_editor_session))
 app.include_router(
     create_settings_router(
         require_admin_session,

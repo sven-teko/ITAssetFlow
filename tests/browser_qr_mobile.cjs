@@ -160,7 +160,7 @@ const run = (async () => {
     await page.getByRole('button',{name:'Weiteren Code scannen',exact:true}).click();
     await lookup('PC-001');
     await page.getByRole('button',{name:'Gerät bearbeiten',exact:true}).waitFor();
-    assert.deepEqual(lookups.at(-1),{code:'PC-001',type:'qr'});
+    assert.deepEqual(lookups.at(-1),{code:'PC-001',type:'serial'});
     await page.getByRole('button',{name:'Weiteren Code scannen',exact:true}).click();
     await lookup('96385074');
     await page.getByLabel('Gefundenen Artikel auswählen').waitFor();
@@ -180,19 +180,19 @@ const run = (async () => {
       await openQr();
       await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures',fixture));
       await page.getByRole('heading',{name:heading,exact:true}).waitFor();
-      assert.deepEqual(lookups.at(-1), {code,type:'auto'});
-      assert.equal(await page.locator('.qr-code-badge').textContent(),format);
+      assert.deepEqual(lookups.at(-1), {code,type:'serial'});
+      assert.equal(await page.locator('.qr-code-badge').textContent(),format+' · Seriennummer');
       await page.getByRole('button',{name:'Bestand neu prüfen',exact:true}).click();
       await page.waitForFunction(()=>!document.querySelector('.qr-refresh-button').disabled);
-      assert.deepEqual(lookups.at(-1), {code,type:'auto'});
-      assert.equal(await page.locator('.qr-code-badge').textContent(),format);
+      assert.deepEqual(lookups.at(-1), {code,type:'serial'});
+      assert.equal(await page.locator('.qr-code-badge').textContent(),format+' · Seriennummer');
       await closeQr();
     }
     await openQr();
     await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/CODE128-NEW.svg'));
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.match(await page.locator('.asset-form-qr-notice').textContent(),/Code 128: PART-128-NEW/);
-    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'PART-128-NEW');
+    assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'PART-128-NEW');
     assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'');
     await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
     assert.ok(wasmRequests.length > 0);
@@ -211,7 +211,8 @@ const run = (async () => {
     await page.getByLabel('Kaufdatum *:', { exact: true }).fill('2026-10-22');
     await page.getByRole('button', { name: /speichern/i }).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
-    assert.equal(lastAsset.scanner_codes.qr_code, 'QR-NEU-42');
+    assert.equal(lastAsset.asset.serial_number, 'QR-NEU-42');
+    assert.equal(lastAsset.scanner_codes.qr_code, null);
     assert.equal(lastAsset.asset.asset_tag, 'QR-NEU-42');
     console.log('PASS: Unbekannter Code öffnet neuen Artikel und bleibt beim Speichern zugeordnet');
 
@@ -299,8 +300,8 @@ const run = (async () => {
     await page.evaluate(dataUrl => { window.testCodeImage=dataUrl; navigator.mediaDevices.getUserMedia=window.fakeScannerGetUserMedia; },code128Data);
     await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
     await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
-    assert.deepEqual(lookups.at(-1),{code:'87954252804',type:'auto'});
-    assert.equal(await page.locator('.qr-code-badge').textContent(),'Code 128');
+    assert.deepEqual(lookups.at(-1),{code:'87954252804',type:'serial'});
+    assert.equal(await page.locator('.qr-code-badge').textContent(),'Code 128 · Seriennummer');
     assert.equal(await page.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))),true);
     assert.ok(await page.evaluate(()=>window.testAppliedConstraints.some(c=>c.advanced?.[0]?.focusMode==='continuous')));
     assert.equal(await page.evaluate(()=>window.testCameraConstraints.video.width.ideal),1920);
@@ -364,8 +365,13 @@ const run = (async () => {
     assert.equal(await page.getByRole('menuitem',{name:'Eintrag bearbeiten'}).count(),1);
     await page.keyboard.press('Escape');
     await page.locator('.inventory-table tbody tr').nth(1).click({button:'right'});
-    page.once('dialog',dialog=>dialog.accept());
+    await page.waitForFunction(()=>document.querySelector('[role=menuitem]:last-child')?.getAttribute('aria-disabled')==='false');
     await page.getByRole('menuitem',{name:'Eintrag löschen'}).click();
+    const archiveDialog=page.getByRole('dialog',{name:'Artikel archivieren',exact:true});
+    await archiveDialog.getByLabel('Grund *',{exact:true}).selectOption('defective');
+    await archiveDialog.getByLabel('Wurde der Artikel vernichtet? *',{exact:true}).selectOption('yes');
+    await archiveDialog.getByRole('button',{name:'Archivieren',exact:true}).click();
+    await archiveDialog.waitFor({state:'hidden'});
     await page.waitForFunction(()=>!document.querySelector('.entry-context-menu'));
     assert.ok(deletedKeys.length === 1 && deletedKeys[0].startsWith('stock:'));
 

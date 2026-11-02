@@ -9,7 +9,7 @@ from supabase import Client
 
 from infrastructure.date_validation import normalize_inventory_dates
 from infrastructure.qr_service import QrService, normalize_qr_code
-from infrastructure.scanner_codes import code_values
+from infrastructure.scanner_codes import code_values, normalize_mac
 from infrastructure.scanner_schema import select_scanner_compatible, write_scanner_compatible
 
 from inventory import (
@@ -135,7 +135,24 @@ class AssetRepository:
             departments,
         )
 
-        return merged_assets + stock_rows
+        result = merged_assets + stock_rows
+        self._attach_item_images(result)
+        return result
+
+    def _attach_item_images(self, rows: list[dict[str, Any]]) -> None:
+        keyed = {}
+        for row in rows:
+            key = (f"stock:{row.get('product_model_id')}:{row.get('storage_location_id')}:{row.get('condition')}"
+                   if row.get("_record_type") == "stock" else f"asset:{row.get('id')}")
+            row["image_id"] = None
+            keyed[key] = row
+        keys = list(keyed)
+        for index in range(0, len(keys), 100):
+            response = (self.client.table("inventory_images").select("id,item_key")
+                        .eq("is_current", True).in_("item_key", keys[index:index+100]).execute())
+            for image in response.data or []:
+                if image.get("item_key") in keyed:
+                    keyed[image["item_key"]]["image_id"] = image["id"]
 
     def delete_inventory_entries(
         self,
@@ -326,11 +343,11 @@ class AssetRepository:
 
             response = select_scanner_compatible(
                 lambda columns: self.client.table(self.asset_table_name)
-                .select(columns).eq("id", asset_id).limit(1),
+                .select(columns).eq("id", asset_id).is_("archived_at", "null").limit(1),
                 self.asset_table_name,
                 "id,product_model_id,asset_tag,serial_number,purchase_date,"
                 "new_price,warranty_until,note,retired_at,status,"
-                "specifications,condition,qr_code,ean",
+                "specifications,condition,qr_code,ean,mac_address",
             )
             rows = [
                 row
@@ -395,6 +412,7 @@ class AssetRepository:
                 current,
                 data,
             )
+            self._attach_item_images([current])
             data["edit_entry"] = current
             return data
 
@@ -476,6 +494,7 @@ class AssetRepository:
             current,
             data,
         )
+        self._attach_item_images([current])
         data["edit_entry"] = current
         return data
 
@@ -934,6 +953,7 @@ class AssetRepository:
             "asset_tag": asset_tag,
             **code_values(asset_data),
             "serial_number": self._none_if_blank(asset_data.get("serial_number")),
+            "mac_address": normalize_mac(asset_data.get("mac_address")),
             "purchase_date": asset_data.get("purchase_date"),
             "new_price": asset_data.get("new_price") or 0,
             "warranty_until": asset_data.get("warranty_until"),
@@ -1094,6 +1114,7 @@ class AssetRepository:
             "product_model_id": model_id,
             "asset_tag": asset_tag,
             **code_values(asset_data),
+            "mac_address": normalize_mac(asset_data.get("mac_address")),
             "serial_number": self._none_if_blank(
                 asset_data.get("serial_number")
             ),
@@ -1664,6 +1685,8 @@ class AssetRepository:
         try:
             def query(columns: str):
                 result = self.client.table(table_name).select(columns)
+                if table_name == self.asset_table_name:
+                    result = result.is_("archived_at", "null")
                 return result.order(order_column) if order_column else result
             response = select_scanner_compatible(query, table_name, select_expression)
         except Exception as error:

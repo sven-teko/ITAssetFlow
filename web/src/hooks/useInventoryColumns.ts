@@ -4,6 +4,7 @@ import type { InventoryMeta } from "../types/inventory";
 import { normalizeText } from "../utils/inventory";
 import { cachedColumnPreferences, loadColumnPreferences, saveColumnPreferences } from "../api/columnPreferences";
 import type { ColumnPreferences } from "../api/columnPreferences";
+import { formatDateTime } from "../utils/dateTime";
 
 function defaultColumnsStorageKey(email: string): string {
   return `itassetflow.default_visible_columns:${email.trim().toLocaleLowerCase()}`;
@@ -106,6 +107,8 @@ export default function useInventoryColumns({
       if (value === null || value === undefined) {
         return "";
       }
+
+      if (column === "created_at" || column === "updated_at" || column === "archived_at") return formatDateTime(value);
 
       if (typeof value === "boolean") {
         return value ? "Ja" : "Nein";

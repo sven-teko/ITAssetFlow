@@ -233,7 +233,9 @@ function editableSpecifications(value: unknown): Record<string, SpecificationVal
   return result;
 }
 
-import { validateCodes } from "../utils/scannerCodes";
+import { validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
+import ItemImagePicker from "../components/ItemImagePicker";
+import { saveItemImage } from "../api/archiveApi";
 
 export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) {
   const navigate = useNavigate();
@@ -245,7 +247,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const scannedCode = isEditMode ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
   const scannedEan = searchParams.get("code_type") === "ean";
   const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
-  const [qrCode, setQrCode] = useState(scannedEan ? "" : scannedCode);
+  const rawType=searchParams.get("code_type");
+  const scannedType: CodeType = rawType && ["qr","ean","mac","serial"].includes(rawType)
+    ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);
+  const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial">(scannedType === "mac" ? "mac" : "serial");
+  const [qrCode, setQrCode] = useState(scannedType === "qr" ? scannedCode : "");
   const [codesModelId, setCodesModelId] = useState("");
   const [ean, setEan] = useState(scannedEan ? scannedCode : "");
   const [formData, setFormData] = useState<FormDataResponse | null>(null);
@@ -269,7 +275,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [newPrice, setNewPrice] = useState("");
 
   const [assetTag, setAssetTag] = useState(!scannedEan && scannedCode.length <= 50 ? scannedCode : "");
-  const [serialNumber, setSerialNumber] = useState("");
+  const [serialNumber, setSerialNumber] = useState(scannedType === "serial" ? scannedCode : "");
+  const [macAddress,setMacAddress]=useState(scannedType === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
+  const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
+  const [imagePreparing,setImagePreparing]=useState(false);
   const [warrantyUntil, setWarrantyUntil] = useState("");
   const [assetNote, setAssetNote] = useState("");
 
@@ -407,6 +416,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           if (recordType === "asset") {
             setAssetTag(String(currentEdit.asset_tag ?? ""));
             setSerialNumber(String(currentEdit.serial_number ?? ""));
+            setMacAddress(String(currentEdit.mac_address ?? ""));
             setWarrantyUntil(dateInputValue(currentEdit.warranty_until));
             setAssetNote(String(currentEdit.note ?? ""));
             setEmployeeId(idText(currentEdit.assigned_employee_id));
@@ -492,7 +502,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
     setCodesModelId(availableModelId);
     const model = rowById(formData.product_models, availableModelId);
-    setQrCode(String((model?.tracking_mode === "quantity" ? model?.qr_code : "") || (!scannedEan ? scannedCode : "")));
+    setQrCode(String((model?.tracking_mode === "quantity" ? model?.qr_code : "") || (scannedType === "qr" || model?.tracking_mode === "quantity" && !scannedEan ? scannedCode : "")));
     setEan(String((model?.tracking_mode === "quantity" ? model?.ean : "") || (scannedEan ? scannedCode : "")));
   }
 
@@ -797,6 +807,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     }
 
     validateCodes(qrCode, ean);
+    if (macAddress.trim() && !normalizeMac(macAddress)) throw new Error("Bitte eine gültige MAC-Adresse eingeben.");
     const price = newPrice.trim() ? parseCHF(newPrice) : 0;
     let modelPayload: Record<string, unknown>;
 
@@ -843,6 +854,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       payload.asset = {
         asset_tag: assetTag.trim(),
         serial_number: serialNumber.trim() || null,
+        mac_address: macAddress.trim() ? normalizeMac(macAddress) : null,
         status,
         purchase_date: purchaseDate,
         new_price: price,
@@ -896,7 +908,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (saving) {
+    if (saving || imagePreparing) {
       return;
     }
 
@@ -917,6 +929,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       : "Der Inventareintrag konnte nicht gespeichert werden.";
 
     try {
+      let imageToSave = imageChange;
+      if (isEditMode && currentEntryType === "stock" && imageChange === undefined && editEntry?.image_id
+        && (String(editEntry.storage_location_id) !== String(payload.storage_location_id)
+          || editEntry.condition !== condition || (payload.model as GenericRow).mode === "new"
+          || String(editEntry.product_model_id) !== String((payload.model as GenericRow).id))) {
+        const originalImage = await fetch(`${API_BASE}/api/images/${encodeURIComponent(String(editEntry.image_id))}`, { credentials: "include", cache: "no-store" });
+        if (!originalImage.ok) throw new Error("Das Artikelbild konnte vor der Verschiebung nicht geladen werden. Bitte erneut versuchen.");
+        imageToSave = await originalImage.blob();
+      }
       const response = await fetch(`${API_BASE}/api/inventory`, {
         method: isEditMode ? "PUT" : "POST",
         credentials: "include",
@@ -941,9 +962,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         throw new Error(errorDetail(data, saveErrorMessage));
       }
 
-      navigate("/inventory", {
-        replace: true,
-      });
+      let imageWarning="";
+      if (imageToSave !== undefined) {
+        const saved=data as GenericRow;
+        const key=currentEntryType === "asset" ? `asset:${saved.id ?? editEntry?.id}`
+          : `stock:${saved.product_model_id ?? (payload.model as GenericRow).id}:${payload.storage_location_id}:${condition}`;
+        try { await saveItemImage(key,imageToSave); }
+        catch (cause) { imageWarning=`Der Artikel wurde gespeichert. ${cause instanceof Error ? cause.message : "Das Bild konnte nicht gespeichert werden."} Bitte das Bild über Bearbeiten erneut hinzufügen.`; }
+      }
+      navigate("/inventory", { replace: true, state: { imageWarning } });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : saveErrorMessage);
     } finally {
@@ -1016,6 +1043,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             ← Zurück zum Inventar
           </button>
         </header>
+        {scannedCode && scannedType !== "qr" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
+          <label>Barcode enthält <select value={barcodeAssignment} onChange={event=>{
+            const value=event.target.value as "mac" | "serial";setBarcodeAssignment(value);
+            setSerialNumber(value === "serial" ? scannedCode : "");setMacAddress(value === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
+          }}><option value="serial">Seriennummer</option><option value="mac">MAC-Adresse</option></select></label>
+        </div>}
         {scannedCode && <div className="asset-form-qr-notice">
           <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
           <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
@@ -1346,8 +1379,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   />
                 </div>
                 <div className="asset-form-row">
-                  <label>Seriennummer:</label>
+                  <label htmlFor="asset-serial">Seriennummer:</label>
                   <input
+                    id="asset-serial"
                     type="text"
                     className="asset-form-control"
                     value={serialNumber}
@@ -1355,6 +1389,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     onChange={(event) => setSerialNumber(event.target.value)}
                   />
                 </div>
+              <div className="asset-form-row"><label htmlFor="asset-mac">MAC-Adresse:</label>
+                <input id="asset-mac" className="asset-form-control" maxLength={50} value={macAddress} disabled={saving}
+                  placeholder="AA:BB:CC:DD:EE:FF" onChange={event=>setMacAddress(event.target.value)}/></div>
                 <div className="asset-form-row">
                   <label htmlFor="asset-warranty-until">Garantie bis:</label>
                   <input
@@ -1536,13 +1573,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 </select>
               </div>
             </fieldset>
+            <ItemImagePicker existingId={String(editEntry?.image_id ?? "")} value={imageChange} disabled={saving}
+              onChange={setImageChange} onBusy={setImagePreparing}/>
           </div>
         </div>
         <footer className="asset-form-actions">
           <button type="button" disabled={saving} onClick={() => navigate("/inventory")}>
             Abbrechen
           </button>
-          <button type="submit" className="primary-button" disabled={saving}>
+          <button type="submit" className="primary-button" disabled={saving || imagePreparing}>
             {saving
               ? "Wird gespeichert ..."
               : isEditMode

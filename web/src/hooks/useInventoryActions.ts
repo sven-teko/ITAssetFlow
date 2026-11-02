@@ -8,8 +8,9 @@ import {
   UnauthorizedError,
 } from "../api/inventoryApi";
 import type { ExportFormat } from "../api/inventoryApi";
+import type { ArchiveReason } from "../api/archiveApi";
 import type { InventoryRow } from "../types/inventory";
-import { getIdentifier, getRowKey } from "../utils/inventory";
+import { getRowKey } from "../utils/inventory";
 
 type UseInventoryActionsOptions = {
   selectedRows: InventoryRow[];
@@ -31,63 +32,36 @@ export default function useInventoryActions({
   clearSelection,
 }: UseInventoryActionsOptions) {
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [archiveRows, setArchiveRows] = useState<InventoryRow[] | null>(null);
+  const [archiveError, setArchiveError] = useState("");
   const [transferBusy, setTransferBusy] = useState(false);
   const transferInProgress = useRef(false);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function deleteEntries(rows: InventoryRow[] = selectedRows): Promise<void> {
-    if (rows.length === 0 || dataLoading || deleteBusy) {
-      return;
-    }
+    if (rows.length === 0 || dataLoading || deleteBusy) return;
+    setArchiveError("");
+    setArchiveRows(rows);
+  }
 
-    const identifiers = rows.slice(0, 8).map(getIdentifier);
-    const preview = identifiers.map((identifier) => `• ${identifier}`).join("\n");
-    const moreCount = Math.max(0, rows.length - identifiers.length);
-
-    const message =
-      rows.length === 1
-        ? `Soll dieser Inventareintrag wirklich gelöscht werden?\n\n${preview}`
-        : `Sollen diese ${rows.length} Inventareinträge wirklich gelöscht werden?\n\n`
-          + preview
-          + (moreCount > 0 ? `\n• … und ${moreCount} weitere` : "");
-
-    if (!window.confirm(message)) {
-      return;
-    }
-
+  async function confirmArchive(reason: ArchiveReason): Promise<void> {
+    if (!archiveRows || deleteBusy) return;
     setDeleteBusy(true);
-    onStatus(
-      rows.length === 1
-        ? "Inventareintrag wird gelöscht ..."
-        : `${rows.length} Inventareinträge werden gelöscht ...`,
-    );
-
+    setArchiveError("");
+    onStatus("Artikel werden archiviert …");
     try {
-      const result = await deleteInventoryEntries(rows.map(getRowKey));
-      const deletedCount = Number(result.deleted_count ?? rows.length);
-
+      const result = await deleteInventoryEntries(archiveRows.map(getRowKey), reason);
+      const count = Number(result.deleted_count ?? archiveRows.length);
+      setArchiveRows(null);
       clearSelection();
       await reload();
-
-      onStatus(
-        deletedCount === 1
-          ? "Inventareintrag wurde gelöscht."
-          : `${deletedCount} Inventareinträge wurden gelöscht.`,
-      );
+      onStatus(`${count} ${count === 1 ? "Eintrag wurde" : "Einträge wurden"} archiviert.`);
     } catch (error) {
-      if (error instanceof UnauthorizedError) {
-        onUnauthorized();
-        return;
-      }
-
-      onStatus(
-        error instanceof Error
-          ? error.message
-          : "Inventareinträge konnten nicht gelöscht werden.",
-      );
-    } finally {
-      setDeleteBusy(false);
-    }
+      if (error instanceof UnauthorizedError) { onUnauthorized(); return; }
+      const message = error instanceof Error ? error.message : "Die Artikel konnten nicht archiviert werden.";
+      setArchiveError(message);
+      onStatus(message);
+    } finally { setDeleteBusy(false); }
   }
 
   function chooseCsvImport(): void {
@@ -187,6 +161,10 @@ export default function useInventoryActions({
   return {
     csvFileInputRef,
     deleteBusy,
+    archiveRows,
+    archiveError,
+    confirmArchive,
+    cancelArchive: () => { if (!deleteBusy) setArchiveRows(null); },
     transferBusy,
     chooseCsvImport,
     importCsvFile,

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adjustQrStock, lookupQr, QrRequestError, type QrLookup, type QrMatch } from "../api/qrApi";
-import { deleteInventoryEntries } from "../api/inventoryApi";
 import QrScanner from "./QrScanner";
 import "./QrWorkflowDialog.css";
-import { isValidEan, type CodeType } from "../utils/scannerCodes";
+import { isValidEan, identifierType, type CodeType } from "../utils/scannerCodes";
 import { APP_VERSION } from "../release";
 
 type Props = {
+  onArchive: (key: string) => void;
   canEdit: boolean;
   onClose: () => void;
   onCreate: (code: string, type: CodeType, format: string) => void;
@@ -16,7 +16,7 @@ type Props = {
 
 const CONDITIONS: Record<string, string> = { new: "Neu", like_new: "Neuwertig", used: "Gebraucht", worn: "Abgenutzt", defective: "Defekt" };
 
-export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, onChanged }: Props) {
+export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, onChanged, onArchive }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
@@ -60,7 +60,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       setError("Bitte eine Artikelkennung mit 1 bis 100 Zeichen ohne Zeilenumbrüche eingeben.");
       return;
     }
-    const type = detectedType === "auto" && !format ? (isValidEan(normalized) ? "ean" : "qr") : detectedType;
+    const type = detectedType === "auto" ? identifierType(normalized, format) : detectedType;
     if (type === "ean" && !isValidEan(normalized)) { setError("Die EAN muss 8 oder 13 Ziffern und eine gültige Prüfziffer enthalten."); return; }
     setRecognizedType(type);
     setRecognizedFormat(format);
@@ -77,11 +77,12 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       if (result.matches.length === 0) {
         setLookup(null);
         if (preserve) setError("Der Artikel wurde nicht mehr gefunden. Bitte den Code erneut scannen.");
-        else if (canEdit) onCreate(result.code, type, format);
+        else if (canEdit) onCreate(result.code, result.code_type ?? type, format);
         else setError("Dieser Code ist noch nicht erfasst. Für neue Artikel sind Bearbeitungsrechte erforderlich.");
         return;
       }
       setLookup(result);
+      setRecognizedType(result.code_type ?? type);
       setNeedsRefresh(false);
       if (!preserve || !result.matches.some(row => row.key === selectedKey)) {
         const row = result.matches[0];
@@ -136,14 +137,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   }
 
   async function removeAsset() {
-    if (!selected || !canEdit || busyRef.current || !window.confirm(`Einzelgerät „${selected.asset_tag}“ wirklich löschen?`)) return;
-    busyRef.current = true; setSaving(true); setError("");
-    try {
-      await deleteInventoryEntries([selected.key]);
-      void onChanged();
-      onClose();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Das Gerät konnte nicht gelöscht werden."); }
-    finally { busyRef.current = false; setSaving(false); }
+    if (selected && canEdit && !busyRef.current) onArchive(selected.key);
   }
 
   function submit(event: FormEvent) { event.preventDefault(); void readCode(code); }
@@ -172,7 +166,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </form>
         </> : <div className="qr-detected-code">
           <div><span className="qr-code-caption">Erkannter Code</span><strong>{lookup.code}</strong></div>
-          <span className="qr-code-badge">{recognizedFormat || (recognizedType === "ean" ? "EAN" : "Kennung")}</span>
+          <span className="qr-code-badge">{recognizedFormat ? `${recognizedFormat} · ` : ""}{recognizedType === "mac" ? "MAC-Adresse" : recognizedType === "serial" ? "Seriennummer" : recognizedType === "ean" ? "EAN" : "QR-Code"}</span>
         </div>}
 
         {error && <div className="qr-error" role="alert">{error}</div>}

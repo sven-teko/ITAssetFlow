@@ -1,6 +1,7 @@
 import { prepareZXingModule, readBarcodes, type ReaderOptions } from "zxing-wasm/reader";
 import wasmUrl from "zxing-wasm/reader/zxing_reader.wasm?url";
 import type { CodeType } from "./scannerCodes";
+import { identifierType } from "./scannerCodes";
 
 export type ScannedCode = { text: string; type: CodeType; format: string };
 type Source = HTMLVideoElement | HTMLImageElement;
@@ -47,7 +48,8 @@ export async function createBarcodeReader() {
       if (result.format === "EAN8" || result.format === "EAN13") {
         return { text: result.text, type: "ean", format: result.format === "EAN8" ? "EAN-8" : "EAN-13" };
       }
-      return { text: result.text, type: "auto", format: result.format.startsWith("Code39") ? "Code 39" : "Code 128" };
+      const format = result.format.startsWith("Code39") ? "Code 39" : "Code 128";
+      return { text: result.text, type: identifierType(result.text, format), format };
     }
     return null;
   };

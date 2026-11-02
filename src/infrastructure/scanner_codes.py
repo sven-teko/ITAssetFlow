@@ -3,6 +3,18 @@ import re
 from typing import Any
 
 
+def normalize_mac(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Die MAC-Adresse muss Text enthalten.")
+    text = re.sub(r"^MAC(?:[- ]?(?:Adresse|Address))?\s*[:=]\s*", "", value.strip(), flags=re.I)
+    if not re.fullmatch(r"(?:[a-f\d]{12}|(?:[a-f\d]{2}:){5}[a-f\d]{2}|(?:[a-f\d]{2}-){5}[a-f\d]{2}|(?:[a-f\d]{4}\.){2}[a-f\d]{4})", text, re.I):
+        raise ValueError("Bitte eine gültige MAC-Adresse mit 12 Hexadezimalzeichen eingeben.")
+    compact = re.sub(r"[:.\-]", "", text).upper()
+    return ":".join(compact[index:index+2] for index in range(0, 12, 2))
+
+
 def normalize_qr(value: Any) -> str | None:
     if value is None or value == "":
         return None

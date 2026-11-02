@@ -5,10 +5,11 @@ import {
   useRef,
 } from "react";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 import AboutDialog from "../components/AboutDialog";
 import AssetDetailPanel from "../components/AssetDetailPanel";
+import ArchiveReasonDialog from "../components/ArchiveReasonDialog";
 import InventorySidebar from "../components/InventorySidebar";
 import LoadingIndicator from "../components/LoadingIndicator";
 import InventoryTable from "../components/InventoryTable";
@@ -45,6 +46,8 @@ export default function InventoryPage({
   onLogout,
 }: InventoryPageProps) {
   const navigate = useNavigate();
+  const location=useLocation();
+  const [imageWarning,setImageWarning]=useState(typeof location.state?.imageWarning === "string" ? location.state.imageWarning : "");
   const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [qrOpen, setQrOpen] = useState(false);
@@ -372,6 +375,7 @@ export default function InventoryPage({
             );
           }
         }}
+        onArchive={() => navigate("/archive")}
         onAbout={() =>
           setAboutOpen(true)
         }
@@ -425,6 +429,7 @@ export default function InventoryPage({
         <button type="button" className="primary-button" onClick={() => setQrOpen(true)}>Scanner</button>
       </nav>}
 
+      {imageWarning && <div className="inventory-image-warning" role="alert">{imageWarning}<button onClick={()=>{setImageWarning("");navigate("/inventory",{replace:true,state:null});}}>Schliessen</button></div>}
       <div
         className="workspace"
         ref={workspaceRef}
@@ -574,7 +579,10 @@ export default function InventoryPage({
         }
       />
 
+      {actions.archiveRows && <ArchiveReasonDialog count={actions.archiveRows.length} busy={actions.deleteBusy}
+        error={actions.archiveError} onCancel={actions.cancelArchive} onConfirm={reason => void actions.confirmArchive(reason)} />}
       {qrOpen && <QrWorkflowDialog canEdit={canEdit} onClose={() => setQrOpen(false)}
+        onArchive={key => { const row=data.inventory.find(row => getRowKey(row)===key); if (row) { setQrOpen(false); void actions.deleteEntries([row]); } }}
         onCreate={(code, type, format) => { setQrOpen(false); navigate(`/inventory/new?code=${encodeURIComponent(code)}&code_type=${type}&code_format=${encodeURIComponent(format)}`); }}
         onEdit={(key) => { setQrOpen(false); navigate(`/inventory/${encodeURIComponent(key)}/edit`); }}
         onChanged={data.loadData} />}

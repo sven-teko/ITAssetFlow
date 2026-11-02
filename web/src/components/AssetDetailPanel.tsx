@@ -1,3 +1,5 @@
+import ItemImage from "./ItemImage";
+
 type InventoryRow =
   Record<string, unknown>;
 
@@ -23,6 +25,7 @@ type AssetDetailPanelProps = {
 const GENERAL_DETAIL_FIELDS = [
   "asset_tag",
   "serial_number",
+  "mac_address",
   "product_model_name",
   "manufacturer_name",
   "product_category_name",
@@ -751,9 +754,8 @@ export default function AssetDetailPanel({
           }
 
         </div>
-
+        {!multiple && typeof rows[0].image_id === "string" && <ItemImage key={rows[0].image_id} id={rows[0].image_id}/>}
       </div>
-
     </aside>
   );
 }

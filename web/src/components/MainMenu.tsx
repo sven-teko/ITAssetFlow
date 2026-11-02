@@ -37,6 +37,7 @@ type MainMenuProps = {
   onExportPostgresql: () => void;
 
   onSettings: () => void;
+  onArchive: () => void;
   onAbout: () => void;
   onLogout: () => void;
 
@@ -156,6 +157,7 @@ export default function MainMenu({
   onExportCsv,
   onExportPostgresql,
   onSettings,
+  onArchive,
   onAbout,
   onLogout,
   onStatus,
@@ -321,6 +323,8 @@ export default function MainMenu({
 
 
               <div className="menu-separator" />
+
+              <button type="button" onClick={() => action(onArchive)}>Archiv</button>
 
 
               <div className="menu-submenu">

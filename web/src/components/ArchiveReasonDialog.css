@@ -1,0 +1,9 @@
+.archive-reason-dialog { width: min(500px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; padding: 24px; border: 1px solid #cfd5dc; border-radius: 8px; color: #24313b; background: #f4f6f8; }
+.archive-reason-dialog::backdrop { background: rgb(20 30 40 / 42%); }
+.archive-reason-dialog h2 { margin: 0 0 12px; }
+.archive-reason-dialog p { line-height: 1.5; }
+.archive-reason-dialog fieldset { padding: 0; margin: 18px 0; border: 0; min-width: 0; }
+.archive-reason-dialog label { display: grid; gap: 7px; margin: 14px 0; }
+.archive-reason-dialog input, .archive-reason-dialog select, .archive-reason-dialog textarea { width: 100%; min-width: 0; padding: 10px; border: 1px solid #c3cbd3; border-radius: 5px; font: inherit; background: white; color: inherit; }
+.archive-reason-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.archive-error { color: #b42318; }

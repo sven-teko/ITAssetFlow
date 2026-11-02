@@ -5,6 +5,7 @@ export const DEFAULT_INVENTORY_META: InventoryMeta = {
   "column_order": [
     "asset_tag",
     "serial_number",
+    "mac_address",
     "product_model_name",
     "manufacturer_name",
     "product_category_name",
@@ -39,6 +40,7 @@ export const DEFAULT_INVENTORY_META: InventoryMeta = {
   "headers": {
     "asset_tag": "Asset-Tag",
     "serial_number": "Seriennummer",
+    "mac_address": "MAC-Adresse",
     "product_model_name": "Produktmodell",
     "manufacturer_name": "Hersteller",
     "product_category_name": "Produktkategorie",
