@@ -35,6 +35,7 @@ from infrastructure.supabase_client import (
 from web_backend.settings_routes import create_settings_router
 from web_backend.product_model_routes import create_product_models_router
 from web_backend.recovery_routes import create_recovery_router
+from web_backend.preferences_routes import create_preferences_router
 
 from inventory import (
     CONDITION_LABELS,
@@ -52,7 +53,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.2.11",
+    version="1.2.12",
 )
 
 
@@ -1507,6 +1508,7 @@ def inventory_meta(
 # Einstellungen und Produktmodelle
 
 app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
+app.include_router(create_preferences_router(get_web_session))
 app.include_router(
     create_settings_router(
         require_admin_session,

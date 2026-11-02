@@ -1,7 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { InventoryMeta, InventoryRow } from "../types/inventory";
+import type { InventoryMeta } from "../types/inventory";
 import { normalizeText } from "../utils/inventory";
+import { cachedColumnPreferences, loadColumnPreferences, saveColumnPreferences } from "../api/columnPreferences";
+import type { ColumnPreferences } from "../api/columnPreferences";
 
 function defaultColumnsStorageKey(email: string): string {
   return `itassetflow.default_visible_columns:${email.trim().toLocaleLowerCase()}`;
@@ -37,37 +39,55 @@ function configuredDefaultColumns(
 
 type UseInventoryColumnsOptions = {
   email: string;
-  inventory: InventoryRow[];
   meta: InventoryMeta | null;
   onStatus: (text: string) => void;
 };
 
 export default function useInventoryColumns({
   email,
-  inventory,
   meta,
   onStatus,
 }: UseInventoryColumnsOptions) {
-  const [columnOrder, setColumnOrder] = useState<string[]>([]);
-  const [requestedVisible, setRequestedVisible] = useState<Set<string> | null>(null);
+  const [preferences, setPreferences] = useState<ColumnPreferences | null>(() => cachedColumnPreferences(email));
+  const revision = useRef(0);
+  const ready = meta !== null;
+
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    const startedAt = revision.current;
+    void loadColumnPreferences(email).then(saved => {
+      if (!cancelled && revision.current === startedAt && saved) setPreferences(saved);
+    }).catch(error => {
+      if (!cancelled) onStatus(error instanceof Error ? error.message : "Spalteneinstellungen konnten nicht geladen werden.");
+    });
+    return () => { cancelled = true; };
+  }, [email, ready, onStatus]);
+
+  const persist = useCallback((next: ColumnPreferences): void => {
+    revision.current += 1;
+    setPreferences(next);
+    void saveColumnPreferences(email, next).catch(error => {
+      onStatus(error instanceof Error ? error.message : "Spalteneinstellungen konnten nicht gespeichert werden.");
+    });
+  }, [email, onStatus]);
 
   const availableColumns = useMemo(() => {
     if (!meta) return [];
-    const available = meta.column_order.filter((column) =>
-      inventory.length === 0 || inventory.some((row) => column in row),
-    );
+    const available = meta.column_order;
+    const columnOrder = preferences?.column_order ?? [];
     return [
       ...columnOrder.filter((column) => available.includes(column)),
       ...available.filter((column) => !columnOrder.includes(column)),
     ];
-  }, [columnOrder, inventory, meta]);
+  }, [preferences, meta]);
 
   const visibleColumns = useMemo(() => {
-    const selected = new Set([...requestedVisible ?? []].filter((column) => availableColumns.includes(column)));
+    const selected = new Set((preferences?.visible_columns ?? []).filter((column) => availableColumns.includes(column)));
     return selected.size > 0 ? selected : new Set(configuredDefaultColumns(
       email, availableColumns, meta?.default_visible_columns ?? [],
     ));
-  }, [availableColumns, email, meta, requestedVisible]);
+  }, [availableColumns, email, meta, preferences]);
 
   const displayedColumns = useMemo(
     () => availableColumns.filter((column) => visibleColumns.has(column)),
@@ -129,8 +149,8 @@ export default function useInventoryColumns({
     const targetIndex = next.indexOf(target);
     if (targetIndex < 0) return;
     next.splice(targetIndex, 0, source);
-    setColumnOrder(next);
-  }, [availableColumns]);
+    persist({ column_order: next, visible_columns: [...visibleColumns] });
+  }, [availableColumns, visibleColumns, persist]);
 
   const setColumnVisible = useCallback((column: string, visible: boolean): void => {
     if (!visible && visibleColumns.size <= 1) {
@@ -140,28 +160,20 @@ export default function useInventoryColumns({
     const next = new Set(visibleColumns);
     if (visible) next.add(column);
     else next.delete(column);
-    setRequestedVisible(next);
-  }, [onStatus, visibleColumns]);
+    persist({ column_order: availableColumns, visible_columns: [...next] });
+  }, [onStatus, visibleColumns, availableColumns, persist]);
 
   const showAllColumns = useCallback((): void => {
-    setRequestedVisible(new Set(availableColumns));
-  }, [availableColumns]);
+    persist({ column_order: availableColumns, visible_columns: availableColumns });
+  }, [availableColumns, persist]);
 
   const resetColumns = useCallback((): void => {
     if (!meta) {
       return;
     }
 
-    setRequestedVisible(
-      new Set(
-        configuredDefaultColumns(
-          email,
-          availableColumns,
-          meta.default_visible_columns,
-        ),
-      ),
-    );
-  }, [availableColumns, email, meta]);
+    persist({ column_order: availableColumns, visible_columns: configuredDefaultColumns(email, availableColumns, meta.default_visible_columns) });
+  }, [availableColumns, email, meta, persist]);
 
   return {
     availableColumns,

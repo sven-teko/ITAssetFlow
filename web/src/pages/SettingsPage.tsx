@@ -666,7 +666,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           showMessage("Einstellungen erfolgreich gespeichert.", "success");
           afterSaveRef.current = false;
         } else {
-          showMessage("Einstellungen bereit.", "success");
+          showMessage("", "info");
         }
       } catch (error) {
         if (!cancelled) {
@@ -2369,7 +2369,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                 </>
               )}
             </main>
-            {!loading && <div
+            {!loading && (message || saving) && <div
               className={`settings-message ${messageTone}${saving ? " settings-message-busy" : ""}`}
               role={messageTone === "error" ? "alert" : "status"}
             >

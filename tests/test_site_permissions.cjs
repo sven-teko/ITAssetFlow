@@ -62,6 +62,13 @@ const run=(async()=>{
     await query("INSERT INTO public.stock_movements(id,product_model_id,from_storage_location_id,from_condition,quantity,movement_type,department_id) VALUES(3,101,11,'new',2,'issue',10)");
     assert.equal(Number((await query('SELECT quantity FROM public.stock_levels WHERE storage_location_id=11'))[0].quantity),1);
     await rejected("INSERT INTO public.stock_movements(id,product_model_id,from_storage_location_id,from_condition,quantity,movement_type,department_id) VALUES(4,101,11,'new',2,'issue',10)",'P0001');
+    await query("INSERT INTO public.stock_movements(id,product_model_id,to_storage_location_id,to_condition,quantity,movement_type,department_id) VALUES(70,101,11,'new',4,'adjustment',10)");
+    await query("INSERT INTO public.stock_movements(id,product_model_id,from_storage_location_id,from_condition,quantity,movement_type,department_id) VALUES(71,101,11,'new',3,'adjustment',10)");
+    assert.equal(Number((await query('SELECT quantity FROM public.stock_levels WHERE storage_location_id=11'))[0].quantity),2);
+    await rejected("UPDATE public.stock_movements SET note='Historie ändern' WHERE id=70",'P0001');
+    await rejected("INSERT INTO public.stock_movements(id,product_model_id,from_storage_location_id,to_storage_location_id,from_condition,to_condition,quantity,movement_type,department_id) VALUES(72,101,11,NULL,'new',NULL,2,'adjustment',10),(73,101,NULL,22,NULL,'new',2,'receipt',20)");
+    assert.equal(Number((await query('SELECT quantity FROM public.stock_levels WHERE storage_location_id=11'))[0].quantity),2);
+    console.log('PASS: Korrekturbuchungen erhöhen und verringern den Bestand; Historie bleibt gesperrt; fehlgeschlagenes Buchungspaar wird vollständig zurückgerollt');
     await rejected("INSERT INTO public.stock_movements(id,product_model_id,to_storage_location_id,to_condition,quantity,movement_type,department_id) VALUES(5,101,22,'new',1,'receipt',20)");
     await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,2,10)','23514');
     await rejected('INSERT INTO public.asset_assignments(asset_id,employee_id,department_id) VALUES(10,NULL,NULL)','23514');

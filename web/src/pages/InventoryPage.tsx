@@ -97,7 +97,6 @@ export default function InventoryPage({
 
   const columns = useInventoryColumns({
     email,
-    inventory: data.inventory,
     meta: data.meta,
     onStatus: setStatus,
   });

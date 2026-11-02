@@ -192,6 +192,7 @@ export default function App() {
             role={role}
           >
             <InventoryPage
+              key={email}
               email={email ?? ""}
               role={role ?? "viewer"}
               onLogout={clearSession}

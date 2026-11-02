@@ -438,25 +438,7 @@ class AssetRepository:
                 "Der ausgewählte Mengenbestand existiert nicht mehr."
             )
 
-        movement_response = (
-            self.client.table("stock_movements")
-            .select(
-                "id,product_model_id,to_storage_location_id,to_condition,"
-                "department_id,purchase_date,new_price,status,note,moved_at"
-            )
-            .eq("product_model_id", product_model_id)
-            .eq("to_storage_location_id", storage_location_id)
-            .eq("to_condition", condition)
-            .order("moved_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        movements = [
-            row
-            for row in (movement_response.data or [])
-            if isinstance(row, dict)
-        ]
-        movement = movements[0] if movements else {}
+        movement = self._latest_stock_metadata(product_model_id, storage_location_id, condition)
 
         location = next(
             (
@@ -1262,6 +1244,21 @@ class AssetRepository:
             "asset_tag": asset_tag,
         }
 
+    def _latest_stock_metadata(self, model_id: Any, location_id: Any, condition: str) -> dict[str, Any]:
+        candidates = []
+        for direction in ("to", "from"):
+            response = (
+                self.client.table("stock_movements")
+                .select("id,department_id,purchase_date,new_price,status,note,moved_at")
+                .eq("product_model_id", model_id)
+                .eq(f"{direction}_storage_location_id", location_id)
+                .eq(f"{direction}_condition", condition)
+                .not_.is_("purchase_date", "null")
+                .order("moved_at", desc=True).order("id", desc=True).limit(1).execute()
+            )
+            candidates.extend(row for row in (response.data or []) if isinstance(row, dict))
+        return max(candidates, key=lambda row: (str(row.get("moved_at") or ""), row.get("id") or 0), default={})
+
     def _update_stock_level(
         self,
         *,
@@ -1281,7 +1278,7 @@ class AssetRepository:
         except (InvalidOperation, TypeError, ValueError) as error:
             raise ValueError("Ungültige Bestandsmenge.") from error
 
-        if desired_quantity <= 0:
+        if not desired_quantity.is_finite() or desired_quantity <= 0:
             raise ValueError(
                 "Die Bestandsmenge muss grösser als 0 sein. "
                 "Zum vollständigen Entfernen bitte „Einträge löschen“ verwenden."
@@ -1335,6 +1332,10 @@ class AssetRepository:
                 "Der ursprüngliche Mengenbestand ist bereits leer."
             )
 
+        expected_quantity = original.get("stock_quantity")
+        if expected_quantity is not None and Decimal(str(expected_quantity)) != current_quantity:
+            raise ValueError("Der Bestand wurde inzwischen geändert. Bitte den Eintrag neu öffnen.")
+
         same_identity = (
             old_model_id == model_id
             and old_location_id == storage_location_id
@@ -1352,17 +1353,6 @@ class AssetRepository:
         }
 
         if same_identity:
-            source_movement_id = original.get(
-                "source_movement_id"
-            )
-            if source_movement_id is not None:
-                (
-                    self.client.table("stock_movements")
-                    .update(metadata)
-                    .eq("id", source_movement_id)
-                    .execute()
-                )
-
             difference = desired_quantity - current_quantity
             if difference != 0:
                 movement = {
@@ -1394,16 +1384,18 @@ class AssetRepository:
                 self.client.table("stock_movements").insert(
                     movement
                 ).execute()
+                return {"product_model_id": model_id, "quantity": float(desired_quantity)}
 
-            return {
-                "product_model_id": model_id,
-                "quantity": float(desired_quantity),
-            }
+            current_metadata = self._latest_stock_metadata(old_model_id, old_location_id, old_condition)
+            if all(current_metadata.get(key) == value for key, value in metadata.items()):
+                return {"product_model_id": model_id, "quantity": float(desired_quantity)}
 
         # Bei einer Änderung von Produktmodell, Lagerort oder Zustand wird
         # der alte Bestand nachvollziehbar ausgebucht und am neuen Ziel
         # wieder eingebucht. Historische Bewegungen bleiben unverändert.
-        self.client.table("stock_movements").insert(
+        # Beide Buchungen werden in einem Request atomar eingefügt. Scheitert
+        # das neue Ziel, bleibt auch der bisherige Bestand unverändert.
+        movements = [
             {
                 "product_model_id": old_model_id,
                 "from_storage_location_id": old_location_id,
@@ -1413,16 +1405,14 @@ class AssetRepository:
                 "from_condition": old_condition,
                 "to_condition": None,
                 "department_id": original.get("department_id"),
+                "purchase_date": None,
                 "new_price": 0,
                 "status": "available",
                 "note": (
                     "Bestand durch Bearbeitung des Inventareintrags "
                     "am bisherigen Ort ausgebucht."
                 ),
-            }
-        ).execute()
-
-        self.client.table("stock_movements").insert(
+            },
             {
                 "product_model_id": model_id,
                 "from_storage_location_id": None,
@@ -1432,8 +1422,9 @@ class AssetRepository:
                 "from_condition": None,
                 "to_condition": condition,
                 **metadata,
-            }
-        ).execute()
+            },
+        ]
+        self.client.table("stock_movements").insert(movements).execute()
 
         return {
             "product_model_id": model_id,

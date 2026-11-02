@@ -24,6 +24,8 @@ const run = (async () => {
     let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null, metaFailure = 0;
     let failSettingsLoad = false, failSettingsSave = false, failModelLoad = false;
     let failExport = false;
+    let currentEmail='admin@example.test';
+    const columnPreferences=new Map();
     const labels = {available:'Verfügbar', in_use:'Im Einsatz', defective:'Defekt', in_repair:'In Reparatur'};
     const meta = {
       column_order:['asset_tag','product_model_name','status','condition','site_name','department_name'],
@@ -60,8 +62,19 @@ const run = (async () => {
         'Access-Control-Allow-Credentials':'true','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET,POST,PUT,OPTIONS'};
       const json = (body,status=200) => route.fulfill({status,headers,contentType:'application/json',body:JSON.stringify(body)});
       if(request.method()==='OPTIONS')return route.fulfill({status:204,headers});
-      if(path==='/api/auth/login'){loggedIn=true; return json({authenticated:true,email:'admin@example.test'});}
-      if(path==='/api/auth/session'){await pause(180); return json({authenticated:loggedIn,email:loggedIn?'admin@example.test':null,role:loggedIn?'admin':null});}
+      if(path==='/api/auth/login'){loggedIn=true;currentEmail=request.postDataJSON().email;return json({authenticated:true,email:currentEmail,role:'admin'});}
+      if(path==='/api/auth/logout'){loggedIn=false;return json({success:true});}
+      if(path==='/api/auth/session'){await pause(180); return json({authenticated:loggedIn,email:loggedIn?currentEmail:null,role:loggedIn?'admin':null});}
+      if(path==='/api/preferences/inventory-columns'){
+        if(request.headers()['x-itassetflow-user']!==currentEmail)return json({detail:'Konto gewechselt'},409);
+        if(request.method()==='PUT'){
+          await pause(100);
+          columnPreferences.set(currentEmail,request.postDataJSON());
+        }
+        const saved=columnPreferences.get(currentEmail)??null;
+        await pause(150);
+        return json({preferences:saved});
+      }
       if(path.startsWith('/api/transfer/export/')){
         await pause(1200);
         if(failExport)return json({detail:'Test: Export vorübergehend nicht erreichbar.'},503);
@@ -135,12 +148,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.2.11 · 29.10.2026',{exact:true}).waitFor();
-    await page.getByText('Scanner mit automatischer QR-, EAN-, Code-128- und Code-39-Erkennung sowie Lagerbuchungen.',{exact:true}).waitFor();
+    await page.getByText('Version 1.2.12 · 02.11.2026',{exact:true}).waitFor();
+    await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
+    assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.11');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.2.12');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -172,6 +186,42 @@ const run = (async () => {
     assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isEnabled(),true);
     await page.locator('.page-header').click();
     console.log('PASS: CSV- und PostgreSQL-Download, Dateinamen, Ladezustand, gesperrte Aktionen und sichtbare Exportfehler');
+
+    const headerLabels=()=>page.locator('.inventory-table .table-header-label').allTextContents();
+    await page.getByRole('columnheader',{name:'Standort',exact:true}).dragTo(page.getByRole('columnheader',{name:'Produkterkennung',exact:true}));
+    await page.locator('.inventory-table thead th').first().click({button:'right'});
+    const savedColumns=page.waitForResponse(response=>response.url().endsWith('/api/preferences/inventory-columns')
+      && response.request().method()==='PUT' && !response.request().postDataJSON().visible_columns.includes('status'));
+    await page.locator('.header-context-option').filter({hasText:/^Status$/}).locator('input').uncheck();
+    await savedColumns;
+    await page.locator('.page-header').click();
+    const expectedHeaders=await headerLabels();
+    assert.equal(expectedHeaders[0],'Standort');assert.ok(!expectedHeaders.includes('Status'));
+    await page.evaluate(()=>localStorage.removeItem('itassetflow.inventory_columns:v1:admin@example.test'));
+    await page.reload();
+    await page.getByText('TEST-001',{exact:true}).waitFor();
+    await page.waitForFunction(()=>document.querySelector('.inventory-table .table-header-label')?.textContent==='Standort'
+      && ![...document.querySelectorAll('.inventory-table .table-header-label')].some(el=>el.textContent==='Status'));
+    assert.deepEqual(await headerLabels(),expectedHeaders);
+    await page.evaluate(()=>{location.hash='/settings?tab=employees';});
+    await page.getByRole('table',{name:'Mitarbeiter'}).waitFor();
+    assert.equal(await page.getByText('Einstellungen bereit.',{exact:true}).count(),0);
+    assert.equal(await page.locator('.settings-message').count(),0);
+    await page.getByRole('button',{name:'Zurück zum Inventar',exact:false}).click();
+    await page.getByText('TEST-001',{exact:true}).waitFor();
+    assert.deepEqual(await headerLabels(),expectedHeaders);
+    async function loginAs(email){
+      await page.getByRole('button',{name:'Abmelden',exact:true}).click();
+      await page.getByLabel('E-Mail-Adresse:').fill(email);
+      await page.getByLabel('Passwort:',{exact:true}).fill('test-password');
+      await page.getByRole('button',{name:'Anmelden',exact:true}).click();
+      await page.getByText('TEST-001',{exact:true}).waitFor();
+    }
+    await loginAs('second@example.test');
+    assert.deepEqual(await headerLabels(),['Produkterkennung','Produktmodell','Status','Standort']);
+    await loginAs('admin@example.test');
+    assert.deepEqual(await headerLabels(),expectedHeaders);
+    console.log('PASS: Spaltenreihenfolge und Auswahl am Konto gespeichert; Wiederherstellung ohne lokalen Cache, Einstellungen und Kontowechsel; keine Bereitschaftsmeldung');
 
 
     await page.getByRole('button',{name:'Status',exact:true}).click();
