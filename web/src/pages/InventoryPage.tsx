@@ -16,6 +16,7 @@ import InventoryTable from "../components/InventoryTable";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
 import InventoryOperationDialog from "../components/InventoryOperationDialog";
+import BulkInventoryEditDialog from "../components/BulkInventoryEditDialog";
 import EntryContextMenu from "../components/EntryContextMenu";
 import useRowContextMenu from "../hooks/useRowContextMenu";
 import useMediaQuery from "../hooks/useMediaQuery";
@@ -52,6 +53,7 @@ export default function InventoryPage({
   const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [qrOpen, setQrOpen] = useState(false);
+  const [bulkRows, setBulkRows] = useState<InventoryRow[] | null>(null);
   const [operation, setOperation] = useState<{ kind: "move" | "stock"; row: InventoryRow } | null>(null);
   const swipeStart = useRef<{ x: number; y: number; left?: boolean; right?: boolean } | null>(null);
   const tabs = ["navigation", "inventory", "detail"] as const;
@@ -113,7 +115,12 @@ export default function InventoryPage({
       columns.formatValue,
   });
 
-  const rowContext = useRowContextMenu(row => view.setSelectedKeys(new Set([getRowKey(row)])));
+  const rowContext = useRowContextMenu(row => {
+    const key = getRowKey(row);
+    if (!view.selectedKeys.has(key)) view.setSelectedKeys(new Set([key]));
+  });
+  const contextRow = rowContext.menu?.row;
+  const contextRows = contextRow && !view.selectedKeys.has(getRowKey(contextRow)) ? [contextRow] : view.selectedRows;
   const closeContext = rowContext.close;
 
   const handleLoggedOut =
@@ -177,25 +184,15 @@ export default function InventoryPage({
     navigate("/inventory/new");
   }
 
-  function editEntry(): void {
-    if (!canEdit) {
-      readOnlyNotice();
-      return;
+  function editEntry(rows = view.selectedRows): void {
+    if (!canEdit) { readOnlyNotice(); return; }
+    if (rows.length === 1) {
+      navigate(`/inventory/${encodeURIComponent(getRowKey(rows[0]))}/edit`);
+    } else if (rows.length > 200) {
+      setStatus("Bitte höchstens 200 Einträge gleichzeitig bearbeiten.");
+    } else if (rows.length > 1) {
+      setBulkRows(rows);
     }
-
-    if (
-      view.selectedRows.length !== 1
-    ) {
-      return;
-    }
-
-    navigate(
-      `/inventory/${encodeURIComponent(
-        getRowKey(
-          view.selectedRows[0],
-        ),
-      )}/edit`,
-    );
   }
 
   function editProductModels(): void {
@@ -223,7 +220,7 @@ export default function InventoryPage({
           view.setFilters
         }
         onCreate={createEntry}
-        onEdit={editEntry}
+        onEdit={() => editEntry()}
         onProductModels={editProductModels}
         onDelete={() => {
           if (!canEdit) {
@@ -587,11 +584,17 @@ export default function InventoryPage({
         onEdit={(key) => { setQrOpen(false); navigate(`/inventory/${encodeURIComponent(key)}/edit`); }}
         onChanged={data.loadData} />}
 
-      {rowContext.menu && <EntryContextMenu x={rowContext.menu.x} y={rowContext.menu.y} disabled={!canEdit || loading}
-        onClose={closeContext} onEdit={() => navigate(`/inventory/${encodeURIComponent(getRowKey(rowContext.menu!.row))}/edit`)}
-        onMove={() => setOperation({ kind: "move", row: rowContext.menu!.row })}
-        onChangeStock={rowContext.menu.row._record_type === "stock" ? () => setOperation({ kind: "stock", row: rowContext.menu!.row }) : undefined}
-        onDelete={() => void actions.deleteEntries([rowContext.menu!.row])} />}
+      {rowContext.menu && contextRow && <EntryContextMenu x={rowContext.menu.x} y={rowContext.menu.y} disabled={!canEdit || loading}
+        multiple={contextRows.length > 1} onClose={closeContext} onEdit={() => editEntry(contextRows)}
+        onMove={contextRows.length === 1 ? () => setOperation({ kind: "move", row: contextRow }) : undefined}
+        onChangeStock={contextRows.length === 1 && contextRow._record_type === "stock" ? () => setOperation({ kind: "stock", row: contextRow }) : undefined}
+        onDelete={() => void actions.deleteEntries(contextRows)} />}
+      {bulkRows && <BulkInventoryEditDialog rows={bulkRows} meta={data.meta} onCancel={() => setBulkRows(null)}
+        onUnauthorized={handleUnauthorized} onSaved={count => {
+          setBulkRows(null);
+          view.clearSelection();
+          void data.loadData().then(() => setStatus(`${count} Einträge aktualisiert.`));
+        }} />}
       {operation && <InventoryOperationDialog kind={operation.kind} row={operation.row}
         onCancel={() => setOperation(null)} onUnauthorized={handleUnauthorized}
         onSuccess={async message => {

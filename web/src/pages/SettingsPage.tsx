@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom";
 import ProductModelsPage, { type ProductModelsHandle } from "./ProductModelsPage";
 import "./SettingsPage.css";
+import BackupSettings from "../components/BackupSettings";
 import EmployeesSettings, { type EmployeeRow } from "../components/EmployeesSettings";
 import useMediaQuery from "../hooks/useMediaQuery";
 import LoadingIndicator from "../components/LoadingIndicator";
@@ -47,7 +48,8 @@ type SettingsTab =
   | "specifications"
   | "manufacturers"
   | "permissions"
-  | "columns";
+  | "columns"
+  | "backup";
 
 const SETTINGS_TABS: Array<[SettingsTab, string]> = [
   ["structure", "Struktur"],
@@ -58,6 +60,7 @@ const SETTINGS_TABS: Array<[SettingsTab, string]> = [
   ["manufacturers", "Hersteller"],
   ["permissions", "Berechtigungen"],
   ["columns", "Standardspalten"],
+  ["backup", "Backup"],
 ];
 
 const STRUCTURE_TABS = [
@@ -2390,6 +2393,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                   {activeTab === "manufacturers" && renderManufacturers()}
                   {activeTab === "permissions" && renderPermissions()}
                   {activeTab === "columns" && renderColumns()}
+                  {activeTab === "backup" && <BackupSettings onSessionExpired={onSessionExpired}/>}
                 </>
               )}
             </main>

@@ -1114,8 +1114,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       : {};
 
   return (
-    <div className="asset-form-page">
+    <div className="asset-form-page asset-form-page--editor">
       <form className="asset-form-shell" onSubmit={(event) => void submit(event)}>
+        <div className="asset-form-scroll">
         <header className="asset-form-header">
           <div>
             <h1>{isEditMode ? "Inventareintrag bearbeiten" : "Neuer Inventareintrag"}</h1>
@@ -1463,8 +1464,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               <div className="asset-form-row"><label htmlFor="item-ean">EAN:</label>
                 <input id="item-ean" type="text" inputMode="numeric" maxLength={13} className="asset-form-control" value={ean} disabled={saving}
                   placeholder="EAN-8 oder EAN-13" onChange={event => setEan(event.target.value)} /></div>
-              <p className="qr-hint">QR-Code oder Barcode-Kennung, EAN oder beide Kennungen sind möglich.
-                {currentEntryType === "stock" ? " Bei Mengenartikeln gelten die Kennungen für das gesamte Produktmodell an allen Lagerorten." : " Eine EAN kann bei mehreren Geräten vorkommen."}</p>
             </fieldset>
             {currentEntryType === "asset" ? (
               <fieldset className="asset-form-group">
@@ -1682,6 +1681,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             <ItemImagePicker existingId={String(editEntry?.image_id ?? "")} value={imageChange} disabled={saving}
               onChange={setImageChange} onBusy={setImagePreparing}/>
           </div>
+        </div>
         </div>
         <footer className="asset-form-actions">
           <button type="button" disabled={saving} onClick={() => navigate("/inventory")}>

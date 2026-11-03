@@ -13,10 +13,27 @@
   background: #f4f6f8;
 }
 
+.asset-form-page.asset-form-page--editor {
+  --asset-form-inset: clamp(12px, 2vw, 24px);
+  --asset-form-inline: max(var(--asset-form-inset), (100% - 1280px) / 2);
+  overflow: hidden;
+  padding: 0;
+  scrollbar-gutter: auto;
+}
+
 .asset-form-shell {
-  width: min(1280px, 100%);
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+.asset-form-scroll {
   min-width: 0;
-  margin: 0 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--asset-form-inset) var(--asset-form-inline);
+  scroll-padding-block: var(--asset-form-inset);
 }
 
 .asset-form-header {
@@ -184,16 +201,12 @@ select.asset-form-control {
 }
 
 .asset-form-actions {
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
-  padding: 12px 0 4px;
+  padding: 12px var(--asset-form-inline);
   border-top: 1px solid #d8dde3;
   background: #f4f6f8;
 }
@@ -257,10 +270,6 @@ select.asset-form-control {
     display: none;
   }
 
-  .asset-form-page {
-    scroll-padding-bottom: 140px;
-  }
-
   .asset-form-actions {
     flex-direction: column-reverse;
     align-items: stretch;
@@ -288,8 +297,8 @@ select.asset-form-control {
 
 /* Auf sehr flachen Bildschirmen bleibt die Aktionsleiste im normalen Seitenfluss. */
 @media (max-height: 480px) {
-  .asset-form-actions { position: static; }
-  .asset-form-page { scroll-padding-bottom: 16px; }
+  .asset-form-shell { display: block; overflow-y: auto; }
+  .asset-form-scroll { overflow: visible; }
 }
 .asset-form-withdrawal-hint {
   margin: 4px 0 12px;

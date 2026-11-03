@@ -119,7 +119,7 @@ export default function ArchivePage({ onSessionExpired, canRestore, canDelete }:
       {selected.note && <p className="archive-note">{selected.note}</p>}
       <p>Archiviert von {selected.archived_by_name}</p>
       </div>
-      <AssetDetailPanel rows={[selected.snapshot]} getIdentifier={getIdentifier} getHeaderLabel={column=>labels[column]??column} formatValue={format}/>
+      <AssetDetailPanel rows={[selected.snapshot._record_type === "stock" ? selected.snapshot : { ...selected.snapshot, stock_quantity: 1 }]} getIdentifier={getIdentifier} getHeaderLabel={column=>labels[column]??column} formatValue={format}/>
     </section>}</div>}
   </main>;
 }

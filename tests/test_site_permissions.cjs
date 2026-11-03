@@ -123,6 +123,33 @@ const run=(async()=>{
   assert.deepEqual(await ids('SELECT site_id AS id FROM public.employee_site_access WHERE employee_id=2'),[1]);
   assert.equal((await query('SELECT * FROM public.employee_site_access WHERE employee_id=3')).length,0);
   console.log('PASS: Administrator access retained, anonymous RPC blocked, rerun does not re-grant excluded sites');
+
+  const timestampMigration=fs.readdirSync(migrations).find(f=>f.endsWith('_stock_level_updated_at.sql'));
+  await db.exec(fs.readFileSync(path.join(migrations,timestampMigration),'utf8'));
+  await db.exec(`
+    INSERT INTO public.stock_movements
+      (id,product_model_id,from_storage_location_id,to_storage_location_id,from_condition,to_condition,quantity,movement_type,recorded_at)
+    VALUES (80,101,22,11,'new','new',1,'transfer',date_trunc('day',now(),'UTC')+interval '1 day 10 hours'),
+           (81,101,NULL,11,NULL,'used',1,'receipt',date_trunc('day',now(),'UTC')+interval '1 day 11 hours'),
+           (82,101,NULL,22,NULL,'new',1,'receipt',date_trunc('day',now(),'UTC')+interval '1 day 12 hours');
+  `);
+  const levels = () => query(`SELECT storage_location_id::int, condition, quantity::int, extract(hour from updated_at at time zone 'UTC')::int AS hour
+    FROM public.stock_levels ORDER BY storage_location_id, condition`);
+  await asUser('editor', async()=>{
+    assert.deepEqual(await levels(), [
+      {storage_location_id:11,condition:'new',quantity:3,hour:10},
+      {storage_location_id:11,condition:'used',quantity:1,hour:11},
+    ]);
+    assert.equal((await query('SELECT quantity::int FROM public.stock_levels_total WHERE storage_location_id=11'))[0].quantity,4);
+  });
+  await asUser('admin', async()=>{
+    assert.deepEqual((await levels()).filter(row=>row.storage_location_id===22), [
+      {storage_location_id:22,condition:'new',quantity:7,hour:12},
+    ]);
+  });
+  await asUser('viewer', async()=>assert.deepEqual(await levels(), []));
+  assert.equal((await query("SELECT has_function_privilege('anon','private.scoped_stock_levels_with_dates()','EXECUTE') granted"))[0].granted,false);
+  console.log('PASS: Last recorded change is scoped to location and condition, including cross-site transfers');
  }finally{await db.close();}
 })();
 run.catch(e=>{console.error({message:e.message,code:e.code,detail:e.detail,where:e.where,testSql:e.testSql,stack:e.stack?.split('\n').slice(0,5).join('\n')});process.exitCode=1;});

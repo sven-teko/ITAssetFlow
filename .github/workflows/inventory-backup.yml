@@ -1,0 +1,55 @@
+name: ITAssetFlow Backup
+
+on:
+  schedule:
+    - cron: '17 3 * * 0'
+      timezone: 'Europe/Zurich'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: itassetflow-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: ${{ github.event.repository.private && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Inventar sichern und verschlüsseln
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_RECIPIENT_CERT: ${{ secrets.BACKUP_RECIPIENT_CERT }}
+          PGSSLMODE: require
+          PGCONNECT_TIMEOUT: '20'
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "$SUPABASE_DB_URL" || -z "$BACKUP_RECIPIENT_CERT" ]]; then
+            echo 'SUPABASE_DB_URL und BACKUP_RECIPIENT_CERT als Repository Secrets einrichten.' >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/itassetflow-backup"
+          target="$RUNNER_TEMP/itassetflow-backup/ITAssetFlow_$(date -u +%Y-%m-%d_%H%M%SZ).json.gz.p7m"
+          printf '%s\n' "$BACKUP_RECIPIENT_CERT" > "$RUNNER_TEMP/itassetflow-recipient.pem"
+          psql --dbname="$SUPABASE_DB_URL" --no-psqlrc --tuples-only --no-align --quiet -v ON_ERROR_STOP=1 \
+            -c 'SELECT private.inventory_backup_data();' \
+            | python3 -c 'import json, sys; data=sys.stdin.buffer.read(100*1024*1024+1); assert len(data)<=100*1024*1024, "Backup überschreitet 100 MiB"; snapshot=json.loads(data); assert snapshot["format"]=="ITAssetFlow-Backup" and snapshot["version"]==1; sys.stdout.buffer.write(data)' \
+            | gzip -6 \
+            | openssl cms -encrypt -binary -aes-256-gcm -outform DER -out "$target" "$RUNNER_TEMP/itassetflow-recipient.pem"
+          if (( $(wc -c < "$target") > 30 * 1024 * 1024 )); then
+            echo 'Backup überschreitet das Limit von 30 MiB pro Artefakt.' >&2
+            exit 1
+          fi
+
+      - name: Verschlüsseltes Backup aufbewahren
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ITAssetFlow-Backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/itassetflow-backup/*.p7m
+          if-no-files-found: error
+          retention-days: 28
+          compression-level: 0

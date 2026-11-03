@@ -652,3 +652,10 @@ select.settings-cell-editor {
 .settings-permissions-table td { vertical-align: middle; }
 
 .settings-permissions-pending { padding: 12px 14px; margin: 0; border: 1px solid #d7c797; border-radius: 5px; color: #73551e; background: #fffbef; line-height: 1.5; }
+
+.settings-backup { gap: 12px; }
+.settings-backup-card { padding: 16px; }
+.settings-backup-card h2 { margin: 0 0 8px; font-size: 1.1rem; }
+.settings-backup-card p { margin: 0 0 12px; color: #526171; }
+.settings-backup-card label { display: block; margin-bottom: 10px; }
+.settings-backup-card input[type="file"] { display: block; max-width: 100%; margin-top: 5px; }

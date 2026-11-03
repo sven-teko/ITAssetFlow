@@ -17,6 +17,7 @@ export type ProductModel = {
   id: string | number;
   name: string;
   manufacturer_id: string | number | null;
+  manufacturer_name?: string | null;
   category_id: string | number;
   part_number: string | null;
   sku: string | null;
@@ -37,7 +38,7 @@ export type ProductModelsData = {
 
 export type ModelDraft = {
   name: string;
-  manufacturer_id: string;
+  manufacturer_name: string;
   part_number: string;
   sku: string;
   qr_code: string;
@@ -79,7 +80,7 @@ export function specificationText(value: unknown): string {
 export function createModelDraft(model: ProductModel, fields: ModelField[]): ModelDraft {
   return {
     name: model.name,
-    manufacturer_id: String(model.manufacturer_id ?? ""),
+    manufacturer_name: model.manufacturer_name?.trim() || "Keiner",
     part_number: model.part_number ?? "",
     sku: model.sku ?? "",
     qr_code: model.qr_code ?? "",
@@ -96,9 +97,8 @@ export function modelChanges(model: ProductModel, fields: ModelField[], draft: M
   for (const key of ["name", "part_number", "sku", "qr_code", "ean"] as const) {
     if (draft[key] !== original[key]) changes[key] = draft[key].trim() || null;
   }
-  if (draft.manufacturer_id !== original.manufacturer_id) {
-    if (!draft.manufacturer_id) throw new Error("Bitte einen Hersteller auswählen.");
-    changes.manufacturer_id = draft.manufacturer_id;
+  if (draft.manufacturer_name.trim() !== original.manufacturer_name) {
+    changes.manufacturer_name = draft.manufacturer_name.trim() || "Keiner";
   }
   const specifications: Record<string, unknown> = {};
   for (const field of fields) {

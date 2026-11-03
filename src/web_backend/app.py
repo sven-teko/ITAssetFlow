@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import (
@@ -21,7 +21,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
 from supabase import Client
 
@@ -40,6 +40,7 @@ from web_backend.product_model_routes import create_product_models_router
 from web_backend.recovery_routes import create_recovery_router
 from web_backend.preferences_routes import create_preferences_router
 from web_backend.archive_routes import ArchiveReason, create_archive_router
+from web_backend.backup_routes import create_backup_router
 
 from inventory import (
     CONDITION_LABELS,
@@ -1372,6 +1373,45 @@ def delete_inventory_entries(
         ) from error
 
 
+class BulkAssetEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["asset"]
+    id: int = Field(gt=0)
+    updated_at: str | None = Field(default=None, max_length=64)
+
+
+class BulkStockEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["stock"]
+    product_model_id: int = Field(gt=0)
+    storage_location_id: int = Field(gt=0)
+    condition: Literal["new", "like_new", "used", "worn", "defective"]
+    quantity: float = Field(gt=0, allow_inf_nan=False)
+
+
+class BulkEditPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entries: list[Annotated[BulkAssetEntry | BulkStockEntry, Field(discriminator="type")]] = Field(min_length=2, max_length=200)
+    changes: dict[str, str | int | float | None] = Field(min_length=1, max_length=6)
+
+
+@app.patch("/api/inventory/bulk")
+def bulk_edit_inventory(request: Request, payload: BulkEditPayload,
+                        web_session: WebSession = Depends(require_editor_session)) -> dict[str, int]:
+    try:
+        updated = web_session.client.rpc("bulk_edit_inventory", {
+            "p_entries": [entry.model_dump(exclude_none=True) for entry in payload.entries],
+            "p_changes": payload.changes,
+        }).execute().data
+        if type(updated) is not int or not 0 <= updated <= len(payload.entries):
+            raise RuntimeError("Die Datenbank hat die Sammelbearbeitung nicht bestätigt.")
+        if updated:
+            INVENTORY_CHANGES.publish(_request_client_id(request))
+        return {"updated_count": updated}
+    except Exception as error:
+        raise _repository_http_exception(error) from error
+
+
 # Datenexport / CSV-Import
 
 @app.get("/api/transfer/export/{export_format}")
@@ -1550,6 +1590,7 @@ def inventory_meta(
 
 app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
 app.include_router(create_preferences_router(get_web_session))
+app.include_router(create_backup_router(require_admin_session))
 app.include_router(create_archive_router(get_web_session, require_editor_session, require_admin_session, INVENTORY_CHANGES.publish))
 app.include_router(
     create_settings_router(

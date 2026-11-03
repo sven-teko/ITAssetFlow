@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-type Props = { x: number; y: number; disabled: boolean; onEdit: () => void; onMove: () => void; onChangeStock?: () => void; onDelete: () => void; onClose: () => void };
+type Props = { x: number; y: number; disabled: boolean; multiple?: boolean; onEdit: () => void; onMove?: () => void; onChangeStock?: () => void; onDelete: () => void; onClose: () => void };
 
-export default function EntryContextMenu({ x, y, disabled, onEdit, onMove, onChangeStock, onDelete, onClose }: Props) {
+export default function EntryContextMenu({ x, y, disabled, multiple, onEdit, onMove, onChangeStock, onDelete, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -23,9 +23,9 @@ export default function EntryContextMenu({ x, y, disabled, onEdit, onMove, onCha
         buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + step + buttons.length) % buttons.length]?.focus();
       }
     }}>
-    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onEdit(); } }}>Eintrag bearbeiten</button>
-    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onMove(); } }}>Umlagern</button>
+    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onEdit(); } }}>{multiple ? "Auswahl bearbeiten" : "Eintrag bearbeiten"}</button>
+    {onMove && <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onMove(); } }}>Umlagern</button>}
     {onChangeStock && <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onChangeStock(); } }}>Lagerbestand ändern</button>}
-    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onDelete(); } }}>Eintrag löschen</button>
+    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onDelete(); } }}>{multiple ? "Auswahl archivieren" : "Eintrag löschen"}</button>
   </div>;
 }

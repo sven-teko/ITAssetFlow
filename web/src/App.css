@@ -480,6 +480,7 @@ input:focus {
 }
 
 .selection-box {
+  flex: 0 0 auto;
   min-height: 40px;
   padding: 8px 9px;
   color: #374151;

@@ -1,0 +1,8 @@
+.bulk-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 8px;
+}
+.bulk-inventory-summary > div { min-width: 0; padding: 8px; border: 1px solid #d7e0e9; border-radius: 5px; background: #fff; }
+.bulk-inventory-summary dt { color: #566575; font-size: 0.85rem; }
+.bulk-inventory-summary dd { min-height: 1.25em; margin: 3px 0 0; overflow-wrap: anywhere; }

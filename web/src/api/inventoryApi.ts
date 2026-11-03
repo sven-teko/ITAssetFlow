@@ -140,7 +140,7 @@ export async function loadInventoryRows(): Promise<InventoryRow[]> {
 
   return data.filter(
     (row): row is InventoryRow => isRecord(row),
-  );
+  ).map(row => row._record_type === "stock" ? row : { ...row, stock_quantity: 1 });
 }
 
 export async function loadInventoryRevision(): Promise<number> {

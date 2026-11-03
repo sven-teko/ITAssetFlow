@@ -423,11 +423,11 @@ export default function InventorySidebar({
             type="button"
             disabled={
               loading
-              || selectionCount !== 1
+              || selectionCount === 0
             }
             onClick={onEdit}
           >
-            Eintrag bearbeiten
+            {selectionCount > 1 ? "Auswahl bearbeiten" : "Eintrag bearbeiten"}
           </button>
 
 

@@ -23,6 +23,7 @@ const run = (async () => {
     page.on('pageerror', error => pageErrors.push(error.message));
     let loggedIn = false, failInventory = false, lastSettings = null, lastAsset = null, metaFailure = 0;
     let failSettingsLoad = false, failSettingsSave = false, failModelLoad = false;
+    let lastModel = null;
     let failExport = false;
     let currentEmail='admin@example.test';
     const columnPreferences=new Map();
@@ -100,6 +101,15 @@ const run = (async () => {
       }
       if(path==='/api/product-models'){
         await pause(400);
+        if(request.method()==='POST'){
+          lastModel=request.postDataJSON();
+          const manufacturer=data.manufacturers.find(row=>row.name===lastModel.manufacturer_name)
+            ?? {id:data.manufacturers.length+1,name:lastModel.manufacturer_name};
+          if(!data.manufacturers.includes(manufacturer)) data.manufacturers.push(manufacturer);
+          const model={...lastModel,id:100+data.product_models.length,manufacturer_id:manufacturer.id,is_active:true,specifications:{}};
+          data.product_models.push(model);
+          return json(model,201);
+        }
         return failModelLoad?json({detail:'Test: Modellliste nicht erreichbar.'},503):json({product_models:data.product_models,manufacturers:data.manufacturers,product_categories:data.product_categories.map(row=>({...row,fields:[]}))});
       }
       if(path==='/api/product-models/100' && request.method()==='PUT'){
@@ -139,6 +149,13 @@ const run = (async () => {
     await page.locator('.brand-loading').waitFor({state:'visible'});
     await page.getByText('TEST-001',{exact:true}).waitFor();
     console.log('PASS: Anmeldung und Logo-Ladeanzeige');
+    await page.getByRole('cell',{name:'TEST-001',exact:true}).click();
+    await page.setViewportSize({width:1440,height:560});
+    assert.ok(await page.locator('.selection-box').filter({hasText:'TEST-001'}).evaluate(el=>{
+      const text=document.createRange();text.selectNodeContents(el);
+      return text.getBoundingClientRect().bottom < el.getBoundingClientRect().bottom;
+    }));
+    await page.setViewportSize({width:1440,height:1000});
     assert.equal(await page.locator('.inventory-header-actions').getByText(/Datensätze?/).count(),0);
     assert.equal(await page.locator('.status-bar').getByText('2 Datensätze',{exact:true}).count(),1);
     assert.equal(await page.locator('.menu-logout-button .menu-power-icon').evaluate(el=>getComputedStyle(el).color),'rgb(200, 50, 50)');
@@ -148,13 +165,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.7.0 · 03.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.8.1 · 03.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.7.0');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.8.1');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -425,6 +442,18 @@ const run = (async () => {
     assert.equal(await page.getByLabel('Bezeichnung *:',{exact:true}).isDisabled(),true);
     await page.getByText('„TestBook aktualisiert“ wurde gespeichert.',{exact:true}).waitFor();
     assert.equal(await page.locator('.settings-spinner').count(),0);
+    const manufacturerInput=page.getByLabel('Hersteller:',{exact:true});
+    for(const [name,manufacturer] of [['Ohne Hersteller','Keiner'],['Mit Hersteller','Freie Marke']]){
+      await page.getByRole('button',{name:'Produktmodell hinzufügen',exact:true}).click();
+      await page.getByLabel('Bezeichnung *:',{exact:true}).fill(name);
+      assert.equal(await manufacturerInput.inputValue(),'Keiner');
+      if(manufacturer!=='Keiner')await manufacturerInput.fill(manufacturer);
+      await page.getByRole('button',{name:'Produktmodell speichern',exact:true}).click();
+      await page.getByText(`„${name}“ wurde hinzugefügt.`,{exact:true}).waitFor();
+      assert.equal(lastModel.manufacturer_name,manufacturer);
+      assert.equal(await manufacturerInput.inputValue(),manufacturer);
+    }
+    assert.equal(await page.locator('#model-manufacturers option[value="Freie Marke"]').count(),1);
     await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
     console.log('PASS: Produktmodelle mit Lade-/Speicheranimation, Fehlerzustand und erneutem Abruf');
 
@@ -436,6 +465,19 @@ const run = (async () => {
 
     await page.getByRole('button',{name:'Neuer Eintrag',exact:true}).click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await page.getByText(/QR-Code oder Barcode-Kennung, EAN/).count(),0);
+    for (const width of [1440,390]){
+      await page.setViewportSize({width,height:560});
+      const scroll=page.locator('.asset-form-scroll');
+      const footer=page.locator('.asset-form-actions');
+      const start=await footer.boundingBox();
+      assert.ok(await scroll.evaluate(el=>el.scrollHeight>el.clientHeight));
+      await scroll.evaluate(el=>{el.scrollTop=el.scrollHeight;});
+      assert.equal((await footer.boundingBox()).y,start.y);
+      const viewport=await scroll.boundingBox();
+      assert.ok(viewport.y+viewport.height<=start.y && start.y+start.height<=560);
+    }
+    await page.setViewportSize({width:1440,height:1000});
     const formRow=label=>page.locator('.asset-form-row').filter({has:page.locator('label').filter({hasText:label})});
     await formRow(/^Standort \*:/).locator('select').selectOption('1');
     await formRow(/^Abteilung \*:/).locator('select').selectOption('10');

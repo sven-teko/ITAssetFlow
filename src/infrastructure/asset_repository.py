@@ -120,7 +120,7 @@ class AssetRepository:
 
         for asset in merged_assets:
             asset["_record_type"] = "asset"
-            asset.setdefault("stock_quantity", None)
+            asset["stock_quantity"] = 1
 
         self.enrich_current_context(
             merged_assets,
@@ -1284,7 +1284,7 @@ class AssetRepository:
                 .not_.is_("purchase_date", "null")
             )
             if direction == "from":
-                query = query.neq("movement_type", "transfer")
+                query = query.neq("movement_type", "transfer").neq("movement_type", "condition_change")
             response = query.order("moved_at", desc=True).order("id", desc=True).limit(1).execute()
             candidates.extend(row for row in (response.data or []) if isinstance(row, dict))
         return max(candidates, key=lambda row: (str(row.get("moved_at") or ""), row.get("id") or 0), default={})
@@ -1740,6 +1740,7 @@ class AssetRepository:
                 "storage_location_id": storage_location_id,
                 "condition": condition,
                 "stock_quantity": quantity,
+                "updated_at": level.get("updated_at"),
                 "current_usage_state": "stored",
                 "inventory_usage": USAGE_STATE_LABELS["stored"],
                 "site_name": "",
@@ -1929,7 +1930,7 @@ class AssetRepository:
             asset["department_name"] = ""
             asset["assigned_to"] = ""  # intern für spätere Detailansichten
             asset["storage_location"] = ""
-            asset.setdefault("stock_quantity", None)
+            asset["stock_quantity"] = 1
 
     def _enrich_locations_and_assignments(
         self,

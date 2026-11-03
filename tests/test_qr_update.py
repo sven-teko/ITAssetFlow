@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from infrastructure.qr_service import QrService, normalize_qr_code
 from infrastructure.asset_repository import AssetRepository
 from web_backend.settings_routes import SettingsService
+from web_backend.product_model_routes import ProductModelService
 from test_update import FakeClient, employee
 
 
@@ -86,6 +87,34 @@ class Database:
             "employees": [{"id": 7, "email": "admin@example.test", "is_active": True}],
         }
     def table(self, name): return Query(self, name)
+
+
+class ProductModelManufacturerTests(unittest.TestCase):
+    def setUp(self):
+        self.db = Database()
+        self.db.rows.update({
+            "product_models": [],
+            "product_categories": [{"id": 1, "name": "Netzwerk", "specification_schema": {}}],
+            "manufacturers": [{"id": 1, "name": "Keiner"}, {"id": 2, "name": "Vorhanden"}],
+        })
+        self.service = ProductModelService(self.db)
+
+    def test_default_custom_existing_and_clear_manufacturer(self):
+        model = self.service.create({"name": "Router", "category_id": 1})
+        self.assertEqual((model["manufacturer_id"], model["manufacturer_name"]), (1, "Keiner"))
+        model = self.service.update(str(model["id"]), {"manufacturer_name": " Neue Marke "})
+        self.assertEqual(model["manufacturer_name"], "Neue Marke")
+        other = self.service.create({"name": "Switch", "category_id": 1, "manufacturer_name": "neue marke"})
+        self.assertEqual(other["manufacturer_id"], model["manufacturer_id"])
+        self.assertEqual(len(self.db.rows["manufacturers"]), 3)
+        self.assertEqual(self.service.update(str(model["id"]), {"manufacturer_name": " "})["manufacturer_id"], 1)
+        loaded = {row["id"]: row["manufacturer_name"] for row in self.service.load()["product_models"]}
+        self.assertEqual(loaded, {model["id"]: "Keiner", other["id"]: "Neue Marke"})
+
+    def test_invalid_model_does_not_create_manufacturer(self):
+        with self.assertRaisesRegex(ValueError, "Produktkategorie"):
+            self.service.create({"name": "Router", "category_id": 123, "manufacturer_name": "Neue Marke"})
+        self.assertEqual(self.db.writes, [])
 
 
 class OptionalEmailTests(unittest.TestCase):

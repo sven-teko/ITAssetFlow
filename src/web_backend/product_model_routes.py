@@ -24,9 +24,10 @@ MODEL_COLUMNS = (
     "specifications,tracking_mode,unit_code,is_active"
 )
 EDITABLE_COLUMNS = {
-    "name", "manufacturer_id", "part_number", "sku", "qr_code", "ean", "is_active", "specifications",
+    "name", "manufacturer_id", "manufacturer_name", "part_number", "sku", "qr_code", "ean", "is_active", "specifications",
 }
 CREATE_COLUMNS = (EDITABLE_COLUMNS - {"is_active"}) | {"category_id", "tracking_mode", "unit_code"}
+NO_MANUFACTURER = "Keiner"
 LOGGER = logging.getLogger(__name__)
 
 SPECIFICATION_ALIASES = {
@@ -157,13 +158,21 @@ class ProductModelService:
     def load(self) -> dict[str, Any]:
         categories = self._load_rows("product_categories", "id,name,specification_schema")
         fields_by_category = {str(row["id"]): model_fields(row.get("specification_schema")) for row in categories}
+        manufacturers = self._load_rows("manufacturers", "id,name")
+        manufacturer_names = {row["id"]: row["name"] for row in manufacturers}
         return {
-            "product_models": [public_model(row, fields_by_category.get(str(row["category_id"]), [])) for row in self._load_rows("product_models", MODEL_COLUMNS)],
+            "product_models": [
+                public_model(
+                    {**row, "manufacturer_name": manufacturer_names.get(row.get("manufacturer_id"))},
+                    fields_by_category.get(str(row["category_id"]), []),
+                )
+                for row in self._load_rows("product_models", MODEL_COLUMNS)
+            ],
             "product_categories": [
                 {"id": row["id"], "name": row["name"], "fields": fields_by_category[str(row["id"])]}
                 for row in categories
             ],
-            "manufacturers": self._load_rows("manufacturers", "id,name"),
+            "manufacturers": manufacturers,
         }
 
     def _editable_values(self, changes: dict[str, Any]) -> dict[str, Any]:
@@ -179,29 +188,58 @@ class ProductModelService:
                 raise ValueError("Die Modellbezeichnung darf nicht leer sein.")
             row[key] = row[key] or None
 
-        if "manufacturer_id" in changes:
-            manufacturer_id = changes["manufacturer_id"]
-            if (
-                isinstance(manufacturer_id, bool)
-                or not isinstance(manufacturer_id, (str, int))
-                or not str(manufacturer_id).strip()
-                or self._get_row("manufacturers", manufacturer_id, "id") is None
-            ):
-                raise ValueError("Bitte einen vorhandenen Hersteller auswählen.")
-            row["manufacturer_id"] = manufacturer_id
-
         if "is_active" in changes:
             if not isinstance(changes["is_active"], bool):
                 raise ValueError("Der Modellstatus muss aktiv oder inaktiv sein.")
             row["is_active"] = changes["is_active"]
         return row
 
+    def _resolve_manufacturer(self, values: dict[str, Any], *, creating: bool = False) -> dict[str, Any] | None:
+        if "manufacturer_id" in values:
+            if "manufacturer_name" in values:
+                raise ValueError("Bitte nur einen Hersteller angeben.")
+            manufacturer_id = values["manufacturer_id"]
+            if manufacturer_id is not None:
+                if isinstance(manufacturer_id, bool) or not isinstance(manufacturer_id, (str, int)) or not str(manufacturer_id).strip():
+                    raise ValueError("Bitte einen vorhandenen Hersteller auswählen.")
+                manufacturer = self._get_row("manufacturers", manufacturer_id, "id,name")
+                if manufacturer is None:
+                    raise ValueError("Bitte einen vorhandenen Hersteller auswählen.")
+                return manufacturer
+        elif "manufacturer_name" not in values and not creating:
+            return None
+
+        name = values.get("manufacturer_name")
+        if name is not None and not isinstance(name, str):
+            raise ValueError("Der Herstellername muss Text enthalten.")
+        name = (name or "").strip() or NO_MANUFACTURER
+        if len(name) > 100:
+            raise ValueError("Der Herstellername darf höchstens 100 Zeichen enthalten.")
+        if name.casefold() == NO_MANUFACTURER.casefold():
+            name = NO_MANUFACTURER
+        for manufacturer in self._load_rows("manufacturers", "id,name"):
+            if manufacturer["name"].strip().casefold() == name.casefold():
+                return manufacturer
+
+        try:
+            rows = self.client.table("manufacturers").insert({"name": name}).execute().data
+        except Exception as error:
+            if str(getattr(error, "code", "")) != "23505":
+                raise
+            # A concurrent request may have created the same manufacturer.
+            rows = self.client.table("manufacturers").select("id,name").eq("name", name).limit(1).execute().data
+            if not rows:
+                raise
+        if not rows or rows[0].get("id") is None:
+            raise HTTPException(500, "Der Hersteller konnte nicht gespeichert werden.")
+        return rows[0]
+
     def create(self, values: dict[str, Any]) -> dict[str, Any]:
         if set(values) - CREATE_COLUMNS:
             raise ValueError("Es wurden nicht bearbeitbare Modellfelder übergeben.")
         row = self._editable_values(values)
-        if not row.get("name") or not row.get("manufacturer_id"):
-            raise ValueError("Bitte eine Modellbezeichnung und einen Hersteller angeben.")
+        if not row.get("name"):
+            raise ValueError("Bitte eine Modellbezeichnung angeben.")
         category_id = values.get("category_id")
         if isinstance(category_id, bool) or not isinstance(category_id, (str, int)) or not str(category_id).strip():
             raise ValueError("Bitte eine vorhandene Produktkategorie auswählen.")
@@ -220,12 +258,15 @@ class ProductModelService:
             "unit_code": unit_code, "is_active": True,
             "specifications": self._merge_specifications({}, values.get("specifications", {}), fields),
         })
+        manufacturer = self._resolve_manufacturer(values, creating=True)
+        assert manufacturer is not None
+        row["manufacturer_id"] = manufacturer["id"]
         rows = write_scanner_compatible(
             lambda values: self.client.table("product_models").insert(values), "product_models", row,
         ).data
         if not rows or rows[0].get("id") is None:
             raise HTTPException(500, "Keine vollständige Speicherbestätigung erhalten. Bitte die Seite neu laden und die Modellliste prüfen.")
-        return public_model(rows[0], fields)
+        return public_model({**rows[0], "manufacturer_name": manufacturer["name"]}, fields)
 
     def update(self, model_id: str, changes: dict[str, Any]) -> dict[str, Any]:
         if set(changes) - EDITABLE_COLUMNS:
@@ -244,6 +285,10 @@ class ProductModelService:
                 raise ValueError("Die Produktkategorie konnte nicht geladen werden.")
             row["specifications"] = self._merge_specifications(current.get("specifications"), changes["specifications"], fields)
 
+        manufacturer = self._resolve_manufacturer(changes)
+        if manufacturer is not None:
+            row["manufacturer_id"] = manufacturer["id"]
+
         if not row:
             return public_model(current, fields)
         rows = write_scanner_compatible(
@@ -252,7 +297,9 @@ class ProductModelService:
         ).data
         if not rows:
             raise HTTPException(403, "Das Modell wurde nicht gespeichert. Bitte die Schreibrechte prüfen und die Liste neu laden.")
-        return public_model(rows[0], fields)
+        return public_model(
+            {**rows[0], "manufacturer_name": manufacturer["name"]} if manufacturer is not None else rows[0], fields,
+        )
 
     def delete(self, model_id: str) -> dict[str, Any]:
         current = self._get_row("product_models", model_id, "id")

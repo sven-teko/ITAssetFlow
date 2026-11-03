@@ -73,7 +73,10 @@ export default function ProductModelsPage({
     const controller = new AbortController();
     void loadProductModels(controller.signal).then(result => {
       if (controller.signal.aborted) return;
-      const models = [...result.product_models].sort(compareModels);
+      const names = new Map(result.manufacturers.map(row => [String(row.id), row.name]));
+      const models = result.product_models.map(model => ({
+        ...model, manufacturer_name: model.manufacturer_name ?? names.get(String(model.manufacturer_id)),
+      })).sort(compareModels);
       setData({ ...result, product_models: models });
       const first = models[0];
       setSelectedId(first ? String(first.id) : "");
@@ -197,14 +200,19 @@ export default function ProductModelsPage({
     setSuccess("");
     setSaving(true);
     try {
-      if (creating && !draft.manufacturer_id) throw new Error("Bitte einen Hersteller auswählen.");
       const changes = modelChanges(selected, fields, draft);
-      const saved = creating ? await createProductModel({
-        ...changes, name: draft.name.trim(), manufacturer_id: draft.manufacturer_id,
+      const result = creating ? await createProductModel({
+        ...changes, name: draft.name.trim(), manufacturer_name: draft.manufacturer_name.trim() || "Keiner",
         category_id: selected.category_id, tracking_mode: selected.tracking_mode, unit_code: selected.unit_code,
       }) : await saveProductModel(selected.id, changes);
+      const saved = { ...result, manufacturer_name: result.manufacturer_name ?? selected.manufacturer_name };
+      const manufacturer = saved.manufacturer_id !== null && saved.manufacturer_name
+        ? { id: saved.manufacturer_id, name: saved.manufacturer_name } : null;
       setData(current => current ? {
         ...current,
+        manufacturers: manufacturer && !current.manufacturers.some(row => String(row.id) === String(manufacturer.id))
+          ? [...current.manufacturers, manufacturer].sort((left, right) => MODEL_NAME_COLLATOR.compare(left.name, right.name))
+          : current.manufacturers,
         product_models: [...current.product_models.filter(model => String(model.id) !== String(saved.id)), saved]
           .sort(compareModels),
       } : current);
@@ -277,10 +285,10 @@ export default function ProductModelsPage({
                   </div>
                 </div>
                 <div className="product-models-toolbar">
-                  <button type="button" disabled={creating || !data.product_categories.length || !data.manufacturers.length} onClick={startCreate}>Produktmodell hinzufügen</button>
+                  <button type="button" disabled={creating || !data.product_categories.length} onClick={startCreate}>Produktmodell hinzufügen</button>
                   <button type="button" className="product-models-delete" disabled={creating || !selected} onClick={() => void removeModel()}>Produktmodell löschen</button>
                 </div>
-                {(!data.product_categories.length || !data.manufacturers.length) && <p className="asset-form-empty-info">Zum Hinzufügen zuerst eine Kategorie und einen Hersteller in den Einstellungen anlegen.</p>}
+                {!data.product_categories.length && <p className="asset-form-empty-info">Zum Hinzufügen zuerst eine Kategorie in den Einstellungen anlegen.</p>}
               </fieldset>
               {selected && draft ? (
                 <div className="asset-form-columns">
@@ -297,11 +305,18 @@ export default function ProductModelsPage({
                         <FormRow id="model-name" label="Bezeichnung *:">
                           <input ref={nameRef} id="model-name" className="asset-form-control" type="text" required value={draft.name} onChange={event => changeDraft({ name: event.target.value })} />
                         </FormRow>
-                        <FormRow id="model-manufacturer" label={creating ? "Hersteller *:" : "Hersteller:"}>
-                          <select id="model-manufacturer" className="asset-form-control" required={creating} value={draft.manufacturer_id} onChange={event => changeDraft({ manufacturer_id: event.target.value })}>
-                            {!data.manufacturers.some(row => String(row.id) === draft.manufacturer_id) && <option value={draft.manufacturer_id} disabled>{creating ? "Bitte auswählen" : draft.manufacturer_id ? "Bisheriger Hersteller" : "Kein Hersteller hinterlegt"}</option>}
-                            {data.manufacturers.map(row => <option key={row.id} value={String(row.id)}>{row.name}</option>)}
-                          </select>
+                        <FormRow id="model-manufacturer" label="Hersteller:">
+                          <div>
+                            <input id="model-manufacturer" className="asset-form-control" type="text" maxLength={100}
+                              list="model-manufacturers" placeholder="Keiner" value={draft.manufacturer_name}
+                              onFocus={event => { if (event.currentTarget.value === "Keiner") event.currentTarget.select(); }}
+                              onChange={event => changeDraft({ manufacturer_name: event.target.value })} />
+                            <datalist id="model-manufacturers">
+                              <option value="Keiner" />
+                              {data.manufacturers.filter(row => row.name.trim().toLocaleLowerCase("de") !== "keiner")
+                                .map(row => <option key={row.id} value={row.name} />)}
+                            </datalist>
+                          </div>
                         </FormRow>
                         {newModel && <>
                           <FormRow id="model-new-tracking" label="Verwaltungsart *:">
