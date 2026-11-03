@@ -1,5 +1,3 @@
-.inventory-header-actions { display: flex; align-items: center; justify-content: end; gap: 12px; min-width: 0; }
-.inventory-header-actions > span { color: #66717c; white-space: nowrap; }
 .mobile-inventory-toolbar { display: none; }
 .inventory-cards { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 12px; }
 .inventory-card { position: relative; margin-bottom: 10px; border: 1px solid #d9e1e9; border-radius: 9px; background: #fff; }
@@ -21,7 +19,7 @@
 
 @media (max-width: 720px) and (orientation: portrait) and (pointer: coarse) {
   html, body, #root { height: 100dvh; }
-  .main-window.mobile-portrait { height: 100dvh; grid-template-rows: 50px auto minmax(0, 1fr) auto; }
+  .main-window.mobile-portrait { height: 100dvh; grid-template-rows: auto minmax(0, 1fr) auto; }
   button, input, select, textarea { touch-action: manipulation; }
   .menu-bar { padding: 2px 4px; }
   .menu-brand { padding: 0 5px 0 2px; margin-right: 2px; border-right: 0; }
@@ -54,9 +52,6 @@
   .mobile-portrait .filter-option { min-height: 44px; }
   .mobile-portrait .sidebar-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
   .mobile-portrait .sidebar-actions > label, .sidebar-product-models-button { grid-column: 1 / -1; }
-  .mobile-portrait .inventory-header-actions { gap: 8px; }
-  .mobile-portrait .inventory-header-actions button { min-height: 40px; font-size: 13px; }
-  .mobile-portrait .desktop-qr-button { display: none; }
   .mobile-portrait .inventory-status { font-size: 11px; min-height: 22px; }
   .mobile-portrait .status-bar { min-height: 24px; font-size: 11px; padding-bottom: max(3px, env(safe-area-inset-bottom)); }
   .mobile-portrait .status-user { overflow: hidden; text-overflow: ellipsis; max-width: 58%; }

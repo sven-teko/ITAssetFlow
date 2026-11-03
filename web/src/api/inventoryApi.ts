@@ -151,22 +151,40 @@ export type DashboardSite = {
   stock_positions: number;
   attention: number;
   known_value: number;
-  missing_prices: number;
   configured_thresholds: number;
   low_stock: number;
   changed_at: string | null;
+  latest_item: string | null;
 };
 
-export async function loadInventoryDashboard(signal: AbortSignal): Promise<DashboardSite[]> {
+export type DashboardReviewItem = {
+  key: string;
+  item_name: string;
+  asset_tag: string | null;
+  site_name: string;
+  location_name: string | null;
+  changed_at: string | null;
+  issue: "defective" | "in_repair" | null;
+  stale: boolean;
+};
+
+export type DashboardData = {
+  sites: DashboardSite[];
+  review_items: DashboardReviewItem[];
+  review_after_days: number;
+};
+
+export async function loadInventoryDashboard(signal: AbortSignal): Promise<DashboardData> {
   const response = await fetch(`${API_BASE}/api/inventory/dashboard`, {
     credentials: "include", cache: "no-store", signal,
   });
   ensureAuthorized(response);
   const data = await readJson(response);
-  if (!response.ok || !isRecord(data) || !Array.isArray(data.sites)) {
+  if (!response.ok || !isRecord(data) || !Array.isArray(data.sites) ||
+      !Array.isArray(data.review_items) || typeof data.review_after_days !== "number") {
     throw new Error(errorDetail(data, "Das Dashboard konnte nicht geladen werden."));
   }
-  return data.sites;
+  return { sites: data.sites, review_items: data.review_items, review_after_days: data.review_after_days };
 }
 
 export async function loadInventoryRevision(): Promise<number> {

@@ -19,13 +19,19 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     };
     const defaults = {
       assets: 0, in_use: 0, stock_positions: 0, attention: 0, known_value: 0, missing_prices: 0,
-      configured_thresholds: 0, low_stock: 0, changed_at: null,
+      configured_thresholds: 0, low_stock: 0, changed_at: null, latest_item: null,
     };
     const sites = [
       { ...defaults, site_id: '1', name: 'Basel', assets: 2, in_use: 1, known_value: 320, missing_prices: 1,
-        changed_at: '2026-11-02T10:03:51Z', configured_thresholds: 1, low_stock: 1 },
-      { ...defaults, site_id: '2', name: 'Büro Allschwil', stock_positions: 1, known_value: 44, changed_at: '2026-11-03T12:23:11Z' },
+        changed_at: '2026-11-02T10:03:51Z', latest_item: 'Laptop · A-1', configured_thresholds: 1, low_stock: 1 },
+      { ...defaults, site_id: '2', name: 'Büro Allschwil', stock_positions: 1, known_value: 44, changed_at: '2026-11-03T12:23:11Z', latest_item: 'Kabel' },
       { ...defaults, site_id: '3', name: 'Leerer Standort' },
+    ];
+    const review = [
+      { key: 'asset:1', item_name: 'Laptop', asset_tag: 'A-1', issue: 'in_repair', stale: false, site_name: 'Basel', location_name: 'Lager',
+        changed_at: '2026-11-02T10:03:51Z' },
+      { key: 'stock:2:2:new', item_name: 'Kabel', asset_tag: null, issue: 'defective', stale: true, site_name: 'Büro Allschwil', location_name: 'Lager',
+        changed_at: '2025-01-01T10:03:51Z' },
     ];
     let fail = true, revision = 1, requests = 0;
     async function mock(page, restricted = false) {
@@ -45,7 +51,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           case '/api/inventory/dashboard':
             requests++;
             return fail ? json({ detail: 'Dashboard vorübergehend nicht verfügbar.' }, 503)
-              : json({ sites: restricted ? sites.slice(0, 1) : sites });
+              : json({ sites: restricted ? sites.slice(0, 1) : sites, review_after_days: 180, review_items: restricted ? review.slice(0, 1) : review });
           default: return json({}, 404);
         }
       });
@@ -58,16 +64,27 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const panel = page.getByRole('tabpanel', { name: 'Dashboard', exact: true });
     await page.getByRole('cell', { name: 'TEST-001' }).waitFor();
     assert.equal(requests, 0);
+    assert.equal(await page.locator('.menu-bar').getByRole('tab').count(), 2);
+    const scanner = page.locator('.menu-bar').getByRole('button', { name: 'Scanner', exact: true });
+    assert.ok(await scanner.isVisible());
+    assert.ok(Math.abs((await scanner.boundingBox()).y - (await inventory.boundingBox()).y) < 6);
     await inventory.focus();
     await inventory.press('ArrowRight');
     await panel.getByRole('alert').waitFor();
     fail = false;
     await panel.getByRole('button', { name: 'Erneut laden' }).click();
-    const table = panel.getByRole('table');
+    const table = panel.getByRole('table', { name: 'Standortübersicht' });
     await table.waitFor();
     assert.match(await panel.locator('.dashboard-metric-value').first().innerText(), /364\.00/);
     await table.getByRole('cell', { name: '03.11.2026-13-23', exact: true }).waitFor();
     await table.getByRole('cell', { name: 'Keine erfasst', exact: true }).waitFor();
+    await table.getByRole('cell', { name: 'Laptop · A-1', exact: true }).waitFor();
+    assert.equal(await panel.getByText(/ohne Preis|Die letzte Änderung zeigt|Einzelartikel zum erfassten/i).count(), 0);
+    const reviewTable = panel.getByRole('table', { name: /Zu prüfende Artikel/ });
+    await reviewTable.getByText('In Reparatur', { exact: true }).waitFor();
+    await reviewTable.getByText('Defekt', { exact: true }).waitFor();
+    await reviewTable.getByText('Lange unverändert', { exact: true }).waitFor();
+    assert.ok(await scanner.isVisible());
     await table.getByRole('button', { name: 'Letzte Änderung' }).click();
     assert.equal(await table.locator('tbody th').first().innerText(), 'Büro Allschwil');
     assert.equal(await page.locator('.inventory-table').isVisible(), false);
@@ -85,7 +102,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await mobile.getByRole('tab', { name: 'Filter', exact: true }).click();
     await mobile.getByRole('tab', { name: 'Dashboard', exact: true }).click();
     await mobile.getByRole('rowheader', { name: 'Basel', exact: true }).waitFor();
-    assert.equal(await mobile.getByRole('rowheader').count(), 1);
+    assert.equal(await mobile.getByRole('table', { name: 'Standortübersicht' }).getByRole('rowheader').count(), 1);
+    assert.equal(await mobile.getByRole('table', { name: /Zu prüfende Artikel/ }).getByRole('rowheader').count(), 1);
+    assert.equal(await mobile.getByRole('button', { name: 'Scanner', exact: true }).count(), 1);
+    await mobile.setViewportSize({ width: 320, height: 780 });
+    assert.ok(await mobile.locator('.menu-bar').evaluate(el => el.scrollWidth <= el.clientWidth));
     assert.equal(await mobile.getByRole('tab', { name: 'Filter', exact: true }).isVisible(), false);
     assert.ok(await mobile.locator('.dashboard-panel').evaluate(el => el.scrollWidth <= el.clientWidth));
     await mobile.getByRole('tab', { name: 'IT-Inventar', exact: true }).click();

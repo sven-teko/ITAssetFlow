@@ -156,7 +156,7 @@ const run = (async () => {
       return text.getBoundingClientRect().bottom < el.getBoundingClientRect().bottom;
     }));
     await page.setViewportSize({width:1440,height:1000});
-    assert.equal(await page.locator('.inventory-header-actions').getByText(/Datensätze?/).count(),0);
+    assert.equal(await page.locator('.menu-bar').getByText(/Datensätze?/).count(),0);
     assert.equal(await page.locator('.status-bar').getByText('2 Datensätze',{exact:true}).count(),1);
     assert.equal(await page.locator('.menu-logout-button .menu-power-icon').evaluate(el=>getComputedStyle(el).color),'rgb(200, 50, 50)');
     assert.equal(await page.getByRole('button',{name:'Abmelden',exact:true}).count(),1);
@@ -165,13 +165,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.9.0 · 03.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.9.1 · 03.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.9.0');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.9.1');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -192,7 +192,7 @@ const run = (async () => {
       const content=fs.readFileSync(await download.path(),'utf8');
       assert.ok(content.includes(label==='CSV'?'itassetflow_format':'BEGIN;'));
       await page.getByText(`${label}-Export wurde erstellt.`,{exact:true}).waitFor();
-      await page.locator('.page-header').click();
+      await page.locator('.status-bar').click();
     }
     failExport=true;
     await openExportMenu();
@@ -201,7 +201,7 @@ const run = (async () => {
     failExport=false;
     await openExportMenu();
     assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isEnabled(),true);
-    await page.locator('.page-header').click();
+    await page.locator('.status-bar').click();
     console.log('PASS: CSV- und PostgreSQL-Download, Dateinamen, Ladezustand, gesperrte Aktionen und sichtbare Exportfehler');
 
     const headerLabels=()=>page.locator('.inventory-table .table-header-label').allTextContents();
@@ -211,7 +211,7 @@ const run = (async () => {
       && response.request().method()==='PUT' && !response.request().postDataJSON().visible_columns.includes('status'));
     await page.locator('.header-context-option').filter({hasText:/^Status$/}).locator('input').uncheck();
     await savedColumns;
-    await page.locator('.page-header').click();
+    await page.locator('.status-bar').click();
     const expectedHeaders=await headerLabels();
     assert.equal(expectedHeaders[0],'Standort');assert.ok(!expectedHeaders.includes('Status'));
     await page.evaluate(()=>localStorage.removeItem('itassetflow.inventory_columns:v1:admin@example.test'));
@@ -246,7 +246,7 @@ const run = (async () => {
     assert.equal(await page.locator('.inventory-table tbody tr').count(),1);
     assert.equal(await page.getByText('TEST-002',{exact:true}).count(),0);
     await page.getByRole('button',{name:'Alle anzeigen',exact:true}).click();
-    await page.locator('.page-header').click();
+    await page.locator('.status-bar').click();
     assert.equal(await page.locator('.inventory-table tbody tr').count(),2);
     console.log('PASS: Statusfilter und Zurücksetzen');
 

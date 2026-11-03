@@ -74,3 +74,41 @@
 .menu-popup:has(> .menu-submenu:hover) > .menu-submenu:not(:hover) > .submenu-popup {
   display: none;
 }
+.menu-workspace-tabs {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid #d8dde3;
+}
+
+.workspace-tabs { display: flex; gap: 4px; }
+.workspace-tabs button {
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: #526171;
+  font-weight: 600;
+  background: transparent;
+}
+.workspace-tabs button[aria-selected="true"] {
+  color: #215b98;
+  background: #edf4fb;
+  border-bottom-color: #2868ad;
+}
+.workspace-tabs button:focus-visible { outline: 2px solid #2868ad; outline-offset: -2px; }
+.menu-scanner-button { flex: 0 0 auto; margin-right: 8px; }
+
+@media (max-width: 620px) {
+  .menu-bar { flex-wrap: wrap; }
+  .menu-workspace-tabs {
+    order: 1;
+    flex: 1 0 100%;
+    margin: 3px 0 0;
+    padding: 3px 0 0;
+    border-left: 0;
+    border-top: 1px solid #d8dde3;
+  }
+  .workspace-tabs button, .menu-scanner-button { min-height: 44px; }
+  .menu-scanner-button { margin-right: 5px; }
+  .menu-bar .menu-logout-button > span { display: none; }
+}

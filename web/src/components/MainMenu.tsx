@@ -3,6 +3,7 @@ import {
   useId,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import "./MainMenu.css";
 
@@ -13,6 +14,8 @@ export type DockPosition =
 
 
 type MainMenuProps = {
+  workspaceTabs: ReactNode;
+  onScan: () => void;
   navigationVisible: boolean;
   detailVisible: boolean;
 
@@ -143,6 +146,8 @@ function DockPanelMenu({
 
 
 export default function MainMenu({
+  workspaceTabs,
+  onScan,
   navigationVisible,
   detailVisible,
   navigationPosition,
@@ -632,12 +637,19 @@ export default function MainMenu({
       </div>
 
 
+      <div className="menu-workspace-tabs" onClick={() => setOpenMenu(null)}>{workspaceTabs}</div>
       <div className="menu-bar-spacer" />
+
+      <button type="button" className="primary-button menu-scanner-button" onClick={() => action(onScan)}>
+        Scanner
+      </button>
 
 
       <button
         type="button"
         className="menu-logout-button"
+        aria-label="Abmelden"
+        title="Abmelden"
         onClick={() =>
           action(
             onLogout,

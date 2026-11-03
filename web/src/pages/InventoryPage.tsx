@@ -204,6 +204,11 @@ export default function InventoryPage({
     if (canManageSettings) navigate("/settings?tab=product-models");
   }
 
+  function switchWorkspaceTab(tab: WorkspaceTab): void {
+    closeContext();
+    setWorkspaceTab(tab);
+  }
+
   const navigationPanel =
     (isMobile || docking.navigationVisible) ? (
       <InventorySidebar
@@ -327,6 +332,22 @@ export default function InventoryPage({
       />
 
       <MainMenu
+        onScan={() => setQrOpen(true)}
+        workspaceTabs={<div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
+          {workspaceTabs.map(([tab, label]) => <button key={tab} id={`workspace-tab-${tab}`}
+            type="button" role="tab" aria-selected={workspaceTab === tab} aria-controls={`workspace-panel-${tab}`}
+            tabIndex={workspaceTab === tab ? 0 : -1}
+            onClick={() => switchWorkspaceTab(tab)}
+            onKeyDown={event => {
+              const next = event.key === "Home" ? "inventory" : event.key === "End" ? "dashboard"
+                : event.key === "ArrowLeft" || event.key === "ArrowRight"
+                  ? (tab === "inventory" ? "dashboard" : "inventory") : null;
+              if (!next) return;
+              event.preventDefault();
+              switchWorkspaceTab(next);
+              document.getElementById(`workspace-tab-${next}`)?.focus();
+            }}>{label}</button>)}
+        </div>}
         navigationVisible={
           docking.navigationVisible
         }
@@ -418,29 +439,6 @@ export default function InventoryPage({
         }
       />
 
-      <div className="page-header workspace-header">
-        <div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
-          {workspaceTabs.map(([tab, label]) => <button key={tab} id={`workspace-tab-${tab}`}
-            type="button" role="tab" aria-selected={workspaceTab === tab} aria-controls={`workspace-panel-${tab}`}
-            tabIndex={workspaceTab === tab ? 0 : -1}
-            onClick={() => { closeContext(); setWorkspaceTab(tab); }}
-            onKeyDown={event => {
-              const next = event.key === "Home" ? "inventory" : event.key === "End" ? "dashboard"
-                : event.key === "ArrowLeft" || event.key === "ArrowRight"
-                  ? (tab === "inventory" ? "dashboard" : "inventory") : null;
-              if (!next) return;
-              event.preventDefault();
-              closeContext();
-              setWorkspaceTab(next);
-              document.getElementById(`workspace-tab-${next}`)?.focus();
-            }}>{label}</button>)}
-        </div>
-        {workspaceTab === "inventory" && <div className="inventory-header-actions">
-          {!isMobile && <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>Scanner</button>}
-          {isMobile && canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
-        </div>}
-      </div>
-
       <section className="inventory-workspace-panel" id="workspace-panel-inventory" role="tabpanel"
         aria-labelledby="workspace-tab-inventory" hidden={workspaceTab !== "inventory"}>
       {isMobile && <nav className="mobile-inventory-toolbar" aria-label="Mobile Inventaransicht">
@@ -453,7 +451,7 @@ export default function InventoryPage({
               switchTab(next); document.getElementById(`mobile-tab-${next}`)?.focus();
             } }}>{tab === "navigation" ? "Filter" : tab === "inventory" ? "Tabelle" : "Details"}</button>)}
         </div>
-        <button type="button" className="primary-button" onClick={() => setQrOpen(true)}>Scanner</button>
+        {canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
       </nav>}
 
       {imageWarning && <div className="inventory-image-warning" role="alert">{imageWarning}<button onClick={()=>{setImageWarning("");navigate("/inventory",{replace:true,state:null});}}>Schliessen</button></div>}
