@@ -10,32 +10,41 @@ import "./StockWithdrawalDialog.css";
 
 type Row = Record<string,unknown>;
 type Source = {product_model_id:number;storage_location_id:number;condition:string;quantity:number;product_model_name:string};
-export default function StockWithdrawalDialog({source,amount, fixedAmount=false,onCancel,onConfirm}: {
-  source:Source;amount:number;fixedAmount?:boolean;onCancel:()=>void;onConfirm:(data:WithdrawalSubmission)=>Promise<void>;
+type Destinations = { sites: Row[]; departments: Row[]; storage_locations: Row[] };
+export default function StockWithdrawalDialog({source,amount, fixedAmount=false,destinationData,onCancel,onConfirm}: {
+  source:Source;amount:number;fixedAmount?:boolean;destinationData?: Destinations;onCancel:()=>void;onConfirm:(data:WithdrawalSubmission)=>Promise<void>;
 }) {
   const ref=useRef<HTMLDialogElement>(null);
   const frozen=useRef<WithdrawalSubmission | null>(null);
+  const inFlight=useRef(false);
   const [quantity,setQuantity]=useState(amount),[action,setAction]=useState<"" | Withdrawal["action"]>("");
   const [reason,setReason]=useState<ArchiveReason>({reason:"customer",customer_name:null,destroyed:null,note:null});
-  const [sites,setSites]=useState<Row[]>([]),[departments,setDepartments]=useState<Row[]>([]),[locations,setLocations]=useState<Row[]>([]);
+  const [fetchedDestinations,setFetchedDestinations]=useState<Destinations | null>(null);
+  const [destinationError,setDestinationError]=useState("");
   const [site,setSite]=useState(""),[department,setDepartment]=useState(""),[location,setLocation]=useState("");
   const [condition,setCondition]=useState("used"),[status,setStatus]=useState("in_use"),[note,setNote]=useState("");
   const emptyUnit=()=>({asset_tag:"",serial_number:"",mac_address:""});
   const [units,setUnits]=useState(()=>Array.from({length:Math.min(amount,100)},emptyUnit));
-  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState("");
-  useEffect(()=>{const el=ref.current;el?.showModal();const controller=new AbortController();
-    void fetch(`${API_BASE}/api/inventory/form-data`,{credentials:"include",signal:controller.signal}).then(async response=>{
+  const [busy,setBusy]=useState(false),[uncertain,setUncertain]=useState(false),[error,setError]=useState("");
+  const destinations = destinationData ?? fetchedDestinations;
+  const { sites, departments, storage_locations: locations } = destinations ?? {sites:[],departments:[],storage_locations:[]};
+  const loading = !destinations && !destinationError;
+  useEffect(()=>{const el=ref.current;el?.showModal();return()=>el?.close();},[]);
+  useEffect(()=>{
+    if(action!=="assets" || destinations || destinationError)return;
+    const controller=new AbortController();
+    void fetch(`${API_BASE}/api/inventory/form-data`,{credentials:"include",cache:"no-store",signal:controller.signal}).then(async response=>{
       if(!response.ok)throw new Error("Die Zielstandorte konnten nicht geladen werden.");
       const data=await response.json();if(controller.signal.aborted)return;
-      setSites(data.sites??[]);setDepartments(data.departments??[]);setLocations(data.storage_locations??[]);
-    }).catch(cause=>{if(!controller.signal.aborted)setError(cause instanceof Error?cause.message:"Die Standorte konnten nicht geladen werden.");})
-      .finally(()=>{if(!controller.signal.aborted)setLoading(false);});
-    return()=>{controller.abort();el?.close();};
-  },[]);
+      setFetchedDestinations({sites:data.sites??[],departments:data.departments??[],storage_locations:data.storage_locations??[]});
+    }).catch(cause=>{if(!controller.signal.aborted)setDestinationError(cause instanceof Error?cause.message:"Die Standorte konnten nicht geladen werden.");});
+    return()=>controller.abort();
+  },[action,destinations,destinationError]);
   const locked=busy||uncertain;
   function changeQuantity(value:number){setQuantity(value);setUnits(old=>Array.from({length:Math.min(Math.max(value,0),100)},(_,i)=>old[i]??emptyUnit()));}
   async function submit(event:FormEvent){
-    event.preventDefault();event.stopPropagation();if(busy)return;setError("");
+    event.preventDefault();event.stopPropagation();if(inFlight.current)return;setError("");
+    inFlight.current=true;
     try {
       if(!uncertain){
         if(!Number.isInteger(quantity)||quantity<1||quantity>source.quantity)throw new Error("Bitte eine verfügbare ganze Menge wählen.");
@@ -55,7 +64,7 @@ export default function StockWithdrawalDialog({source,amount, fixedAmount=false,
       const ambiguous=cause instanceof QrRequestError && (cause.status===0||cause.status>=500);
       setUncertain(ambiguous);
       setError(ambiguous?"Die Antwort fehlt. Bitte dieselbe Buchung erneut prüfen; sie wird dabei nicht doppelt gebucht.":cause instanceof Error?cause.message:"Die Entnahme konnte nicht gespeichert werden.");
-    }finally{setBusy(false);}
+    }finally{inFlight.current=false;setBusy(false);}
   }
   return createPortal(<dialog ref={ref} className="stock-withdrawal" aria-labelledby="withdrawal-title" onCancel={e=>{e.preventDefault();if(!locked)onCancel();}}>
     <form onSubmit={event=>void submit(event)}><header><h2 id="withdrawal-title">Bestand entnehmen</h2><p>{source.product_model_name} · {source.quantity} Stück verfügbar</p></header>
@@ -66,7 +75,7 @@ export default function StockWithdrawalDialog({source,amount, fixedAmount=false,
     {action==="archive" && <ArchiveReasonFields value={reason} onChange={setReason}/>}
     {action==="assets" && <>
       <p>Für jedes entnommene Stück entsteht ein eigener Artikel am gewählten Ziel.</p>
-      {loading?<p role="status">Standorte werden geladen …</p>:<div className="withdrawal-target">
+      {destinationError?<p role="alert" className="archive-error">{destinationError} <button type="button" onClick={()=>setDestinationError("")}>Erneut laden</button></p>:loading?<p role="status">Standorte werden geladen …</p>:<div className="withdrawal-target">
         <label>Standort *<select aria-label="Zielstandort *" required value={site} onChange={e=>{setSite(e.target.value);setDepartment("");setLocation("");}}><option value="">Bitte auswählen</option>{sites.map(row=><option key={String(row.id)} value={String(row.id)}>{String(row.name)}</option>)}</select></label>
         <label>Abteilung *<select aria-label="Zielabteilung *" required value={department} onChange={e=>{setDepartment(e.target.value);setLocation("");}}><option value="">Bitte auswählen</option>{departments.filter(row=>String(row.site_id)===site).map(row=><option key={String(row.id)} value={String(row.id)}>{String(row.name)}</option>)}</select></label>
         <label>Lagerort / Einsatzort *<select aria-label="Ziel-Lagerort *" required value={location} onChange={e=>setLocation(e.target.value)}><option value="">Bitte auswählen</option>{locations.filter(row=>String(row.site_id)===site&&String(row.department_id)===department&&row.is_active!==false).map(row=><option key={String(row.id)} value={String(row.id)}>{String(row.name)}</option>)}</select></label>
@@ -77,6 +86,6 @@ export default function StockWithdrawalDialog({source,amount, fixedAmount=false,
       <label>Bemerkung zu den Einzelartikeln<textarea maxLength={2000} value={note} onChange={e=>setNote(e.target.value)}/></label>
     </>}
     </fieldset>{error&&<p role="alert" className="archive-error">{error}</p>}
-    <footer><button type="button" disabled={locked} onClick={onCancel}>Abbrechen</button><button type="submit" className="primary-button" disabled={busy||(action==="assets"&&loading)}>{busy?"Wird gebucht …":uncertain?"Buchung erneut prüfen":"Entnahme buchen"}</button></footer>
+    <footer><button type="button" disabled={locked} onClick={onCancel}>Abbrechen</button><button type="submit" className="primary-button" disabled={busy||(action==="assets"&&!destinations)}>{busy?"Wird gebucht …":uncertain?"Buchung erneut prüfen":"Entnahme buchen"}</button></footer>
     </form></dialog>,document.body);
 }

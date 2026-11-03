@@ -7,10 +7,10 @@ const run=(async()=>{
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  let quantity=10,postCount=0,putCount=0,dropResponse=false,lastBooking=null,lastEdit=null,missingSnapshot=false;
+  let quantity=10,postCount=0,putCount=0,dropResponse=false,lastBooking=null,lastEdit=null,missingSnapshot=false,failSave=false,modelName="Router";
   const operations=new Map(),assets=[],archived=[];
   const meta={column_order:['asset_tag','product_model_name','stock_quantity','site_name'],default_visible_columns:['asset_tag','product_model_name','stock_quantity','site_name'],headers:{asset_tag:'Produkterkennung',product_model_name:'Produktmodell',stock_quantity:'Menge',site_name:'Standort'},status_labels:{available:'Verfügbar',in_use:'Im Einsatz'},condition_labels:{new:'Neu',used:'Gebraucht'},inventory_group_labels:{device:'Gerät'}};
-  const source=()=>({id:'stock:101:11:new',_record_type:'stock',product_model_id:101,product_model_name:'Router',stock_quantity:quantity,storage_location_id:11,site_id:1,department_id:10,site_name:'Lager',department_name:'IT',storage_location:'Kiste',condition:'new',status:'available',purchase_date:'2026-11-02',_web_inventory_group:'device',_web_category_key:'router',_web_condition_key:'new'});
+  const source=()=>({id:'stock:101:11:new',_record_type:'stock',product_model_id:101,product_model_name:modelName,stock_quantity:quantity,storage_location_id:11,site_id:1,department_id:10,site_name:'Lager',department_name:'IT',storage_location:'Kiste',condition:'new',status:'available',purchase_date:'2026-11-02',_web_inventory_group:'device',_web_category_key:'router',_web_condition_key:'new'});
   const form={sites:[{id:1,name:'Lager'},{id:2,name:'Büro'}],departments:[{id:10,name:'IT',site_id:1},{id:20,name:'Betrieb',site_id:2}],storage_locations:[{id:11,name:'Kiste',site_id:1,department_id:10,is_active:true},{id:22,name:'Empfang',site_id:2,department_id:20,is_active:true}],employees:[],manufacturers:[{id:1,name:'Test'}],product_categories:[{id:1,name:'Router',code:'router',inventory_group:'device',specification_schema:{fields:[]}}],product_models:[{id:101,name:'Router',category_id:1,manufacturer_id:1,tracking_mode:'quantity',is_active:true,qr_code:'QR-CABLE',specifications:{}}],parent_assets:[]};
   const book=body=>{
    if(operations.has(body.request_id))return operations.get(body.request_id);
@@ -31,13 +31,14 @@ const run=(async()=>{
    if(p==='/api/inventory/revision')return json({revision:1});
    if(p==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:':test\n\n'});
    if(p==='/api/inventory/form-data')return json(form);
-   if(p==='/api/inventory/edit-form-data')return json({...form,edit_entry:{...source(),stock_quantity:missingSnapshot?undefined:String(quantity)}});
+   if(p==='/api/inventory/edit-form-data')return json({...form,edit_entry:{...source(),stock_quantity:missingSnapshot?undefined:quantity.toFixed(3)}});
    if(p==='/api/inventory'){
     if(req.method()==='PUT'){
      putCount++;lastEdit=req.postDataJSON();
+     if(failSave)return json({detail:[{msg:'Der Lagerort ist ungültig.'}]},422);
      if(!lastEdit.withdrawal)return json({detail:{code:'stock_withdrawal_required',message:'Entnahme auswählen',available:quantity}},409);
      book({code:'QR-CABLE',product_model_id:101,storage_location_id:11,condition:'new',direction:'remove',quantity:lastEdit.edit.stock_quantity-lastEdit.stock.quantity,
-      request_id:lastEdit.withdrawal.request_id,withdrawal:lastEdit.withdrawal});return json({entry_type:'stock',product_model_id:101,quantity});
+      request_id:lastEdit.withdrawal.request_id,withdrawal:lastEdit.withdrawal});return json({saved:true,entry_type:'stock',product_model_id:101,quantity});
     }return json([source(),...assets]);
    }
    if(p==='/api/scanner/lookup')return json({code:url.searchParams.get('code'),matches:[{key:'stock:101:11:new',record_type:'stock',product_model_id:101,product_model_name:'Router',storage_location_id:11,storage_location_name:'Kiste',site_name:'Lager',department_name:'IT',condition:'new',quantity}],locations:[{id:11,site_name:'Lager',department_name:'IT',storage_location_name:'Kiste'}]});
@@ -74,33 +75,48 @@ const run=(async()=>{
   assert.equal(quantity,7);assert.equal(archived.length,1);assert.equal(lastBooking.request_id,pending);assert.equal(postCount,3);
   console.log('PASS: Teilentnahme mit Pflichtgrund; Verbindungsabbruch nach Speicherung und sichere Wiederholung ohne doppelte Archivmenge');
   await page.getByRole('button',{name:'Scanner schliessen'}).click();
-  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3Atest/edit');
+  quantity=4;modelName='TV Box Fernbedienung (Quadratische Tasten)';form.product_models[0].name=modelName;
+  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3Astock%3A101%3A11%3Anew%3A101%3A11%3Anew/edit');
   await page.getByRole('heading',{name:'Inventareintrag bearbeiten',exact:true}).waitFor();
   const quantityInput=page.locator('.asset-form-row').filter({has:page.locator('label').filter({hasText:/^Menge \[Stück\] \*:/})}).locator('input');
-  await quantityInput.fill('5');await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+  assert.equal(await quantityInput.inputValue(),'4');
+  await quantityInput.fill('3');
+  await page.getByText(/4 → 3 Stück/).waitFor();await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
   dialog=page.getByRole('dialog',{name:'Bestand entnehmen',exact:true});await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');
-  assert.equal(await dialog.getByLabel('Menge entnehmen *',{exact:true}).inputValue(),'2');
+  assert.equal(await dialog.getByLabel('Menge entnehmen *',{exact:true}).inputValue(),'1');
   assert.equal(putCount,0);
   await dialog.getByLabel('Grund *',{exact:true}).selectOption('defective');await dialog.getByLabel('Wurde der Artikel vernichtet? *',{exact:true}).selectOption('yes');
   await dialog.getByRole('button',{name:'Entnahme buchen',exact:true}).click();await page.locator('.inventory-table').waitFor();
-  assert.equal(quantity,5);assert.equal(lastEdit.withdrawal.reason.destroyed,true);
+  assert.equal(quantity,3);assert.equal(lastEdit.withdrawal.reason.destroyed,true);
   assert.equal(putCount,1);
   console.log('PASS: Auch direkte Mengenverringerung im Bearbeitungsformular verlangt Archivgrund oder Einzelartikel');
   missingSnapshot=true;
   form.product_models[0].tracking_mode='hybrid';
-  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3Atest/edit');
-  await quantityInput.fill('4');await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3Astock%3A101%3A11%3Anew%3A101%3A11%3Anew/edit');
+  await quantityInput.fill('2');await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
   await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('assets');
   assert.equal(await dialog.getByLabel('Menge entnehmen *',{exact:true}).inputValue(),'1');
-  assert.equal(putCount,2);assert.equal(quantity,5);
+  assert.equal(putCount,2);assert.equal(quantity,3);
   await dialog.getByLabel('Zielstandort *',{exact:true}).selectOption('2');
   await dialog.getByLabel('Zielabteilung *',{exact:true}).selectOption('20');
   await dialog.getByLabel('Ziel-Lagerort *',{exact:true}).selectOption('22');
   await dialog.getByLabel('Produkterkennung * 1',{exact:true}).fill('ROUTER-EDIT-1');
   await dialog.getByRole('button',{name:'Entnahme buchen',exact:true}).click();await page.locator('.inventory-table').waitFor();
-  assert.equal(putCount,3);assert.equal(quantity,4);assert.equal(assets.length,2);
+  assert.equal(putCount,3);assert.equal(quantity,2);assert.equal(assets.length,2);
   assert.equal(lastEdit.scanner_codes.qr_code,'QR-CABLE');
   console.log('PASS: Server öffnet Entnahmedialog bei fehlendem Ausgangsbestand; Einzelartikel entsteht genau einmal');
+  missingSnapshot=false;failSave=true;
+  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3A101%3A11%3Anew/edit');
+  await quantityInput.fill('');
+  await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+  await page.getByRole('alert').getByText('Bitte die Bestandsmenge eingeben.').waitFor();
+  assert.equal(putCount,3);
+  await quantityInput.fill('2');
+  await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+  await page.getByRole('alert').getByText('Der Lagerort ist ungültig.').waitFor();
+  assert.equal(putCount,4);failSave=false;
+  await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
+  console.log('PASS: Leere Menge bucht nichts; API-Validierungsfehler bleibt sichtbar');
   await page.getByRole('button',{name:'Datei',exact:true}).click();await page.getByRole('button',{name:'Archiv',exact:true}).click();
   await page.getByRole('cell',{name:'Bei Kunde',exact:true}).waitFor();await page.getByRole('columnheader',{name:'Anzahl',exact:true}).waitFor();
   assert.equal(archived[0].snapshot.stock_quantity,2);
@@ -109,7 +125,7 @@ const run=(async()=>{
   await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');await dialog.getByLabel('Grund *',{exact:true}).selectOption('other');
   await dialog.getByLabel('Eigener Löschgrund *',{exact:true}).fill('Verbraucht');await screenshot('mobile-entnahme');
   assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
-  await dialog.getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal(quantity,4);
+  await dialog.getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal(quantity,2);
   assert.deepEqual(errors,[]);
   console.log('PASS: Archiv zeigt entnommene Anzahl; mobile Entnahme ohne Überlauf, Abbrechen ohne Buchung');
  }finally{await browser.close();await vite.close();}

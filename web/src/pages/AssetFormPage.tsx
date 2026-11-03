@@ -85,15 +85,21 @@ function compareNames(left: GenericRow, right: GenericRow): number {
 }
 
 function errorDetail(payload: unknown, fallback: string): string {
-  const detail = (payload as { detail?: unknown } | null)?.detail;
-  if (typeof detail === "string") return detail;
-  const message = (detail as { message?: unknown } | null)?.message;
-  return typeof message === "string" ? message : fallback;
+  const body = payload as { detail?: unknown; message?: unknown; error?: unknown } | null;
+  const detail = body?.detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.map(item => item?.msg).filter((value): value is string => typeof value === "string");
+    if (messages.length > 0) return messages.join("\n");
+  }
+  for (const message of [detail, (detail as { message?: unknown } | null)?.message, body?.message, body?.error]) {
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
 }
 
 function readStockQuantity(value: unknown): number | null {
   if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
-  const parsed = Number(value);
+  const parsed = typeof value === "string" ? Number(value.trim().replace(",", ".")) : value;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
@@ -301,6 +307,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   const [specValues, setSpecValues] = useState<Record<string, SpecificationValue>>({});
   const errorMessageRef = useRef<HTMLDivElement>(null);
+  const submissionInProgress = useRef(false);
 
 
   // Fehlermeldungen auch bei langen Formularen sichtbar und fokussierbar machen.
@@ -312,9 +319,14 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   }, [errorMessage, loading]);
 
   useEffect(() => {
+    const controller = new AbortController();
     async function loadForm(): Promise<void> {
       setLoading(true);
       setErrorMessage("");
+      setFormData(null);
+      setEditEntry(null);
+      setPendingWithdrawal(null);
+      setImageChange(undefined);
 
       try {
         const [formResponse, metaResponse] = await Promise.all([
@@ -325,11 +337,14 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               : `${API_BASE}/api/inventory/form-data`,
             {
               credentials: "include",
+              cache: "no-store",
+              signal: controller.signal,
             },
           ),
 
           fetch(`${API_BASE}/api/inventory/meta`, {
             credentials: "include",
+            signal: controller.signal,
           }),
         ]);
 
@@ -344,6 +359,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
         const formPayload: unknown = await formResponse.json();
         const metaPayload: unknown = await metaResponse.json();
+        if (controller.signal.aborted) return;
 
         if (!formResponse.ok) {
           throw new Error(
@@ -359,9 +375,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         }
 
         const data = formPayload as FormDataResponse;
-        setFormData(data);
-        setMeta(metaPayload as InventoryMeta);
-
         const currentEdit =
           typeof data.edit_entry === "object" &&
           data.edit_entry !== null &&
@@ -373,6 +386,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         if (isEditMode && !currentEdit) {
           throw new Error("Der ausgewählte Inventareintrag konnte nicht geladen werden.");
         }
+        setFormData(data);
+        setMeta(metaPayload as InventoryMeta);
 
         if (currentEdit) {
           const currentModel =
@@ -441,15 +456,17 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           setCategoryId(idText(data.product_categories[0].id));
         }
       } catch (error) {
+        if (controller.signal.aborted) return;
         setErrorMessage(
           error instanceof Error ? error.message : "Die Eingabedaten konnten nicht geladen werden.",
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 
     void loadForm();
+    return () => controller.abort();
   }, [entryKey, isEditMode, navigate, onSessionExpired]);
   const categories = useMemo(
     () =>
@@ -536,6 +553,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       : currentTrackingMode === "serialized"
         ? "asset"
         : hybridEntryType;
+  const startingQuantity = isEditMode && currentEntryType === "stock"
+    ? readStockQuantity(editEntry?.stock_quantity ?? editEntry?.quantity)
+    : null;
+  const requestedQuantity = readStockQuantity(quantity);
+  const withdrawalAmount = startingQuantity !== null && requestedQuantity !== null && requestedQuantity < startingQuantity
+    ? startingQuantity - requestedQuantity
+    : null;
   const currentSpecificationFields = useMemo(
     () => specificationFields(currentCategory),
     [currentCategory],
@@ -880,8 +904,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     } else {
       let stockQuantity = 1;
 
+      if (isEditMode && !quantity.trim()) throw new Error("Bitte die Bestandsmenge eingeben.");
       if (quantity.trim()) {
-        stockQuantity = Number(quantity);
+        stockQuantity = readStockQuantity(quantity) ?? NaN;
 
         if (!Number.isInteger(stockQuantity) || stockQuantity < (isEditMode ? 0 : 1)) {
           throw new Error(isEditMode ? "Menge muss eine ganze Zahl ab 0 sein." : "Menge muss eine ganze Zahl grösser als 0 sein.");
@@ -905,7 +930,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         product_model_id: editEntry.product_model_id ?? null,
         storage_location_id: editEntry.storage_location_id ?? null,
         condition: editEntry.condition ?? null,
-        stock_quantity: readStockQuantity(editEntry.stock_quantity ?? editEntry.quantity),
+        stock_quantity: startingQuantity,
         source_movement_id: editEntry.source_movement_id ?? null,
       };
     }
@@ -916,7 +941,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (saving || imagePreparing || pendingWithdrawal) {
+    if (submissionInProgress.current || saving || imagePreparing || pendingWithdrawal) {
       return;
     }
 
@@ -931,8 +956,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       return;
     }
 
-    const available = readStockQuantity((payload.edit as GenericRow | undefined)?.stock_quantity);
-    if (available !== null && prepareWithdrawal(payload, available)) return;
+    if (startingQuantity !== null && prepareWithdrawal(payload, startingQuantity)) return;
     await persist(payload);
   }
 
@@ -959,6 +983,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   }
 
   async function persist(payload:GenericRow):Promise<void> {
+    if (submissionInProgress.current) return;
+    submissionInProgress.current = true;
     setSaving(true);
     const saveErrorMessage = isEditMode
       ? "Der Inventareintrag konnte nicht aktualisiert werden."
@@ -992,7 +1018,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         return;
       }
 
-      const data: unknown = await response.json();
+      const data: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
         const detail = (data as { detail?: { code?: string; available?: number } } | null)?.detail;
@@ -1000,7 +1026,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           const available = readStockQuantity(detail.available);
           if (available !== null && prepareWithdrawal(payload, available)) return;
         }
-        throw new QrRequestError(errorDetail(data, saveErrorMessage),response.status);
+        throw new QrRequestError(errorDetail(data, `${saveErrorMessage} (HTTP ${response.status})`),response.status);
+      }
+      if (!data || typeof data !== "object" || (payload.withdrawal && (data as GenericRow).saved !== true)) {
+        throw new QrRequestError("Der Server hat die Speicherung nicht bestätigt.", 502);
       }
 
       let imageWarning="";
@@ -1016,6 +1045,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       if(payload.withdrawal) throw error instanceof QrRequestError ? error : new QrRequestError(error instanceof Error?error.message:saveErrorMessage,0);
       setErrorMessage(error instanceof Error ? error.message : saveErrorMessage);
     } finally {
+      submissionInProgress.current = false;
       setSaving(false);
     }
   }
@@ -1470,12 +1500,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     type="text"
                     inputMode="numeric"
                     className="asset-form-control"
-                    placeholder="leer = 1"
+                    placeholder={isEditMode ? "Bestandsmenge eingeben" : "leer = 1"}
                     value={quantity}
                     disabled={saving}
                     onChange={(event) => setQuantity(event.target.value)}
                   />
                 </div>
+                {withdrawalAmount !== null && <p className="asset-form-withdrawal-hint">
+                  {startingQuantity} → {requestedQuantity} Stück. Wähle beim Speichern, ob du {withdrawalAmount === 1 ? "das entnommene Stück" : `die ${withdrawalAmount} entnommenen Stücke`} einzeln erfasst oder archivierst.
+                </p>}
                 <div className="asset-form-row asset-form-row-top">
                   <label>Bemerkungen:</label>
                   <textarea
@@ -1632,7 +1665,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           </button>
         </footer>
       </form>
-      {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
+      {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount destinationData={formData} source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
         condition:String(editEntry.condition),quantity:pendingWithdrawal.available,product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
         amount={pendingWithdrawal.amount} onCancel={()=>setPendingWithdrawal(null)}
         onConfirm={submission=>persist({...pendingWithdrawal.payload,withdrawal:{...submission.withdrawal,request_id:submission.request_id}})}/>}

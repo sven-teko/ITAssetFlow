@@ -451,7 +451,7 @@ class AssetRepository:
             for row in (level_response.data or [])
             if isinstance(row, dict)
         ]
-        if not levels:
+        if not levels or Decimal(str(levels[0].get("quantity") or 0)) <= 0:
             raise ValueError(
                 "Der ausgewählte Mengenbestand existiert nicht mehr."
             )

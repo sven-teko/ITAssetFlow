@@ -98,6 +98,46 @@ class StockEditTests(unittest.TestCase):
                 self.assertEqual(error.exception.available, 5)
                 self.assertEqual(self.db.writes, [])
 
+    def test_edit_route_for_four_to_three_stock(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from uuid import uuid4
+        from fastapi.testclient import TestClient
+        from web_backend.app import app, get_web_session
+
+        self.db.rows["product_models"][0]["name"] = "TV Box Fernbedienung (Quadratische Tasten)"
+        self.db.rows["stock_levels"][0]["quantity"] = "4.000"
+        self.db.rows["stock_movements"][0]["quantity"] = 4
+        self.payload["edit"]["stock_quantity"] = "4.000"
+        self.payload["stock"]["quantity"] = 3
+        self.db.rpc = Mock(return_value=SimpleNamespace(execute=Mock(return_value=SimpleNamespace(
+            data={"saved": True, "quantity": 3, "changed_quantity": 1}
+        ))))
+        session = SimpleNamespace(client=self.db, email="editor@example.test", role="user")
+        with patch.dict(app.dependency_overrides, {get_web_session: lambda: session}), TestClient(app) as client:
+            with patch.object(AssetRepository, "load_inventory", side_effect=AssertionError("Vollständiges Inventar geladen")):
+                edit = client.get("/api/inventory/edit-form-data", params={"entry_key": "stock:stock:10:3:used:10:3:used"})
+            self.assertEqual(edit.status_code, 200, edit.text)
+            self.assertEqual(edit.json()["edit_entry"]["stock_quantity"], "4.000")
+            self.assertEqual(edit.headers["cache-control"], "no-store")
+            before = client.put("/api/inventory", json=self.payload)
+            self.assertEqual(before.status_code, 409, before.text)
+            self.assertEqual(before.json()["detail"]["code"], "stock_withdrawal_required")
+            self.db.rpc.assert_not_called()
+            for outcome in (
+                {"action": "archive", "reason": {"reason": "lost"}},
+                {"action": "assets", "target_location_id": 4, "target_condition": "used",
+                 "target_status": "available", "units": [{"asset_tag": "FB-001"}]},
+            ):
+                saved = client.put("/api/inventory", json={**self.payload, "withdrawal": {
+                    **outcome, "request_id": str(uuid4()),
+                }})
+                self.assertEqual(saved.status_code, 200, saved.text)
+                self.assertEqual(saved.json()["quantity"], 3)
+                args = self.db.rpc.call_args.args[1]
+                self.assertEqual(args["p_quantity"], 1)
+                self.assertEqual(args["p_details"]["action"], outcome["action"])
+
     def test_reduction_with_reason_uses_atomic_rpc_and_delta(self):
         from unittest.mock import Mock
         from types import SimpleNamespace

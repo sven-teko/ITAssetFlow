@@ -496,6 +496,18 @@ def _find_inventory_entry(
             "Inventarschlüssel fehlt."
         )
 
+    parts = normalized_key.split(":")
+    if len(parts) == 2 and parts[0] == "asset" and parts[1].isascii() and parts[1].isdigit():
+        return {"_record_type": "asset", "id": int(parts[1])}
+    if len(parts) == 8 and parts[:2] == ["stock", "stock"] and parts[2:5] == parts[5:8]:
+        parts = ["stock", *parts[2:5]]
+    if (len(parts) == 4 and parts[0] == "stock"
+            and all(value.isascii() and value.isdigit() for value in parts[1:3])
+            and parts[3] in {"new", "like_new", "used", "worn", "defective"}):
+        model_id, location_id = map(int, parts[1:3])
+        return {"_record_type": "stock", "id": ":".join(parts),
+                "product_model_id": model_id, "storage_location_id": location_id, "condition": parts[3]}
+
     for row in repository.load_inventory():
         if (
             isinstance(row, dict)
@@ -1142,6 +1154,7 @@ def inventory_form_data(
 @app.get("/api/inventory/edit-form-data")
 def inventory_edit_form_data(
     entry_key: str,
+    response: Response,
     web_session: WebSession = Depends(
         get_web_session
     ),
@@ -1166,9 +1179,8 @@ def inventory_edit_form_data(
             value_error_status=404,
         ) from error
 
-    return _normalize_form_data(
-        data
-    )
+    response.headers["Cache-Control"] = "no-store"
+    return _normalize_form_data(data)
 
 
 # Inventareintrag erstellen / bearbeiten / löschen
