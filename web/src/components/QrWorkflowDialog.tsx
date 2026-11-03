@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adjustQrStock, lookupQr, QrRequestError, type QrLookup, type QrMatch } from "../api/qrApi";
 import QrScanner from "./QrScanner";
+import StockWithdrawalDialog from "./StockWithdrawalDialog";
+import { newBookingId, type WithdrawalSubmission } from "../api/stockBooking";
 import "./QrWorkflowDialog.css";
 import { isValidEan, identifierType, type CodeType } from "../utils/scannerCodes";
 import { APP_VERSION } from "../release";
@@ -20,6 +22,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   const dialogRef = useRef<HTMLDialogElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
+  const pendingAdd=useRef<Record<string,unknown> | null>(null);
+  const [withdrawalOpen,setWithdrawalOpen]=useState(false);
+  const [addPending,setAddPending]=useState(false);
   const [code, setCode] = useState("");
   const [recognizedType, setRecognizedType] = useState<CodeType | null>(null);
   const [recognizedFormat, setRecognizedFormat] = useState("");
@@ -85,8 +90,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       setRecognizedType(result.code_type ?? type);
       setNeedsRefresh(false);
       if (!preserve || !result.matches.some(row => row.key === selectedKey)) {
-        const row = result.matches[0];
-        setSelectedKey(result.matches.length === 1 ? row.key : "");
+        const preferred=result.matches.find(row=>row.key===result.preferred_key);
+        const row = preferred ?? result.matches[0];
+        setSelectedKey(preferred || result.matches.length === 1 ? row.key : "");
         setLocationId(String(row.storage_location_id ?? result.locations[0]?.id ?? ""));
         setCondition(row.condition || "used");
         setQuantity("1");
@@ -98,9 +104,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     }
   }
 
-  async function book(direction: "add" | "remove") {
-    if (!selected || !lookup || busyRef.current || !canEdit || needsRefresh) return;
-    const amount = Number(quantity);
+  async function book(direction: "add" | "remove", withdrawal?:WithdrawalSubmission) {
+    if (!selected || !lookup || busyRef.current || !canEdit || needsRefresh && !withdrawal && !pendingAdd.current) return;
+    const amount = withdrawal?.quantity ?? Number(quantity);
     if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000 || !locationId) {
       setError("Bitte einen Lagerort und eine ganze Menge zwischen 1 und 1’000’000 wählen.");
       return;
@@ -109,11 +115,15 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       setError("Die Abgangsmenge ist grösser als der verfügbare Bestand.");
       return;
     }
+    if(direction === "remove" && !withdrawal){setWithdrawalOpen(true);return;}
+    const payload = withdrawal ? {code:lookup.code,product_model_id:selected.product_model_id,storage_location_id:Number(locationId),condition,direction,...withdrawal}
+      : pendingAdd.current ?? {code:lookup.code,product_model_id:selected.product_model_id,storage_location_id:Number(locationId),condition,quantity:amount,direction,request_id:newBookingId()};
+    if(direction === "add") {pendingAdd.current=payload;setAddPending(true);}
     busyRef.current = true;
     setSaving(true); setError(""); setMessage("");
     try {
-      const result = await adjustQrStock({ code: lookup.code, product_model_id: selected.product_model_id,
-        storage_location_id: Number(locationId), condition, quantity: amount, direction });
+      const result = await adjustQrStock(payload);
+      pendingAdd.current=null;setAddPending(false);setWithdrawalOpen(false);setNeedsRefresh(false);
       if (!result.saved) throw new QrRequestError("Die Buchung wurde nicht bestätigt. Bitte Bestand neu prüfen.", 500);
       if (result.quantity !== null) {
         const location = lookup.locations.find((row) => String(row.id) === locationId);
@@ -126,11 +136,13 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
         ] } : current);
         setSelectedKey(updated.key);
       } else setNeedsRefresh(true);
-      setMessage(`${direction === "add" ? "Zugang" : "Abgang"} von ${amount} Stück gespeichert.${result.quantity === null ? " Bitte den Bestand neu prüfen." : ""}`);
+      setMessage(`${direction === "add" ? "Zugang" : result.asset_count ? "Übernahme als Einzelartikel" : "Entnahme ins Archiv"} von ${amount} Stück gespeichert.${result.quantity === null ? " Bitte den Bestand neu prüfen." : ""}`);
       void onChanged();
     } catch (cause) {
       const uncertain = cause instanceof QrRequestError && (cause.status === 0 || cause.status >= 500);
       setNeedsRefresh(uncertain);
+      if (!uncertain) {pendingAdd.current=null;setAddPending(false);}
+      if(withdrawal) throw cause;
       setError(uncertain ? "Der Buchungsstatus ist unklar. Bitte zuerst den Bestand neu prüfen, bevor du erneut buchst."
         : cause instanceof Error ? cause.message : "Die Buchung konnte nicht gespeichert werden.");
     } finally { busyRef.current = false; setSaving(false); }
@@ -143,11 +155,11 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   function submit(event: FormEvent) { event.preventDefault(); void readCode(code); }
 
   return (
-    <dialog ref={dialogRef} className="qr-dialog" aria-labelledby="qr-title"
-      onCancel={event => { event.preventDefault(); if (!busyRef.current) onClose(); }}>
+    <><dialog ref={dialogRef} className="qr-dialog" aria-labelledby="qr-title"
+      onCancel={event => { event.preventDefault(); if (!busyRef.current && !addPending) onClose(); }}>
       <header className="qr-dialog-header">
         <div><h2 id="qr-title">Scanner</h2><p>Artikel erkennen und Bestand buchen.</p></div>
-        <button type="button" className="qr-close-button" aria-label="Scanner schliessen" disabled={saving} onClick={onClose}>×</button>
+        <button type="button" className="qr-close-button" aria-label="Scanner schliessen" disabled={saving||addPending} onClick={onClose}>×</button>
       </header>
 
       <div className="qr-dialog-body">
@@ -197,21 +209,21 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
               <div className="qr-stock-balance"><span>Aktueller Bestand</span><strong>{needsRefresh ? "Bitte prüfen" : `${balance} Stück`}</strong></div>
               <div className="qr-result-fields">
                 <label className="qr-location-field">Lagerort
-                  <select aria-label="Lagerort für Scanner-Buchung" value={locationId} disabled={saving || loading}
+                  <select aria-label="Lagerort für Scanner-Buchung" value={locationId} disabled={saving || loading || addPending}
                     onChange={event => { setLocationId(event.target.value); setError(""); setMessage(""); }}>
                     <option value="">Bitte auswählen</option>
                     {lookup.locations.map(row => <option key={row.id} value={row.id}>{row.site_name} · {row.department_name} · {row.storage_location_name}</option>)}
                   </select>
                 </label>
                 <label>Zustand
-                  <select aria-label="Zustand für Scanner-Buchung" value={condition} disabled={saving || loading}
+                  <select aria-label="Zustand für Scanner-Buchung" value={condition} disabled={saving || loading || addPending}
                     onChange={event => { setCondition(event.target.value); setError(""); setMessage(""); }}>
                     {Object.entries(CONDITIONS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                 </label>
                 <label htmlFor="qr-quantity">Menge [Stück]
                   <input id="qr-quantity" type="number" min="1" max="1000000" step="1" inputMode="numeric" value={quantity}
-                    disabled={saving || loading || !canEdit} onChange={event => setQuantity(event.target.value)} />
+                    disabled={saving || loading || !canEdit || addPending} onChange={event => setQuantity(event.target.value)} />
                 </label>
               </div>
               <div className="qr-book-buttons">
@@ -224,17 +236,18 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </>}
           {!canEdit && <p className="qr-hint">Dieses Konto besitzt Leserechte.</p>}
           <button type="button" className="qr-refresh-button" disabled={saving || loading}
-            onClick={() => void readCode(lookup.code, true, recognizedType ?? "auto", recognizedFormat)}>Bestand neu prüfen</button>
+            onClick={() => pendingAdd.current ? void book("add") : void readCode(lookup.code, true, recognizedType ?? "auto", recognizedFormat)}>{addPending?"Buchung erneut prüfen":"Bestand neu prüfen"}</button>
         </section>}
       </div>
 
       <footer className="qr-dialog-footer">
         {!lookup && <small className="qr-build-version">v{APP_VERSION}</small>}
-        {lookup && <button type="button" className="qr-next-button" disabled={saving || loading} onClick={() => {
+        {lookup && <button type="button" className="qr-next-button" disabled={saving || loading || addPending} onClick={() => {
           setLookup(null); setCode(""); setRecognizedType(null); setRecognizedFormat(""); setNeedsRefresh(false); setMessage(""); setError("");
         }}>Weiteren Code scannen</button>}
-        <button type="button" disabled={saving} onClick={onClose}>Schliessen</button>
+        <button type="button" disabled={saving||addPending} onClick={onClose}>Schliessen</button>
       </footer>
-    </dialog>
+    </dialog>{withdrawalOpen && selected && <StockWithdrawalDialog source={{product_model_id:selected.product_model_id,storage_location_id:Number(locationId),condition,quantity:balance,product_model_name:selected.product_model_name}}
+      amount={Number(quantity)} onCancel={()=>setWithdrawalOpen(false)} onConfirm={submission=>book("remove",submission)}/>}</>
   );
 }

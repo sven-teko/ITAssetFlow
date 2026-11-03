@@ -614,6 +614,7 @@ class DataTransferService:
             "excluded": [
                 "audit_log",
                 "inventory_change_state",
+                "inventory_stock_requests",
                 "stock_levels",
                 "stock_levels_total",
             ],

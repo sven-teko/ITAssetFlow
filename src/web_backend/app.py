@@ -517,7 +517,14 @@ def _repository_http_exception(
     message = str(error)
     normalized = message.casefold()
 
-    if isinstance(
+    code = str(getattr(error, "code", ""))
+    if code in {"40001", "23505"}:
+        status_code = 409
+    elif code == "42501":
+        status_code = 403
+    elif code in {"P0001", "23514", "22P02", "22003", "22007"}:
+        status_code = 400
+    elif isinstance(
         error,
         ValueError,
     ):

@@ -1,6 +1,7 @@
 import sys
 import unittest
 from copy import deepcopy
+from uuid import uuid4
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -94,7 +95,8 @@ class QrTests(unittest.TestCase):
     def setUp(self):
         self.db = Database()
         self.service = QrService(self.db, actor_email="admin@example.test")
-        self.booking = {"code": "QR-CABLE", "product_model_id": 10, "storage_location_id": 3, "condition": "used", "quantity": 2, "direction": "add"}
+        self.db.rpc = Mock(return_value=SimpleNamespace(execute=Mock(return_value=SimpleNamespace(data={"saved": True, "quantity": 7, "changed_quantity": 2}))))
+        self.booking = {"request_id": str(uuid4()), "code": "QR-CABLE", "product_model_id": 10, "storage_location_id": 3, "condition": "used", "quantity": 2, "direction": "add"}
 
     def test_unknown_code_has_no_match_and_writes_nothing(self):
         self.assertEqual(self.service.lookup("NEW-001")["matches"], [])
@@ -117,26 +119,28 @@ class QrTests(unittest.TestCase):
         self.db.rows["stock_levels"] = []
         match = self.service.lookup("QR-CABLE")["matches"][0]
         self.assertIsNone(match["storage_location_id"])
+        self.db.rpc.return_value.execute.return_value.data["quantity"] = 2
         self.assertEqual(self.service.adjust(self.booking)["quantity"], 2)
 
-    def test_increase_records_one_receipt_with_actor(self):
+    def test_increase_uses_one_atomic_database_call(self):
         result = self.service.adjust(self.booking)
         self.assertEqual(result["quantity"], 7)
-        self.assertEqual(len(self.db.writes), 1)
-        row = self.db.rows["stock_movements"][0]
-        self.assertEqual(row["movement_type"], "receipt")
-        self.assertEqual(row["performed_by_employee_id"], 7)
-        self.assertIsNone(row["from_storage_location_id"])
+        self.db.rpc.assert_called_once()
+        name, payload = self.db.rpc.call_args.args
+        self.assertEqual(name, "book_inventory_stock")
+        self.assertEqual(payload["p_request_id"], self.booking["request_id"])
+        self.assertEqual(self.db.writes, [])
 
-    def test_remove_all_preserves_movement_history(self):
-        result = self.service.adjust({**self.booking, "quantity": 5, "direction": "remove"})
-        self.assertEqual(result["quantity"], 0)
-        self.assertEqual(self.db.rows["stock_movements"][0]["movement_type"], "issue")
-        self.assertEqual(self.service.lookup("QR-CABLE")["matches"][0]["quantity"], 0)
+    def test_remove_requires_outcome_before_database_call(self):
+        with self.assertRaisesRegex(ValueError, "Archivierung oder Einzelartikel"):
+            self.service.adjust({**self.booking, "direction": "remove"})
+        self.db.rpc.assert_not_called()
+        self.assertEqual(self.db.writes, [])
 
-    def test_too_large_removal_writes_nothing(self):
+    def test_too_large_removal_is_rejected_by_atomic_database_call(self):
+        self.db.rpc.return_value.execute.side_effect = ValueError("Nicht genügend Lagerbestand")
         with self.assertRaisesRegex(ValueError, "Nicht genügend"):
-            self.service.adjust({**self.booking, "quantity": 6, "direction": "remove"})
+            self.service.adjust({**self.booking, "quantity": 6, "direction": "remove", "withdrawal": {"action": "archive", "reason": {"reason": "lost"}}})
         self.assertEqual(self.db.writes, [])
 
     def test_invalid_quantities_rejected(self):
@@ -178,8 +182,9 @@ class QrTests(unittest.TestCase):
         with patch.object(self.db, "table", side_effect=table):
             result = self.service.adjust(self.booking)
         self.assertTrue(result["saved"])
-        self.assertIsNone(result["quantity"])
-        self.assertEqual(len(self.db.writes), 1)
+        self.assertEqual(result["quantity"], 7)
+        self.assertEqual(calls, 0)
+        self.db.rpc.assert_called_once()
 
     def test_invalid_qr_text(self):
         for value in ("", "A\nB", "X" * 101, None):

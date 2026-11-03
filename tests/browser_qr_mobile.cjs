@@ -18,6 +18,7 @@ const run = (async () => {
     const errors = [], wasmRequests = [];
     page.on('pageerror', error => errors.push(error.message));
     page.on('request', request => { if (request.url().includes('.wasm')) wasmRequests.push(request.url()); });
+    const bookingResults=new Map();
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
@@ -72,10 +73,12 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/stock') {
         const payload = req.postDataJSON(); bookings.push(payload);
+        let result=bookingResults.get(payload.request_id);
+        if(!result){stock += payload.direction === 'add' ? payload.quantity : -payload.quantity;
+          result={saved:true,quantity:stock,changed_quantity:payload.quantity};bookingResults.set(payload.request_id,result);}
         if (uncertain) { uncertain = false; return route.abort('failed'); }
         if (malformed) { malformed = false; return json({}); }
-        stock += payload.direction === 'add' ? payload.quantity : -payload.quantity;
-        return json({ saved: true, quantity: stock, changed_quantity: payload.quantity });
+        return json(result);
       }
       if (endpoint === '/api/inventory/delete') { deletedKeys = req.postDataJSON().entry_keys; return json({deleted_count: deletedKeys.length}); }
       return json({ detail: `Unbekannter Test-Endpunkt ${endpoint}` }, 404);
@@ -230,7 +233,12 @@ const run = (async () => {
     assert.equal(bookings.length, 1);
     await page.getByLabel('Menge [Stück]', { exact: true }).fill('7');
     await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: 'Abgang von 7 Stück gespeichert.' }).waitFor();
+    const withdrawal=page.getByRole('dialog',{name:'Bestand entnehmen',exact:true});
+    await withdrawal.getByLabel('Verwendung *',{exact:true}).selectOption('archive');
+    await withdrawal.getByLabel('Grund *',{exact:true}).selectOption('lost');
+    await withdrawal.getByRole('button',{name:'Entnahme buchen',exact:true}).click();
+    await withdrawal.waitFor({state:'hidden'});
+    await page.getByRole('status').filter({ hasText: 'Entnahme ins Archiv von 7 Stück gespeichert.' }).waitFor();
     assert.equal(stock, 0); assert.equal(bookings.length, 2);
     assert.equal(await page.getByRole('button', { name: 'Bestand reduzieren', exact: true }).isDisabled(), true);
     await page.getByRole('button', { name: 'Bestand neu prüfen', exact: true }).click();
@@ -243,16 +251,18 @@ const run = (async () => {
     await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Buchungsstatus ist unklar' }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);
-    assert.equal(bookings.length, 3);
-    await page.getByRole('button', { name: 'Bestand neu prüfen', exact: true }).click();
+    const pending=bookings.at(-1).request_id;
+    await page.getByRole('button', { name: 'Buchung erneut prüfen', exact: true }).click();
     await page.waitForFunction(() => !document.querySelector('.qr-result .primary-button').disabled);
+    assert.equal(bookings.at(-1).request_id,pending);assert.equal(stock,1);
     malformed = true;
     await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'Buchungsstatus ist unklar' }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);
-    assert.equal(bookings.length, 4);
+    await page.getByRole('button', { name: 'Buchung erneut prüfen', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('.qr-result .primary-button').disabled);
+    assert.equal(stock,2);
     await closeQr();
-    console.log('PASS: Verbindungsabbruch und ungültige Antwort sperren weitere Buchungen bis zur Bestandsprüfung');
+    console.log('PASS: Verbindungsabbruch und ungültige Antwort nach bereits gespeicherter Buchung; Wiederholung ohne Doppelbuchung');
 
     const imageData = 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'fixtures/QR-CABLE.png')).toString('base64');
     await page.evaluate(dataUrl => {

@@ -16,6 +16,8 @@ const run=(async()=>{
    await db.exec(fs.readFileSync(path.join(root,'database/scanner_codes.sql'),'utf8'));
    await db.exec(fs.readFileSync(path.join(root,'supabase/migrations/20261029093456_site_permissions.sql'),'utf8'));
    await db.exec(fs.readFileSync(path.join(root,'supabase/migrations/20261102145032_inventory_archive_images.sql'),'utf8'));
+   await db.exec(fs.readFileSync(path.join(root,'supabase/migrations/20261102153129_stock_outcomes.sql'),'utf8'));
+   await db.exec(fs.readFileSync(path.join(root,'supabase/migrations/20261102154643_stock_metadata_notes.sql'),'utf8'));
    await db.exec(`INSERT INTO auth.users(id,email) VALUES('${admin}','admin@example.test'),('${editor}','editor@example.test');`);
   }
   await source.exec(`
@@ -42,6 +44,8 @@ const run=(async()=>{
   await source.query('SELECT public.set_inventory_image($1,$2)',['asset:10','aW1hZ2UtZGF0YQ==']);
   await source.query('SELECT public.archive_inventory_items($1,$2)',[['asset:10'],{reason:'customer',customer_name:'Testkunde'}]);
   await source.query('SELECT public.archive_inventory_items($1,$2)',[['asset:20'],{reason:'other',note:'VERBORGENER-ARCHIVGRUND'}]);
+  await source.query("SELECT public.book_inventory_stock($1,101,11,'used',1,'remove',$2,4)",[require('node:crypto').randomUUID(),{action:'archive',reason:{reason:'lost'}}]);
+  await source.query("SELECT public.book_inventory_stock($1,101,11,'used',1,'remove',$2,3)",[require('node:crypto').randomUUID(),{action:'assets',target_location_id:11,target_condition:'used',target_status:'in_use',units:[{asset_tag:'AUS-MENGE'}]}]);
   await source.exec('RESET ROLE');
   await source.query("SELECT set_config('request.jwt.claims','',false)");
 
@@ -61,16 +65,16 @@ service.export_csv(sys.argv[2]+'.csv'); service.export_postgresql(sys.argv[2]+'.
   const sql=fs.readFileSync(full+'.sql','utf8');
   await target.exec(sql);
   await target.exec(sql);
-  assert.equal(Number((await target.query('SELECT count(*) n FROM public.assets')).rows[0].n),2);
+  assert.equal(Number((await target.query('SELECT count(*) n FROM public.assets')).rows[0].n),3);
   assert.equal((await target.query('SELECT parent_location_id FROM public.storage_locations WHERE id=11')).rows[0].parent_location_id,22);
   assert.equal((await target.query('SELECT note,ean FROM public.assets WHERE id=10')).rows[0].note,all.assets.find(row=>row.id===10).note);
   assert.equal((await target.query('SELECT ean FROM public.assets WHERE id=10')).rows[0].ean,'0012345678905');
-  assert.equal(Number((await target.query('SELECT count(*) n FROM public.inventory_archive')).rows[0].n),2);
+  assert.equal(Number((await target.query('SELECT count(*) n FROM public.inventory_archive')).rows[0].n),3);
   assert.equal((await target.query('SELECT image_data FROM public.inventory_images')).rows[0].image_data,'aW1hZ2UtZGF0YQ==');
   const count=(await target.query('SELECT expected_quantity,counted_quantity,difference_quantity,adjustment_movement_id FROM public.stock_counts')).rows[0];
   assert.equal(Number(count.expected_quantity),5);assert.equal(Number(count.counted_quantity),4);assert.equal(Number(count.difference_quantity),-1);
-  assert.equal(Number((await target.query('SELECT quantity FROM public.stock_levels WHERE product_model_id=101 AND storage_location_id=11')).rows[0].quantity),4);
-  assert.equal(Number((await target.query('SELECT count(*) n FROM public.stock_movements')).rows[0].n),2);
+  assert.equal(Number((await target.query('SELECT quantity FROM public.stock_levels WHERE product_model_id=101 AND storage_location_id=11')).rows[0].quantity),2);
+  assert.equal(Number((await target.query('SELECT count(*) n FROM public.stock_movements')).rows[0].n),4);
   assert.equal((await target.query("SELECT tgenabled FROM pg_trigger WHERE tgname='stock_counts_prepare_trg'")).rows[0].tgenabled,'O');
   console.log('PASS: SQL in leerer Datenbank ausführbar und wiederholbar; Hierarchie, JSON, Texte, EAN, Archiv, Bilder und historische Lagerzählung bleiben korrekt');
 
@@ -80,7 +84,7 @@ service.export_csv(sys.argv[2]+'.csv'); service.export_postgresql(sys.argv[2]+'.
   await source.exec('RESET ROLE');
   const limited=exportFiles(scoped,'limited');
   for(const format of ['csv','sql'])assert.ok(!fs.readFileSync(limited+'.'+format,'utf8').includes('VERBORGEN'));
-  assert.deepEqual(scoped.assets.map(row=>row.id),[10]);assert.deepEqual(scoped.sites.map(row=>row.id),[1]);
+  assert.deepEqual(scoped.assets.map(row=>row.id).sort((a,b)=>a-b),[1,10]);assert.deepEqual(scoped.sites.map(row=>row.id),[1]);
   console.log('PASS: Beide Exportformate enthalten ausschliesslich die durch echte Standort-RLS sichtbaren Datensätze');
  }finally{await source.close();await target.close();fs.rmSync(directory,{recursive:true,force:true});}
 })();

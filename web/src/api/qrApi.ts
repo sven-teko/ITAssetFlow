@@ -26,7 +26,7 @@ export type QrLocation = {
   department_name: string;
 };
 
-export type QrLookup = { code: string; code_type?: CodeType; matches: QrMatch[]; locations: QrLocation[] };
+export type QrLookup = { code: string; code_type?: CodeType; preferred_key?: string | null; matches: QrMatch[]; locations: QrLocation[] };
 
 export class QrRequestError extends Error {
   status: number;
@@ -54,16 +54,16 @@ export async function lookupQr(code: string, signal?: AbortSignal, codeType: Cod
 }
 
 export async function adjustQrStock(payload: Record<string, unknown>): Promise<{
-  saved: boolean; quantity: number | null; changed_quantity: number;
+  saved: boolean; quantity: number | null; changed_quantity: number; asset_count: number;
 }> {
   const data = await request("stock", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-ITAssetFlow-Client-ID": getInventoryClientId() },
     body: JSON.stringify(payload),
-  }) as { saved?: unknown; quantity?: unknown; changed_quantity?: unknown } | null;
+  }) as { saved?: unknown; quantity?: unknown; changed_quantity?: unknown; asset_count?: unknown } | null;
   if (data?.saved !== true || (data.quantity !== null && (typeof data.quantity !== "number" || !Number.isFinite(data.quantity) || data.quantity < 0))
     || typeof data.changed_quantity !== "number" || !Number.isFinite(data.changed_quantity) || data.changed_quantity <= 0) {
     throw new QrRequestError("Die Buchungsbestätigung ist unvollständig. Bitte Bestand neu prüfen.", 500);
   }
-  return { saved: true, quantity: data.quantity as number | null, changed_quantity: data.changed_quantity };
+  return { saved: true, quantity: data.quantity as number | null, changed_quantity: data.changed_quantity, asset_count: Number(data.asset_count??0) };
 }

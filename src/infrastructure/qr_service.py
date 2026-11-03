@@ -1,9 +1,7 @@
 """QR-Kennungen und Lagerbuchungen über die vorhandenen Inventartabellen."""
 import re
-from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
-from uuid import uuid4
 
 from supabase import Client
 from infrastructure.scanner_codes import normalize_ean, code_values, normalize_mac
@@ -85,6 +83,7 @@ class QrService:
         if code_type == "ean":
             normalize_ean(code)
         assets = self._assets_for_code(code)
+        direct_asset_match = bool(assets)
         matched_models = self._models_for_code(code)
         # Eine EAN kann mehrere Einzelgeräte desselben Modells bezeichnen.
         seen_assets = {row["id"] for row in assets}
@@ -142,7 +141,9 @@ class QrService:
 
         active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations if row.get("is_active") is True and row.get("department_id") is not None]
         detected = next((row.get("matched_identifier") for row in assets if row.get("matched_identifier")), code_type)
-        return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations}
+        stocked = [row for row in matches if row["record_type"] == "stock" and row["quantity"] > 0]
+        preferred = stocked[0]["key"] if not direct_asset_match and len(stocked) == 1 else None
+        return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations, "preferred_key": preferred}
 
     def save_model_codes(self, model_id: Any, values: dict[str, Any], *, only_empty: bool = False) -> None:
         changes = code_values(values)
@@ -208,39 +209,5 @@ class QrService:
         if not locations or not locations[0].get("is_active") or locations[0].get("department_id") is None:
             raise ValueError("Bitte einen aktiven Lagerort mit Abteilung auswählen.")
 
-        def balance() -> Decimal:
-            rows = self._data(self.client.table("stock_levels").select("quantity").eq("product_model_id", model_id).eq("storage_location_id", location_id).eq("condition", condition).limit(1).execute())
-            return Decimal(str(rows[0]["quantity"] or 0)) if rows else Decimal(0)
-
-        if direction == "remove" and balance() < quantity:
-            raise ValueError("Nicht genügend Lagerbestand für diesen Abgang. Bitte den aktuellen Bestand prüfen.")
-        employees = self._data(self.client.table("employees").select("id").eq("email", self.actor_email).eq("is_active", True).limit(1).execute())
-        if not employees:
-            raise ValueError("Der angemeldete Benutzer konnte keinem aktiven Mitarbeiter zugeordnet werden.")
-        incoming = direction == "add"
-        history = self._data(self.client.table("stock_movements").select("purchase_date,new_price,status").eq("product_model_id", model_id).eq("to_storage_location_id", location_id).eq("to_condition", condition).order("id", desc=True).limit(1).execute())
-        metadata = history[0] if history else {}
-        movement = {
-            "product_model_id": model_id,
-            "from_storage_location_id": None if incoming else location_id,
-            "to_storage_location_id": location_id if incoming else None,
-            "from_condition": None if incoming else condition,
-            "to_condition": condition if incoming else None,
-            "quantity": float(quantity), "movement_type": "receipt" if incoming else "issue",
-            "department_id": locations[0]["department_id"], "performed_by_employee_id": employees[0]["id"],
-            "purchase_date": metadata.get("purchase_date") or date.today().isoformat(),
-            "new_price": metadata.get("new_price") or 0, "status": metadata.get("status") or "available",
-            "reference": f"SCAN:{uuid4()}", "note": f"Scanner-{'Zugang' if incoming else 'Abgang'}: {code}",
-        }
-        # Eine einzige INSERT-Buchung. Der vorhandene DB-Trigger
-        # prevent_negative_stock serialisiert konkurrierende Bestandsänderungen.
-        response = self.client.table("stock_movements").insert(movement).execute()
-        rows = self._data(response)
-        try:
-            current_quantity = float(balance())
-        except Exception:
-            # Die Buchung ist bereits gespeichert. Ein fehlgeschlagener
-            # anschliessender Lesezugriff darf keinen erneuten Zugang auslösen.
-            current_quantity = None
-        return {"saved": True, "movement_id": rows[0].get("id") if rows else None,
-            "quantity": current_quantity, "direction": direction, "changed_quantity": float(quantity)}
+        from infrastructure.stock_booking import book_stock
+        return book_stock(self.client, payload)

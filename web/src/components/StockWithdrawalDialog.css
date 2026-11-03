@@ -1,0 +1,9 @@
+.stock-withdrawal { width:min(640px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:24px;border:1px solid #cbd3dc;border-radius:8px;background:#f4f6f8;color:#24313b; }
+.stock-withdrawal::backdrop {background:rgb(20 30 40 / 45%);}
+.stock-withdrawal h2 {margin:0;font-size:23px;}.stock-withdrawal h3 {margin:0 0 12px;font-size:16px;}
+.stock-withdrawal fieldset {border:0;padding:0;min-width:0;}.stock-withdrawal label {display:grid;gap:7px;margin:12px 0;min-width:0;}
+.stock-withdrawal input,.stock-withdrawal select,.stock-withdrawal textarea {width:100%;min-width:0;padding:10px;font:inherit;color:inherit;background:white;border:1px solid #c3ccd5;border-radius:5px;}
+.withdrawal-target {display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 14px;}
+.withdrawal-unit {padding:16px;margin:14px 0;border:1px solid #d0d9e1;border-radius:6px;background:white;}
+.stock-withdrawal footer {display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-top:20px;}
+@media(max-width:420px){.stock-withdrawal{padding:18px;}.stock-withdrawal footer button{flex:1;}}

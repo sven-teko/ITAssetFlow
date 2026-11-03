@@ -6,6 +6,15 @@ from infrastructure.scanner_codes import normalize_ean, code_values
 
 
 class ScannerTests(unittest.TestCase):
+    def test_box_code_prefers_remaining_stock_after_conversion_to_hybrid(self):
+        db = Database()
+        db.rows["product_models"][0]["tracking_mode"] = "hybrid"
+        db.rows["assets"][0]["product_model_id"] = 10
+        result = QrService(db).lookup("QR-CABLE")
+        self.assertEqual(len(result["matches"]), 2)
+        self.assertEqual(result["preferred_key"], "stock:10:3:used")
+        self.assertIsNone(QrService(db).lookup("SER-1")["preferred_key"])
+
     def test_optional_independent_codes(self):
         self.assertEqual(code_values({}), {})
         self.assertEqual(code_values({"qr_code": "", "ean": None}), {"qr_code": None, "ean": None})
@@ -24,7 +33,11 @@ class ScannerTests(unittest.TestCase):
         qr = service.lookup("QR-NEW", "qr")["matches"]
         ean = service.lookup("4006381333931", "ean")["matches"]
         self.assertEqual(qr, ean)
-        result = service.adjust({"code": "4006381333931", "product_model_id": 10, "storage_location_id": 3, "condition": "used", "quantity": 2, "direction": "remove"})
+        from unittest.mock import Mock
+        from types import SimpleNamespace
+        from uuid import uuid4
+        db.rpc = Mock(return_value=SimpleNamespace(execute=Mock(return_value=SimpleNamespace(data={"saved": True,"quantity":3,"changed_quantity":2}))))
+        result = service.adjust({"request_id": str(uuid4()), "withdrawal": {"action":"archive","reason":{"reason":"lost"}}, "code": "4006381333931", "product_model_id": 10, "storage_location_id": 3, "condition": "used", "quantity": 2, "direction": "remove"})
         self.assertEqual(result["quantity"], 3)
 
     def test_duplicate_ean_returns_all_devices(self):

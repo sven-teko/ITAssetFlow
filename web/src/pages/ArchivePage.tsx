@@ -42,10 +42,10 @@ export default function ArchivePage({ onSessionExpired }: { onSessionExpired: ()
     <header><div><h1>Archiv</h1><p>Aus dem Inventar entfernte Artikel</p></div><button onClick={() => navigate("/inventory")}>Zurück zum Inventar</button></header>
     {loading ? <p role="status">Archiv wird geladen …</p> : error ? <div role="alert"><p>{error}</p><button onClick={() => setRevision(v=>v+1)}>Erneut laden</button></div> :
     <div className="archive-layout"><section className="archive-list" aria-label="Archivierte Artikel">
-      {items.length === 0 ? <p>Keine archivierten Artikel vorhanden.</p> : <div className="archive-table-scroll"><table><thead><tr><th>Archiviert am</th><th>Artikel</th><th>Standort</th><th>Grund</th></tr></thead>
+      {items.length === 0 ? <p>Keine archivierten Artikel vorhanden.</p> : <div className="archive-table-scroll"><table><thead><tr><th>Archiviert am</th><th>Artikel</th><th>Anzahl</th><th>Standort</th><th>Grund</th></tr></thead>
         <tbody>{items.map(item=><tr key={item.id} className={selected?.id===item.id?"selected":""}>
           <td>{formatDateTime(item.archived_at)}</td><td><button onClick={()=>setSelected(item)}>{item.label}</button></td>
-          <td>{String(item.snapshot.site_name??"")}</td><td>{REASON_LABELS[item.reason]}</td>
+          <td>{item.snapshot._record_type==="stock"?String(item.snapshot.stock_quantity??""):"1"}</td><td>{String(item.snapshot.site_name??"")}</td><td>{REASON_LABELS[item.reason]}</td>
         </tr>)}</tbody></table></div>}
       <footer><span>{total} {total===1?"Eintrag":"Einträge"}</span><button disabled={offset===0} onClick={()=>setOffset(Math.max(0,offset-50))}>Zurück</button>
         <button disabled={offset+50>=total} onClick={()=>setOffset(offset+50)}>Weiter</button></footer>

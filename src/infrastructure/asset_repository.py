@@ -528,6 +528,16 @@ class AssetRepository:
             or ""
         ).strip().casefold()
 
+        if record_type == "stock" and isinstance(payload.get("stock"), dict):
+            try:
+                desired = Decimal(str(payload["stock"].get("quantity")))
+                original_quantity = Decimal(str(edit.get("stock_quantity")))
+            except (InvalidOperation, TypeError, ValueError):
+                desired = original_quantity = Decimal("NaN")
+            if desired.is_finite() and original_quantity.is_finite() and desired < original_quantity:
+                from infrastructure.stock_booking import reduce_edited_stock
+                return reduce_edited_stock(self.client, payload)
+
         model_info = payload.get("model")
         if not isinstance(model_info, dict):
             raise ValueError("Produktmodell fehlt.")
@@ -1352,6 +1362,9 @@ class AssetRepository:
             raise ValueError(
                 "Der ursprüngliche Mengenbestand ist bereits leer."
             )
+
+        if desired_quantity < current_quantity:
+            raise ValueError("Für eine Verringerung bitte die Entnahme mit Archivgrund oder Einzelartikeln erfassen.")
 
         expected_quantity = original.get("stock_quantity")
         if expected_quantity is not None and Decimal(str(expected_quantity)) != current_quantity:

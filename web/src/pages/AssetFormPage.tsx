@@ -236,6 +236,8 @@ function editableSpecifications(value: unknown): Record<string, SpecificationVal
 import { validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
 import ItemImagePicker from "../components/ItemImagePicker";
 import { saveItemImage } from "../api/archiveApi";
+import StockWithdrawalDialog from "../components/StockWithdrawalDialog";
+import { QrRequestError } from "../api/qrApi";
 
 export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) {
   const navigate = useNavigate();
@@ -279,6 +281,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [macAddress,setMacAddress]=useState(scannedType === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
   const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
   const [imagePreparing,setImagePreparing]=useState(false);
+  const [pendingWithdrawal,setPendingWithdrawal]=useState<GenericRow | null>(null);
   const [warrantyUntil, setWarrantyUntil] = useState("");
   const [assetNote, setAssetNote] = useState("");
 
@@ -875,8 +878,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       if (quantity.trim()) {
         stockQuantity = Number(quantity);
 
-        if (!Number.isInteger(stockQuantity) || stockQuantity <= 0) {
-          throw new Error("Menge muss eine ganze Zahl grösser als 0 sein.");
+        if (!Number.isInteger(stockQuantity) || stockQuantity < (isEditMode ? 0 : 1)) {
+          throw new Error(isEditMode ? "Menge muss eine ganze Zahl ab 0 sein." : "Menge muss eine ganze Zahl grösser als 0 sein.");
         }
       }
 
@@ -923,6 +926,18 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       return;
     }
 
+    if(isEditMode && currentEntryType === "stock" && Number((payload.stock as GenericRow).quantity)<Number(editEntry?.stock_quantity)) {
+      if(imageChange!==undefined){setErrorMessage("Bitte das geänderte Bild zuerst mit unveränderter Menge speichern und danach die Entnahme buchen.");return;}
+      if(String(payload.storage_location_id)!==String(editEntry?.storage_location_id) || payload.condition!==editEntry?.condition
+        || String((payload.model as GenericRow).id)!==String(editEntry?.product_model_id)){
+        setErrorMessage("Bitte zuerst die Entnahme am bisherigen Lagerort buchen und danach den Restbestand verschieben.");return;
+      }
+      setPendingWithdrawal(payload);return;
+    }
+    await persist(payload);
+  }
+
+  async function persist(payload:GenericRow):Promise<void> {
     setSaving(true);
     const saveErrorMessage = isEditMode
       ? "Der Inventareintrag konnte nicht aktualisiert werden."
@@ -959,7 +974,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       const data: unknown = await response.json();
 
       if (!response.ok) {
-        throw new Error(errorDetail(data, saveErrorMessage));
+        throw new QrRequestError(errorDetail(data, saveErrorMessage),response.status);
       }
 
       let imageWarning="";
@@ -972,6 +987,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       }
       navigate("/inventory", { replace: true, state: { imageWarning } });
     } catch (error) {
+      if(payload.withdrawal) throw error instanceof QrRequestError ? error : new QrRequestError(error instanceof Error?error.message:saveErrorMessage,0);
       setErrorMessage(error instanceof Error ? error.message : saveErrorMessage);
     } finally {
       setSaving(false);
@@ -1053,6 +1069,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
           <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
         </div>}
+        {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
+          condition:String(editEntry.condition),quantity:Number(editEntry.stock_quantity),product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
+          amount={Number(editEntry.stock_quantity)-Number((pendingWithdrawal.stock as GenericRow).quantity)} onCancel={()=>setPendingWithdrawal(null)}
+          onConfirm={submission=>persist({...pendingWithdrawal,withdrawal:{...submission.withdrawal,request_id:submission.request_id}})}/>}
         {errorMessage && (
           <div
             className="asset-form-error-message"

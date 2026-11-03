@@ -69,7 +69,7 @@ class StockEditTests(unittest.TestCase):
         }
 
     def test_increase_and_decrease_append_only_adjustments(self):
-        for quantity, direction, difference in ((8, "to", 3), (2, "from", 3)):
+        for quantity, direction, difference in ((8, "to", 3),):
             with self.subTest(quantity=quantity):
                 self.setUp()
                 self.payload["stock"].update(quantity=quantity, note="Neu")
@@ -85,6 +85,26 @@ class StockEditTests(unittest.TestCase):
                             "storage_location_id": 3, "condition": "used"})["edit_entry"]
                 self.assertEqual(reopened["stock_quantity"], quantity)
                 self.assertEqual(reopened["note"], "Neu")
+
+    def test_reduction_requires_archive_or_new_assets(self):
+        self.payload["stock"]["quantity"] = 2
+        with self.assertRaisesRegex(ValueError, "Buchungskennung"):
+            self.repo.update_inventory_entry(self.payload)
+        self.assertEqual(self.db.writes, [])
+
+    def test_reduction_with_reason_uses_atomic_rpc_and_delta(self):
+        from unittest.mock import Mock
+        from types import SimpleNamespace
+        from uuid import uuid4
+        self.db.rpc=Mock(return_value=SimpleNamespace(execute=Mock(return_value=SimpleNamespace(data={"saved":True,"quantity":2,"changed_quantity":3}))))
+        self.payload["stock"]["quantity"]=2
+        self.payload["withdrawal"]={"request_id":str(uuid4()),"action":"archive","reason":{"reason":"lost"}}
+        self.repo.update_inventory_entry(self.payload)
+        args=self.db.rpc.call_args.args[1]
+        self.assertEqual(args["p_quantity"],3)
+        self.assertEqual(args["p_expected_quantity"],5)
+        self.assertEqual(args["p_details"]["reason"]["reason"],"lost")
+        self.assertEqual(self.db.writes,[])
 
     def test_unchanged_entry_does_not_write_history(self):
         self.repo.update_inventory_entry(self.payload)
