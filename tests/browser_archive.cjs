@@ -8,7 +8,7 @@ const run=(async()=>{
   const page=await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(10000);
   const imageId='00000000-0000-0000-0000-000000000001';
-  let photo=null,saved=null,archivePayload=null,lookup=null,stockPhoto=null,stockSaved=false;
+  let photo=null,saved=null,archivePayload=null,lookup=null,stockPhoto=null,stockSaved=false,deletions=0;
   const archived=[];
   const meta={column_order:['asset_tag','product_model_name','created_at','updated_at','site_name'],default_visible_columns:['asset_tag','product_model_name','created_at','updated_at','site_name'],headers:{asset_tag:'Produkterkennung',product_model_name:'Produktmodell',created_at:'Erstellt am',updated_at:'Geändert am',site_name:'Standort',serial_number:'Seriennummer',mac_address:'MAC-Adresse'},status_labels:{available:'Verfügbar'},condition_labels:{used:'Gebraucht'},inventory_group_labels:{device:'Gerät'}};
   let rows=[{id:1,_record_type:'asset',asset_tag:'PC-001',product_model_name:'Notebook',site_name:'Basel',department_name:'IT',storage_location:'Lager',created_at:'2026-11-02T09:07:58Z',updated_at:'2026-07-04T14:03:59Z',status:'available',condition:'used',_web_inventory_group:'device',_web_category_key:'laptop',_web_condition_key:'used'}];
@@ -46,6 +46,9 @@ const run=(async()=>{
     rows=rows.filter(r=>r.id!==2);return json({deleted_count:1});
    }
    if(p==='/api/archive')return json({items:archived,total:archived.length});
+   if(p==='/api/archive/archive-1'&&req.method()==='DELETE'){
+    deletions++;archived.splice(0,1);return route.fulfill({status:204,headers});
+   }
    return json({detail:`Unbekannter Test-Endpunkt ${p}`},404);
   });
   const screenshot=async name=>{if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,name+'.png')});}};
@@ -110,6 +113,14 @@ const run=(async()=>{
   }
   assert.deepEqual(errors,[]);
   console.log('PASS: Pflicht-Kundenname, Entfernen aus Inventar, Datei > Archiv mit Grund/Bild und mobile Ansicht ohne Überlauf');
+  const remove=page.getByRole('button',{name:'Endgültig löschen',exact:true});
+  page.once('dialog',prompt=>prompt.dismiss());
+  await remove.click();assert.equal(deletions,0);
+  page.once('dialog',prompt=>prompt.accept());
+  await remove.click();
+  await page.getByText('Keine archivierten Artikel vorhanden.').waitFor();
+  assert.equal(deletions,1);assert.equal(rows.some(row=>row.id===2),false);
+  console.log('PASS: Löschen im Archiv verlangt Bestätigung und stellt keinen Artikel wieder her');
   await page.setViewportSize({width:1440,height:1000});
   form.product_models.push({id:101,name:'Fernbedienung',category_id:1,manufacturer_id:1,tracking_mode:'quantity',is_active:true,specifications:{}});
   form.storage_locations.push({id:12,name:'Ziel',site_id:1,department_id:10,is_active:true});

@@ -202,7 +202,7 @@ export default function App() {
         }
       />
 
-      <Route path="/archive" element={<ProtectedPage email={email} role={role}><ArchivePage onSessionExpired={clearSession}/></ProtectedPage>} />
+      <Route path="/archive" element={<ProtectedPage email={email} role={role}><ArchivePage onSessionExpired={clearSession} canDelete={role === "admin"}/></ProtectedPage>} />
       <Route
         path="/inventory/new"
         element={

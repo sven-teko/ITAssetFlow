@@ -88,9 +88,15 @@ class StockEditTests(unittest.TestCase):
 
     def test_reduction_requires_archive_or_new_assets(self):
         self.payload["stock"]["quantity"] = 2
-        with self.assertRaisesRegex(ValueError, "Buchungskennung"):
-            self.repo.update_inventory_entry(self.payload)
-        self.assertEqual(self.db.writes, [])
+        from infrastructure.stock_booking import StockWithdrawalRequired
+        for snapshot in (5, None):
+            with self.subTest(snapshot=snapshot):
+                self.payload["edit"]["stock_quantity"] = snapshot
+                self.payload["scanner_codes"] = {"qr_code": "NICHT-SPEICHERN"}
+                with self.assertRaises(StockWithdrawalRequired) as error:
+                    self.repo.update_inventory_entry(self.payload)
+                self.assertEqual(error.exception.available, 5)
+                self.assertEqual(self.db.writes, [])
 
     def test_reduction_with_reason_uses_atomic_rpc_and_delta(self):
         from unittest.mock import Mock

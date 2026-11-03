@@ -85,12 +85,16 @@ function compareNames(left: GenericRow, right: GenericRow): number {
 }
 
 function errorDetail(payload: unknown, fallback: string): string {
-  return typeof payload === "object" &&
-    payload !== null &&
-    "detail" in payload &&
-    typeof payload.detail === "string"
-    ? payload.detail
-    : fallback;
+  const detail = (payload as { detail?: unknown } | null)?.detail;
+  if (typeof detail === "string") return detail;
+  const message = (detail as { message?: unknown } | null)?.message;
+  return typeof message === "string" ? message : fallback;
+}
+
+function readStockQuantity(value: unknown): number | null {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function specificationFields(category: GenericRow | null): SpecificationField[] {
@@ -281,7 +285,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [macAddress,setMacAddress]=useState(scannedType === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
   const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
   const [imagePreparing,setImagePreparing]=useState(false);
-  const [pendingWithdrawal,setPendingWithdrawal]=useState<GenericRow | null>(null);
+  const [pendingWithdrawal, setPendingWithdrawal] = useState<{ payload: GenericRow; available: number; amount: number } | null>(null);
   const [warrantyUntil, setWarrantyUntil] = useState("");
   const [assetNote, setAssetNote] = useState("");
 
@@ -426,7 +430,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             setParentAssetId(idText(currentEdit.connected_product_id));
             setSpecValues(editableSpecifications(currentEdit.specifications));
           } else {
-            const currentQuantity = currentEdit.stock_quantity ?? currentEdit.quantity ?? "";
+            const currentQuantity = readStockQuantity(currentEdit.stock_quantity ?? currentEdit.quantity) ?? "";
             setQuantity(String(currentQuantity));
             setStockNote(String(currentEdit.note ?? ""));
             setEmployeeId("");
@@ -505,8 +509,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
     setCodesModelId(availableModelId);
     const model = rowById(formData.product_models, availableModelId);
-    setQrCode(String((model?.tracking_mode === "quantity" ? model?.qr_code : "") || (scannedType === "qr" || model?.tracking_mode === "quantity" && !scannedEan ? scannedCode : "")));
-    setEan(String((model?.tracking_mode === "quantity" ? model?.ean : "") || (scannedEan ? scannedCode : "")));
+    const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity";
+    setQrCode(String((useModelCodes ? model?.qr_code : "") || (scannedType === "qr" || model?.tracking_mode === "quantity" && !scannedEan ? scannedCode : "")));
+    setEan(String((useModelCodes ? model?.ean : "") || (scannedEan ? scannedCode : "")));
   }
 
   if (modelMode === "existing" && selectedModelId !== availableModelId) {
@@ -900,7 +905,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         product_model_id: editEntry.product_model_id ?? null,
         storage_location_id: editEntry.storage_location_id ?? null,
         condition: editEntry.condition ?? null,
-        stock_quantity: editEntry.stock_quantity ?? null,
+        stock_quantity: readStockQuantity(editEntry.stock_quantity ?? editEntry.quantity),
         source_movement_id: editEntry.source_movement_id ?? null,
       };
     }
@@ -911,7 +916,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (saving || imagePreparing) {
+    if (saving || imagePreparing || pendingWithdrawal) {
       return;
     }
 
@@ -926,15 +931,31 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       return;
     }
 
-    if(isEditMode && currentEntryType === "stock" && Number((payload.stock as GenericRow).quantity)<Number(editEntry?.stock_quantity)) {
-      if(imageChange!==undefined){setErrorMessage("Bitte das geänderte Bild zuerst mit unveränderter Menge speichern und danach die Entnahme buchen.");return;}
-      if(String(payload.storage_location_id)!==String(editEntry?.storage_location_id) || payload.condition!==editEntry?.condition
-        || String((payload.model as GenericRow).id)!==String(editEntry?.product_model_id)){
-        setErrorMessage("Bitte zuerst die Entnahme am bisherigen Lagerort buchen und danach den Restbestand verschieben.");return;
-      }
-      setPendingWithdrawal(payload);return;
-    }
+    const available = readStockQuantity((payload.edit as GenericRow | undefined)?.stock_quantity);
+    if (available !== null && prepareWithdrawal(payload, available)) return;
     await persist(payload);
+  }
+
+  function prepareWithdrawal(payload: GenericRow, available: number): boolean {
+    const edit = payload.edit as GenericRow | undefined;
+    const desired = readStockQuantity((payload.stock as GenericRow | undefined)?.quantity);
+    if (edit?.record_type !== "stock" || desired === null || desired >= available) return false;
+
+    if (!Number.isInteger(available - desired)) {
+      setErrorMessage("Die entnommene Menge muss eine ganze Stückzahl sein.");
+    } else if (imageChange !== undefined) {
+      setErrorMessage("Bitte das geänderte Bild zuerst mit unveränderter Menge speichern und danach die Entnahme buchen.");
+    } else if (String(payload.storage_location_id) !== String(edit.storage_location_id)
+        || payload.condition !== edit.condition || String((payload.model as GenericRow).id) !== String(edit.product_model_id)) {
+      setErrorMessage("Bitte zuerst die Entnahme am bisherigen Lagerort buchen und danach den Restbestand verschieben.");
+    } else {
+      setPendingWithdrawal({
+        payload: { ...payload, edit: { ...edit, stock_quantity: available } },
+        available,
+        amount: available - desired,
+      });
+    }
+    return true;
   }
 
   async function persist(payload:GenericRow):Promise<void> {
@@ -974,6 +995,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       const data: unknown = await response.json();
 
       if (!response.ok) {
+        const detail = (data as { detail?: { code?: string; available?: number } } | null)?.detail;
+        if (response.status === 409 && !payload.withdrawal && detail?.code === "stock_withdrawal_required") {
+          const available = readStockQuantity(detail.available);
+          if (available !== null && prepareWithdrawal(payload, available)) return;
+        }
         throw new QrRequestError(errorDetail(data, saveErrorMessage),response.status);
       }
 
@@ -1069,10 +1095,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
           <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
         </div>}
-        {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
-          condition:String(editEntry.condition),quantity:Number(editEntry.stock_quantity),product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
-          amount={Number(editEntry.stock_quantity)-Number((pendingWithdrawal.stock as GenericRow).quantity)} onCancel={()=>setPendingWithdrawal(null)}
-          onConfirm={submission=>persist({...pendingWithdrawal,withdrawal:{...submission.withdrawal,request_id:submission.request_id}})}/>}
         {errorMessage && (
           <div
             className="asset-form-error-message"
@@ -1610,6 +1632,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           </button>
         </footer>
       </form>
+      {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
+        condition:String(editEntry.condition),quantity:pendingWithdrawal.available,product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
+        amount={pendingWithdrawal.amount} onCancel={()=>setPendingWithdrawal(null)}
+        onConfirm={submission=>persist({...pendingWithdrawal.payload,withdrawal:{...submission.withdrawal,request_id:submission.request_id}})}/>}
     </div>
   );
 }

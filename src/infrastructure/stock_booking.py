@@ -8,6 +8,12 @@ from infrastructure.scanner_codes import normalize_mac
 from infrastructure.archive_reason import ArchiveReason
 
 
+class StockWithdrawalRequired(ValueError):
+    def __init__(self, available: Decimal):
+        self.available = float(available)
+        super().__init__("Wähle für die entnommene Menge «Einzelartikel» oder «Archiv».")
+
+
 def book_stock(client, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         request_id = str(UUID(str(payload.get("request_id"))))
@@ -53,6 +59,8 @@ def reduce_edited_stock(client, payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Bearbeitungsinformationen, Mengenbestand oder Produktmodell fehlen.")
     if payload.get("withdrawal") is not None and not isinstance(payload["withdrawal"],dict):
         raise ValueError("Ungültige Entnahmedaten.")
+    if not payload.get("withdrawal"):
+        raise StockWithdrawalRequired(Decimal(str(edit["stock_quantity"])))
     if (model.get("mode") != "existing" or str(model.get("id")) != str(edit.get("product_model_id"))
             or str(payload.get("storage_location_id")) != str(edit.get("storage_location_id"))
             or payload.get("condition") != edit.get("condition")):

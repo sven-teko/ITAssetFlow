@@ -609,13 +609,13 @@ class AssetRepository:
                 "asset_tag": result.get("asset_tag"),
             }
 
-        QrService(self.client).save_model_codes(model_id, scanner_codes)
         result = self._update_stock_level(
             original=edit,
             model_id=model_id,
             condition=condition,
             storage_location_id=storage_location_id,
             stock_data=payload.get("stock"),
+            scanner_codes=scanner_codes,
         )
         return {
             "entry_type": "stock",
@@ -1298,6 +1298,7 @@ class AssetRepository:
         condition: str,
         storage_location_id: Any,
         stock_data: Any,
+        scanner_codes: dict[str, Any],
     ) -> dict[str, Any]:
         if not isinstance(stock_data, dict):
             raise ValueError("Bestandsdaten fehlen.")
@@ -1309,11 +1310,8 @@ class AssetRepository:
         except (InvalidOperation, TypeError, ValueError) as error:
             raise ValueError("Ungültige Bestandsmenge.") from error
 
-        if not desired_quantity.is_finite() or desired_quantity <= 0:
-            raise ValueError(
-                "Die Bestandsmenge muss grösser als 0 sein. "
-                "Zum vollständigen Entfernen bitte „Einträge löschen“ verwenden."
-            )
+        if not desired_quantity.is_finite() or desired_quantity < 0:
+            raise ValueError("Die Bestandsmenge muss eine gültige, nicht negative Zahl sein.")
 
         department_id = stock_data.get("department_id")
         purchase_date = stock_data.get("purchase_date")
@@ -1363,12 +1361,15 @@ class AssetRepository:
                 "Der ursprüngliche Mengenbestand ist bereits leer."
             )
 
-        if desired_quantity < current_quantity:
-            raise ValueError("Für eine Verringerung bitte die Entnahme mit Archivgrund oder Einzelartikeln erfassen.")
-
         expected_quantity = original.get("stock_quantity")
         if expected_quantity is not None and Decimal(str(expected_quantity)) != current_quantity:
             raise ValueError("Der Bestand wurde inzwischen geändert. Bitte den Eintrag neu öffnen.")
+
+        if desired_quantity < current_quantity:
+            from infrastructure.stock_booking import StockWithdrawalRequired
+            raise StockWithdrawalRequired(current_quantity)
+
+        QrService(self.client).save_model_codes(model_id, scanner_codes)
 
         same_identity = (
             old_model_id == model_id

@@ -35,7 +35,7 @@ export default function StockWithdrawalDialog({source,amount, fixedAmount=false,
   const locked=busy||uncertain;
   function changeQuantity(value:number){setQuantity(value);setUnits(old=>Array.from({length:Math.min(Math.max(value,0),100)},(_,i)=>old[i]??emptyUnit()));}
   async function submit(event:FormEvent){
-    event.preventDefault();if(busy)return;setError("");
+    event.preventDefault();event.stopPropagation();if(busy)return;setError("");
     try {
       if(!uncertain){
         if(!Number.isInteger(quantity)||quantity<1||quantity>source.quantity)throw new Error("Bitte eine verfügbare ganze Menge wählen.");

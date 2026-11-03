@@ -7,7 +7,7 @@ const run=(async()=>{
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000},hasTouch:true});page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  let quantity=10,postCount=0,dropResponse=false,lastBooking=null,lastEdit=null;
+  let quantity=10,postCount=0,putCount=0,dropResponse=false,lastBooking=null,lastEdit=null,missingSnapshot=false;
   const operations=new Map(),assets=[],archived=[];
   const meta={column_order:['asset_tag','product_model_name','stock_quantity','site_name'],default_visible_columns:['asset_tag','product_model_name','stock_quantity','site_name'],headers:{asset_tag:'Produkterkennung',product_model_name:'Produktmodell',stock_quantity:'Menge',site_name:'Standort'},status_labels:{available:'Verfügbar',in_use:'Im Einsatz'},condition_labels:{new:'Neu',used:'Gebraucht'},inventory_group_labels:{device:'Gerät'}};
   const source=()=>({id:'stock:101:11:new',_record_type:'stock',product_model_id:101,product_model_name:'Router',stock_quantity:quantity,storage_location_id:11,site_id:1,department_id:10,site_name:'Lager',department_name:'IT',storage_location:'Kiste',condition:'new',status:'available',purchase_date:'2026-11-02',_web_inventory_group:'device',_web_category_key:'router',_web_condition_key:'new'});
@@ -31,10 +31,12 @@ const run=(async()=>{
    if(p==='/api/inventory/revision')return json({revision:1});
    if(p==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:':test\n\n'});
    if(p==='/api/inventory/form-data')return json(form);
-   if(p==='/api/inventory/edit-form-data')return json({...form,edit_entry:source()});
+   if(p==='/api/inventory/edit-form-data')return json({...form,edit_entry:{...source(),stock_quantity:missingSnapshot?undefined:String(quantity)}});
    if(p==='/api/inventory'){
     if(req.method()==='PUT'){
-     lastEdit=req.postDataJSON();book({code:'QR-CABLE',product_model_id:101,storage_location_id:11,condition:'new',direction:'remove',quantity:lastEdit.edit.stock_quantity-lastEdit.stock.quantity,
+     putCount++;lastEdit=req.postDataJSON();
+     if(!lastEdit.withdrawal)return json({detail:{code:'stock_withdrawal_required',message:'Entnahme auswählen',available:quantity}},409);
+     book({code:'QR-CABLE',product_model_id:101,storage_location_id:11,condition:'new',direction:'remove',quantity:lastEdit.edit.stock_quantity-lastEdit.stock.quantity,
       request_id:lastEdit.withdrawal.request_id,withdrawal:lastEdit.withdrawal});return json({entry_type:'stock',product_model_id:101,quantity});
     }return json([source(),...assets]);
    }
@@ -78,10 +80,27 @@ const run=(async()=>{
   await quantityInput.fill('5');await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
   dialog=page.getByRole('dialog',{name:'Bestand entnehmen',exact:true});await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');
   assert.equal(await dialog.getByLabel('Menge entnehmen *',{exact:true}).inputValue(),'2');
+  assert.equal(putCount,0);
   await dialog.getByLabel('Grund *',{exact:true}).selectOption('defective');await dialog.getByLabel('Wurde der Artikel vernichtet? *',{exact:true}).selectOption('yes');
   await dialog.getByRole('button',{name:'Entnahme buchen',exact:true}).click();await page.locator('.inventory-table').waitFor();
   assert.equal(quantity,5);assert.equal(lastEdit.withdrawal.reason.destroyed,true);
+  assert.equal(putCount,1);
   console.log('PASS: Auch direkte Mengenverringerung im Bearbeitungsformular verlangt Archivgrund oder Einzelartikel');
+  missingSnapshot=true;
+  form.product_models[0].tracking_mode='hybrid';
+  await page.goto('http://127.0.0.1:5177/#/inventory/stock%3Atest/edit');
+  await quantityInput.fill('4');await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+  await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('assets');
+  assert.equal(await dialog.getByLabel('Menge entnehmen *',{exact:true}).inputValue(),'1');
+  assert.equal(putCount,2);assert.equal(quantity,5);
+  await dialog.getByLabel('Zielstandort *',{exact:true}).selectOption('2');
+  await dialog.getByLabel('Zielabteilung *',{exact:true}).selectOption('20');
+  await dialog.getByLabel('Ziel-Lagerort *',{exact:true}).selectOption('22');
+  await dialog.getByLabel('Produkterkennung * 1',{exact:true}).fill('ROUTER-EDIT-1');
+  await dialog.getByRole('button',{name:'Entnahme buchen',exact:true}).click();await page.locator('.inventory-table').waitFor();
+  assert.equal(putCount,3);assert.equal(quantity,4);assert.equal(assets.length,2);
+  assert.equal(lastEdit.scanner_codes.qr_code,'QR-CABLE');
+  console.log('PASS: Server öffnet Entnahmedialog bei fehlendem Ausgangsbestand; Einzelartikel entsteht genau einmal');
   await page.getByRole('button',{name:'Datei',exact:true}).click();await page.getByRole('button',{name:'Archiv',exact:true}).click();
   await page.getByRole('cell',{name:'Bei Kunde',exact:true}).waitFor();await page.getByRole('columnheader',{name:'Anzahl',exact:true}).waitFor();
   assert.equal(archived[0].snapshot.stock_quantity,2);
@@ -90,7 +109,7 @@ const run=(async()=>{
   await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');await dialog.getByLabel('Grund *',{exact:true}).selectOption('other');
   await dialog.getByLabel('Eigener Löschgrund *',{exact:true}).fill('Verbraucht');await screenshot('mobile-entnahme');
   assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
-  await dialog.getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal(quantity,5);
+  await dialog.getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal(quantity,4);
   assert.deepEqual(errors,[]);
   console.log('PASS: Archiv zeigt entnommene Anzahl; mobile Entnahme ohne Überlauf, Abbrechen ohne Buchung');
  }finally{await browser.close();await vite.close();}

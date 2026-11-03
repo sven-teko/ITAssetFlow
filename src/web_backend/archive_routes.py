@@ -1,11 +1,12 @@
 """Standortgeschütztes Archiv und optionale Artikelbilder."""
 import base64
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from infrastructure.archive_reason import ArchiveReason
 
 
-def create_archive_router(get_web_session, require_editor_session):
+def create_archive_router(get_web_session, require_editor_session, require_admin_session):
     router = APIRouter(prefix="/api", tags=["archive", "images"])
 
     def change_image(web_session, key, data):
@@ -23,9 +24,21 @@ def create_archive_router(get_web_session, require_editor_session):
         response.headers["Cache-Control"] = "no-store"
         return {"items": result.data or [], "total": result.count or 0}
 
+    @router.delete("/archive/{archive_id}", status_code=204)
+    def delete_archive_entry(archive_id: UUID, web_session=Depends(require_admin_session)):
+        try:
+            result = (web_session.client.table("inventory_archive").delete()
+                      .eq("id", str(archive_id)).execute())
+        except Exception as error:
+            if str(getattr(error, "code", "")) == "42501":
+                raise HTTPException(403, "Dieser Archiveintrag darf nicht gelöscht werden.") from error
+            raise HTTPException(503, "Der Archiveintrag konnte nicht gelöscht werden. Bitte erneut versuchen.") from error
+        if not result.data:
+            raise HTTPException(404, "Dieser Archiveintrag ist nicht mehr vorhanden.")
+        return Response(status_code=204)
+
     @router.get("/images/{image_id}")
     def image(image_id: str, web_session=Depends(get_web_session)):
-        from uuid import UUID
         try:
             identifier = str(UUID(image_id))
         except ValueError as error:

@@ -27,6 +27,7 @@ from config import get_app_config
 from infrastructure.asset_repository import AssetRepository
 from infrastructure.data_transfer_service import DataTransferService
 from infrastructure.qr_service import QrService
+from infrastructure.stock_booking import StockWithdrawalRequired
 from infrastructure.supabase_client import (
     authenticate_user,
     get_session_tokens,
@@ -514,6 +515,10 @@ def _repository_http_exception(
     *,
     value_error_status: int = 400,
 ) -> HTTPException:
+    if isinstance(error, StockWithdrawalRequired):
+        return HTTPException(409, detail={
+            "code": "stock_withdrawal_required", "message": str(error), "available": error.available,
+        })
     message = str(error)
     normalized = message.casefold()
 
@@ -1522,7 +1527,7 @@ def inventory_meta(
 
 app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
 app.include_router(create_preferences_router(get_web_session))
-app.include_router(create_archive_router(get_web_session, require_editor_session))
+app.include_router(create_archive_router(get_web_session, require_editor_session, require_admin_session))
 app.include_router(
     create_settings_router(
         require_admin_session,
@@ -1568,6 +1573,7 @@ def _web_file_response(
     return FileResponse(
         path,
         media_type=media_type,
+        headers={"Cache-Control": "no-cache"} if path.suffix.casefold() == ".html" else None,
     )
 
 

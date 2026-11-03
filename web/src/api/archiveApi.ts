@@ -11,6 +11,14 @@ export async function loadArchive(offset: number, signal: AbortSignal): Promise<
   if (!response.ok) throw new Error(typeof data?.detail === "string" ? data.detail : "Das Archiv konnte nicht geladen werden.");
   return data;
 }
+export async function deleteArchiveEntry(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/archive/${encodeURIComponent(id)}`, { method: "DELETE", credentials: "include" });
+  if (response.status === 401) throw new UnauthorizedError();
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(typeof data?.detail === "string" ? data.detail : "Der Archiveintrag konnte nicht gelöscht werden.");
+  }
+}
 export async function saveItemImage(key: string, image: Blob | null): Promise<void> {
   const response = await fetch(`${API_BASE}/api/inventory/${encodeURIComponent(key)}/image`, {
     method: image ? "POST" : "DELETE", credentials: "include",

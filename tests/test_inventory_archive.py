@@ -66,6 +66,33 @@ class ArchiveApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/archive").status_code, 401)
         self.assertEqual(self.client.get("/api/images/00000000-0000-0000-0000-000000000001").status_code, 401)
 
+    def test_archive_delete_only_for_admin_and_only_selected_row(self):
+        archive_id = "00000000-0000-0000-0000-000000000001"
+        url = f"/api/archive/{archive_id}"
+        for role in ("viewer", "user"):
+            self.session.role = role
+            self.assertEqual(self.client.delete(url).status_code, 403)
+        self.db.table.assert_not_called()
+        self.session.role = "admin"
+        self.assertEqual(self.client.delete("/api/archive/invalid").status_code, 422)
+        query = self.db.table.return_value.delete.return_value
+        query.eq.return_value.execute.return_value = SimpleNamespace(data=[{"id": archive_id}])
+        self.assertEqual(self.client.delete(url).status_code, 204)
+        self.db.table.assert_called_once_with("inventory_archive")
+        query.eq.assert_called_once_with("id", archive_id)
+        query.eq.return_value.execute.return_value = SimpleNamespace(data=[])
+        self.assertEqual(self.client.delete(url).status_code, 404)
+
+    def test_unconfirmed_stock_reduction_returns_dialog_signal(self):
+        from decimal import Decimal
+        from infrastructure.stock_booking import StockWithdrawalRequired
+        with patch("web_backend.app.AssetRepository") as repo:
+            repo.return_value.update_inventory_entry.side_effect = StockWithdrawalRequired(Decimal(5))
+            response = self.client.put("/api/inventory", json={})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["code"], "stock_withdrawal_required")
+        self.assertEqual(response.json()["detail"]["available"], 5)
+
     def test_image_response_is_not_cached(self):
         content = b"test-image"
         self.db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = SimpleNamespace(

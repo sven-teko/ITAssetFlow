@@ -27,6 +27,7 @@ const run=(async()=>{
    INSERT INTO public.stock_movements(product_model_id,to_storage_location_id,to_condition,quantity,movement_type,department_id,purchase_date) VALUES(101,11,'used',5,'receipt',10,'2026-01-01');`);
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261029093456_site_permissions.sql'),'utf8'));
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261102145032_inventory_archive_images.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261103075158_archive_permanent_delete.sql'),'utf8'));
   await asUser('admin',async()=>{await q('SELECT public.set_employee_site_access(2,ARRAY[1]::bigint[])');await q('SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])');});
   let archivedImage,hiddenImage;
   await asUser('admin',async()=>{hiddenImage=(await q('SELECT public.set_inventory_image($1,$2) id',['asset:20','aGlkZGVu']))[0].id;});
@@ -71,8 +72,20 @@ const run=(async()=>{
    assert.equal((await q('SELECT image_data FROM public.inventory_images WHERE id=$1',[archivedImage]))[0].image_data,Buffer.from('image-b').toString('base64'));
    await rejected('SELECT public.archive_inventory_items($1,$2)',[['asset:11'],{reason:'lost'}],'42501');
    await rejected('SELECT public.set_inventory_image($1,$2)',['asset:11','aW1hZ2U='],'42501');
-   await rejected('DELETE FROM public.inventory_archive',[],'42501');
+   assert.equal((await q('DELETE FROM public.inventory_archive RETURNING id')).length,0);
   });
+  await asUser('editor',async()=>{
+   assert.equal((await q('DELETE FROM public.inventory_archive RETURNING id')).length,0);
+  });
+  await asUser('admin',async()=>{
+   const movements=(await q('SELECT count(*) n FROM public.stock_movements'))[0].n;
+   assert.equal((await q("DELETE FROM public.inventory_archive WHERE source_key='asset:10' RETURNING id")).length,1);
+   assert.equal((await q("SELECT id FROM public.inventory_archive WHERE source_key='asset:10'")).length,0);
+   assert.ok((await q('SELECT archived_at FROM public.assets WHERE id=10'))[0].archived_at);
+   assert.equal((await q('SELECT count(*) n FROM public.stock_movements'))[0].n,movements);
+   assert.equal((await q("DELETE FROM public.inventory_archive WHERE source_key='asset:10' RETURNING id")).length,0);
+  });
+  console.log('PASS: Nur Admins löschen Archiveinträge endgültig; Artikel und Lagerbuchungen bleiben unverändert');
   console.log('PASS: Archivgründe, Kundenname, Vernichtung, atomare Stapel, Geräte/Mengen, unveränderte Historie, dauerhafte Bilder und echte Standort-RLS');
  }finally{await db.close();}
 })();run.catch(error=>{console.error({message:error.message,code:error.code,stack:error.stack});process.exitCode=1;});module.exports=run;
