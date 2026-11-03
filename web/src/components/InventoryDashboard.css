@@ -94,3 +94,18 @@
   .dashboard-metric { padding: 10px; }
   .dashboard-table th, .dashboard-table td { padding-inline: 9px; }
 }
+
+.dashboard-site-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 5px 0 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-weight: inherit;
+}
+.dashboard-site-toggle span { color: #215b98; }
+.dashboard-department-row { background: #f4f8fb; }
+.dashboard-department-row th { padding-left: 32px; font-weight: 500; }

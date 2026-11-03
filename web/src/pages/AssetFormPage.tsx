@@ -307,6 +307,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [departmentId, setDepartmentId] = useState("");
   const [locationId, setLocationId] = useState("");
   const [parentAssetId, setParentAssetId] = useState("");
+  const [connectedChildIds, setConnectedChildIds] = useState<string[]>([]);
   const [employeeId, setEmployeeId] = useState("");
 
   const [specValues, setSpecValues] = useState<Record<string, SpecificationValue>>({});
@@ -447,6 +448,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             setAssetNote(String(currentEdit.note ?? ""));
             setEmployeeId(idText(currentEdit.assigned_employee_id));
             setParentAssetId(idText(currentEdit.connected_product_id));
+            setConnectedChildIds(Array.isArray(currentEdit.connected_child_ids) ? currentEdit.connected_child_ids.map(idText) : []);
             setSpecValues(editableSpecifications(currentEdit.specifications));
           } else {
             const currentQuantity = readStockQuantity(currentEdit.stock_quantity ?? currentEdit.quantity) ?? "";
@@ -454,6 +456,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             setStockNote(String(currentEdit.note ?? ""));
             setEmployeeId("");
             setParentAssetId("");
+            setConnectedChildIds([]);
             setSpecValues({});
           }
         } else if (data.product_categories[0]) {
@@ -607,10 +610,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         }),
     [formData, departmentId],
   );
-  const showParentAsset =
-    String(currentCategory?.inventory_group ?? "")
-      .trim()
-      .toLocaleLowerCase() === "component" && currentEntryType === "asset";
+  const connectionOptions = useMemo(() => {
+    const self = idText(formData?.edit_entry?.id);
+    return (formData?.parent_assets ?? [])
+      .filter(asset => idText(asset.id) !== self)
+      .sort((a, b) => String(a.label).localeCompare(String(b.label), "de-CH", { numeric: true, sensitivity: "base" }));
+  }, [formData]);
 
   function clearInvalid(key: string): void {
     setInvalidFields((current) => {
@@ -629,7 +634,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     setCategoryId(value);
     setSelectedModelId("");
     setSpecValues({});
-    setParentAssetId("");
     clearInvalid("category");
   }
 
@@ -903,8 +907,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         employee_id: employeeId ? originalId(formData.employees, employeeId) : null,
         department_id: departmentOriginalId,
       };
-      payload.parent_asset_id =
-        showParentAsset && parentAssetId ? originalId(formData.parent_assets, parentAssetId) : null;
+      payload.parent_asset_id = parentAssetId || null;
+      const initialChildren = new Set(Array.isArray(formData.edit_entry?.connected_child_ids)
+        ? formData.edit_entry.connected_child_ids.map(idText) : []);
+      const selectedChildren = new Set(connectedChildIds);
+      const add = connectedChildIds.filter(id => !initialChildren.has(id));
+      const remove = [...initialChildren].filter(id => !selectedChildren.has(id));
+      if (add.length || remove.length) payload.connection_changes = { add, remove };
     } else {
       let stockQuantity = 1;
 
@@ -1627,29 +1636,42 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   ))}
                 </select>
               </div>
-              {showParentAsset && (
-                <div className="asset-form-row">
-                  <label>Verbunden mit:</label>
-                  <select
-                    className="asset-form-control"
-                    value={parentAssetId}
-                    disabled={saving}
-                    onChange={(event) => setParentAssetId(event.target.value)}
-                  >
-                    <option value="">Nicht verbunden</option>
-                    {[...formData.parent_assets]
-                      .sort((left, right) =>
-                        String(left.label ?? "").localeCompare(String(right.label ?? ""), "de-CH", {
-                          sensitivity: "base",
-                        }),
-                      )
-                      .map((asset) => (
-                        <option key={idText(asset.id)} value={idText(asset.id)}>
-                          {String(asset.label ?? `Asset #` + idText(asset.id))}
-                        </option>
-                      ))}
-                  </select>
-                </div>
+              {currentEntryType === "asset" && (
+                <fieldset className="asset-form-connections">
+                  <legend>Verbundene Produkte</legend>
+                  <div className="asset-form-row">
+                    <label htmlFor="asset-main-connection">Hauptartikel</label>
+                    <select id="asset-main-connection" className="asset-form-control" value={parentAssetId}
+                      disabled={saving} onChange={event => setParentAssetId(event.target.value)}>
+                      <option value="">Kein Hauptartikel</option>
+                      {parentAssetId && !connectionOptions.some(asset => idText(asset.id) === parentAssetId) &&
+                        <option value={parentAssetId}>Artikel #{parentAssetId}</option>}
+                      {connectionOptions.filter(asset => !connectedChildIds.includes(idText(asset.id))).map(asset =>
+                        <option key={idText(asset.id)} value={idText(asset.id)}>{String(asset.label)}</option>)}
+                    </select>
+                  </div>
+                  <div className="asset-form-row">
+                    <label htmlFor="asset-add-connection">Verbundenes Produkt hinzufügen</label>
+                    <select id="asset-add-connection" className="asset-form-control" value="" disabled={saving}
+                      onChange={event => {
+                        const id = event.target.value;
+                        if (id) setConnectedChildIds(previous => previous.includes(id) ? previous : [...previous, id]);
+                      }}>
+                      <option value="">Artikel auswählen …</option>
+                      {connectionOptions.filter(asset => idText(asset.id) !== parentAssetId && !connectedChildIds.includes(idText(asset.id))).map(asset =>
+                        <option key={idText(asset.id)} value={idText(asset.id)}>{String(asset.label)}</option>)}
+                    </select>
+                  </div>
+                  {connectedChildIds.length > 0 && <ul>
+                    {connectedChildIds.map(id => {
+                      const label = String(connectionOptions.find(asset => idText(asset.id) === id)?.label ?? `Artikel #${id}`);
+                      return <li key={id}><span>{label}</span>
+                        <button type="button" disabled={saving} aria-label={`${label} entfernen`}
+                          onClick={() => setConnectedChildIds(previous => previous.filter(child => child !== id))}>Entfernen</button>
+                      </li>;
+                    })}
+                  </ul>}
+                </fieldset>
               )}
               <div className="asset-form-row">
                 <label>Mitarbeiter:</label>

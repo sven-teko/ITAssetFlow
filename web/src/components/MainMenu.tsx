@@ -1,11 +1,14 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
+  type RefObject,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import "./MainMenu.css";
+import type { InventorySort } from "./InventoryTable";
 
 
 export type DockPosition =
@@ -15,6 +18,10 @@ export type DockPosition =
 
 type MainMenuProps = {
   workspaceTabs: ReactNode;
+  inventoryAreaRef: RefObject<HTMLElement | null>;
+  toolbarLayoutKey: string;
+  sort: InventorySort;
+  onSort: (sort: InventorySort) => void;
   onScan: () => void;
   navigationVisible: boolean;
   detailVisible: boolean;
@@ -147,6 +154,10 @@ function DockPanelMenu({
 
 export default function MainMenu({
   workspaceTabs,
+  inventoryAreaRef,
+  toolbarLayoutKey,
+  sort,
+  onSort,
   onScan,
   navigationVisible,
   detailVisible,
@@ -186,6 +197,32 @@ export default function MainMenu({
       null,
     );
 
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const leading = root?.querySelector(".menu-leading-end");
+    const trailing = root?.querySelector(".menu-logout-button");
+    if (!root || !leading || !trailing) return;
+
+    const syncToolbar = () => {
+      const center = inventoryAreaRef.current?.getBoundingClientRect();
+      if (!center || center.width <= 0) return;
+      const menu = root.getBoundingClientRect();
+      root.style.setProperty("--inventory-left", `${Math.max(0, center.left - menu.left)}px`);
+      root.style.setProperty("--inventory-right", `${Math.max(0, menu.right - center.right)}px`);
+      root.dataset.toolbarRow = center.left < leading.getBoundingClientRect().right + 8
+        || center.right > trailing.getBoundingClientRect().left - 8 ? "separate" : "inline";
+    };
+    syncToolbar();
+    const resize = new ResizeObserver(syncToolbar);
+    for (const element of [root, leading, trailing]) resize.observe(element);
+    const frame = requestAnimationFrame(() => {
+      // The inventory panel is a sibling and may mount after this layout effect.
+      if (inventoryAreaRef.current) resize.observe(inventoryAreaRef.current);
+      syncToolbar();
+    });
+    return () => { cancelAnimationFrame(frame); resize.disconnect(); };
+  }, [inventoryAreaRef, toolbarLayoutKey]);
 
   useEffect(
     () => {
@@ -489,6 +526,27 @@ export default function MainMenu({
           && (
             <div className="menu-popup">
 
+              <details className="menu-sort">
+                <summary>Sortieren nach</summary>
+                <div className="menu-sort-field">
+                  <label htmlFor="inventory-sort-direction">Reihenfolge</label>
+                  <select id="inventory-sort-direction" value={sort.direction} onChange={event =>
+                    onSort({ ...sort, direction: event.target.value === "desc" ? "desc" : "asc" })}>
+                    <option value="asc">Aufsteigend</option>
+                    <option value="desc">Absteigend</option>
+                  </select>
+                </div>
+                <div className="menu-sort-field">
+                  <label htmlFor="inventory-sort-column">Spalte</label>
+                  <select id="inventory-sort-column" value={sort.column ?? ""} onChange={event =>
+                    onSort({ ...sort, column: event.target.value || null })}>
+                    <option value="">Keine Sortierung</option>
+                    {columns.map(column => <option key={column} value={column}>{getHeaderLabel(column)}</option>)}
+                  </select>
+                </div>
+              </details>
+              <div className="menu-separator" />
+
               <DockPanelMenu
                 title="Navigation"
                 visible={navigationVisible}
@@ -595,7 +653,7 @@ export default function MainMenu({
       </div>
 
 
-      <div className="top-menu">
+      <div className="top-menu menu-leading-end">
 
         <button
           type="button"
@@ -637,12 +695,13 @@ export default function MainMenu({
       </div>
 
 
-      <div className="menu-workspace-tabs" onClick={() => setOpenMenu(null)}>{workspaceTabs}</div>
+      <div className="menu-inventory-toolbar">
+        <div onClick={() => setOpenMenu(null)}>{workspaceTabs}</div>
+        <button type="button" className="primary-button menu-scanner-button" onClick={() => action(onScan)}>
+          Scanner
+        </button>
+      </div>
       <div className="menu-bar-spacer" />
-
-      <button type="button" className="primary-button menu-scanner-button" onClick={() => action(onScan)}>
-        Scanner
-      </button>
 
 
       <button

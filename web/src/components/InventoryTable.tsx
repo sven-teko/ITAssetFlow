@@ -10,10 +10,7 @@ type InventoryRow =
   Record<string, unknown>;
 
 
-type SortDirection =
-  "asc"
-  | "desc";
-
+export type InventorySort = { column: string | null; direction: "asc" | "desc" };
 
 type HeaderContextMenuState = {
   x: number;
@@ -23,6 +20,8 @@ type HeaderContextMenuState = {
 
 type InventoryTableProps = {
   rows: InventoryRow[];
+  sort: InventorySort;
+  onSort: (sort: InventorySort) => void;
   rowBindings?: (row: InventoryRow) => React.HTMLAttributes<HTMLTableRowElement>;
 
   columns: string[];
@@ -132,6 +131,8 @@ function clampColumnWidth(
 
 export default function InventoryTable({
   rows,
+  sort: { column: sortColumn, direction: sortDirection },
+  onSort,
   rowBindings,
   columns,
   allColumns,
@@ -147,20 +148,6 @@ export default function InventoryTable({
   onShowAllColumns,
   onResetColumns,
 }: InventoryTableProps) {
-  const [
-    sortColumn,
-    setSortColumn,
-  ] = useState<string | null>(
-    null,
-  );
-
-  const [
-    sortDirection,
-    setSortDirection,
-  ] = useState<SortDirection>(
-    "asc",
-  );
-
   const [
     draggedColumn,
     setDraggedColumn,
@@ -418,26 +405,7 @@ export default function InventoryTable({
       return;
     }
 
-    if (
-      sortColumn !== column
-    ) {
-      setSortColumn(
-        column,
-      );
-
-      setSortDirection(
-        "asc",
-      );
-
-      return;
-    }
-
-    setSortDirection(
-      (current) =>
-        current === "asc"
-          ? "desc"
-          : "asc",
-    );
+    onSort({ column, direction: sortColumn === column && sortDirection === "asc" ? "desc" : "asc" });
   }
 
 
@@ -814,6 +782,7 @@ export default function InventoryTable({
                 (column) => (
                   <th
                     key={column}
+                    aria-sort={sortColumn === column ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
                     draggable
                     style={{
                       width:

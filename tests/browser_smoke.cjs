@@ -54,7 +54,7 @@ const run = (async () => {
         {id:4,first_name:'Noah',last_name:'Sicht',email:'noah@example.test',department_id:10,is_active:true,auth_user_id:'auth-noah',app_role:'viewer',allowed_site_ids:[1]},
       ],
       product_models:[{id:100,name:'TestBook',category_id:1,manufacturer_id:1,is_active:true,tracking_mode:'serialized',unit_code:'piece',specifications:{}}],
-      parent_assets:[], ...meta, factory_default_visible_columns:meta.default_visible_columns,
+      parent_assets:[{id:21,label:"Monitor"},{id:22,label:"Maus"}], ...meta, factory_default_visible_columns:meta.default_visible_columns,
     };
     const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
     await page.route(url => url.pathname.startsWith('/api/'), async route => {
@@ -165,13 +165,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.9.1 · 03.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.6.2 · 03.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.9.1');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.6.2');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -484,6 +484,8 @@ const run = (async () => {
     await formRow(/^Lagerort \*:/).locator('select').selectOption('11');
     await formRow(/^Produkterkennung \*:/).locator('input').fill('TEST-003');
     await page.getByLabel('Kaufdatum *:',{exact:true}).fill('2026-10-21');
+    await page.getByLabel('Verbundenes Produkt hinzufügen',{exact:true}).selectOption('21');
+    await page.getByLabel('Verbundenes Produkt hinzufügen',{exact:true}).selectOption('22');
     await page.getByLabel('Garantie bis:',{exact:true}).fill('2026-10-20');
     assert.equal(await page.getByLabel('Garantie bis:',{exact:true}).evaluate(el=>el.validity.rangeUnderflow),true);
     // Browserprüfung und serverunabhängige Formularprüfung separat ausführen.
@@ -495,6 +497,7 @@ const run = (async () => {
     await page.getByRole('button',{name:/speichern/i}).click();
     await page.getByText('TEST-001',{exact:true}).waitFor();
     assert.equal(lastAsset.asset.warranty_until,'2028-02-29');
+    assert.deepEqual(lastAsset.connection_changes,{add:['21','22'],remove:[]});
     console.log('PASS: Garantieprüfung und Speichern mit gültigem Schalttag');
 
     failInventory=true;

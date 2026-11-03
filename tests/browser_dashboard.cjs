@@ -23,7 +23,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     };
     const sites = [
       { ...defaults, site_id: '1', name: 'Basel', assets: 2, in_use: 1, known_value: 320, missing_prices: 1,
-        changed_at: '2026-11-02T10:03:51Z', latest_item: 'Laptop · A-1', configured_thresholds: 1, low_stock: 1 },
+        changed_at: '2026-11-02T10:03:51Z', latest_item: 'Laptop · A-1', configured_thresholds: 1, low_stock: 1,
+        departments: [{ ...defaults, id: '11', name: 'Informatik', assets: 2, known_value: 320 }] },
       { ...defaults, site_id: '2', name: 'Büro Allschwil', stock_positions: 1, known_value: 44, changed_at: '2026-11-03T12:23:11Z', latest_item: 'Kabel' },
       { ...defaults, site_id: '3', name: 'Leerer Standort' },
     ];
@@ -44,7 +45,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         switch (new URL(req.url()).pathname) {
           case '/api/auth/session': return json({ authenticated: true, email: 'test@example.test', role: restricted ? 'viewer' : 'admin' });
           case '/api/inventory/meta': return json(meta);
-          case '/api/inventory': return json([{ id: 1, _record_type: 'asset', asset_tag: 'TEST-001' }]);
+          case '/api/inventory': return json([{ id: 1, _record_type: 'asset', asset_tag: 'TEST-001' },{ id: 2, _record_type: 'asset', asset_tag: 'TEST-002' }]);
           case '/api/inventory/revision': return json({ revision });
           case '/api/inventory/events': return route.fulfill({ headers, contentType: 'text/event-stream', body: ': ready\n\n' });
           case '/api/preferences/inventory-columns': return json({ preferences: null });
@@ -57,6 +58,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       });
     }
     const page = await browser.newPage({ viewport: { width: 1440, height: 850 } });
+    page.setDefaultTimeout(8000);
     await mock(page);
     await page.goto(origin + '/#/inventory');
     const inventory = page.getByRole('tab', { name: 'IT-Inventar', exact: true });
@@ -68,6 +70,26 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const scanner = page.locator('.menu-bar').getByRole('button', { name: 'Scanner', exact: true });
     assert.ok(await scanner.isVisible());
     assert.ok(Math.abs((await scanner.boundingBox()).y - (await inventory.boundingBox()).y) < 6);
+    const checkAlignment = () => page.waitForFunction(() => {
+      const area = document.querySelector('.inventory-area').getBoundingClientRect();
+      const tabs = document.querySelector('.workspace-tabs').getBoundingClientRect();
+      const scan = document.querySelector('.menu-scanner-button').getBoundingClientRect();
+      return Math.abs(tabs.left-area.left) < 2 && Math.abs(scan.right-area.right) < 2;
+    });
+    await checkAlignment();
+    await page.setViewportSize({ width: 1190, height: 850 });
+    await checkAlignment();
+    await page.setViewportSize({ width: 740, height: 850 });
+    await checkAlignment();
+    await page.setViewportSize({ width: 1440, height: 850 });
+    await page.getByRole('button', { name: 'Optionen', exact: true }).click();
+    await page.getByText('Sortieren nach', { exact: true }).click();
+    await page.getByLabel('Reihenfolge', { exact: true }).selectOption('desc');
+    await page.getByLabel('Spalte', { exact: true }).selectOption('asset_tag');
+    assert.equal(await page.locator('.inventory-table tbody tr').first().innerText(), 'TEST-002');
+    await page.keyboard.press('Escape');
+    await page.getByRole('columnheader', { name: /Produkterkennung/ }).click();
+    assert.equal(await page.locator('.inventory-table tbody tr').first().innerText(), 'TEST-001');
     await inventory.focus();
     await inventory.press('ArrowRight');
     await panel.getByRole('alert').waitFor();
@@ -79,6 +101,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await table.getByRole('cell', { name: '03.11.2026-13-23', exact: true }).waitFor();
     await table.getByRole('cell', { name: 'Keine erfasst', exact: true }).waitFor();
     await table.getByRole('cell', { name: 'Laptop · A-1', exact: true }).waitFor();
+    await table.getByRole('button', { name: 'Basel', exact: true }).click();
+    await table.getByRole('rowheader', { name: 'Informatik', exact: true }).waitFor();
+    await table.getByRole('button', { name: 'Basel', exact: true }).click();
+    assert.equal(await table.getByRole('rowheader', { name: 'Informatik', exact: true }).count(), 0);
     assert.equal(await panel.getByText(/ohne Preis|Die letzte Änderung zeigt|Einzelartikel zum erfassten/i).count(), 0);
     const reviewTable = panel.getByRole('table', { name: /Zu prüfende Artikel/ });
     await reviewTable.getByText('In Reparatur', { exact: true }).waitFor();

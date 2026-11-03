@@ -321,3 +321,21 @@ select.asset-form-control {
 @keyframes asset-form-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .asset-form-spinner { animation: none; } }
 .asset-form-add-mac { justify-self: start; }
+
+.asset-form-connections {
+  min-width: 0;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid #d8dde3;
+  border-radius: 6px;
+}
+.asset-form-connections legend { font-weight: 600; }
+.asset-form-connections ul { margin: 0; padding: 0; list-style: none; }
+.asset-form-connections li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  overflow-wrap: anywhere;
+}

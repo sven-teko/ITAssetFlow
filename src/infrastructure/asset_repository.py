@@ -206,7 +206,8 @@ class AssetRepository:
                 desired = expected = Decimal("NaN")
             if payload.get("withdrawal") or (desired.is_finite() and expected.is_finite() and desired < expected):
                 return reduce_edited_stock(self.client, payload)
-        result = self.client.rpc("save_inventory_entry", {"p_payload": payload, "p_editing": editing}).execute().data
+        rpc_name = "save_inventory_entry_with_connections" if "connection_changes" in payload else "save_inventory_entry"
+        result = self.client.rpc(rpc_name, {"p_payload": payload, "p_editing": editing}).execute().data
         if not isinstance(result, dict) or result.get("entry_type") not in {"asset", "stock"}:
             raise RuntimeError("Der Server hat die Speicherung nicht bestätigt.")
         return result
@@ -399,6 +400,14 @@ class AssetRepository:
                 current["connected_product_id"] = components[0].get(
                     "parent_asset_id"
                 )
+
+            outgoing = (
+                self.client.table("asset_component_assignments").select("child_asset_id")
+                .eq("parent_asset_id", asset_id).is_("removed_at", "null").order("child_asset_id").execute()
+            )
+            current["connected_child_ids"] = [
+                row["child_asset_id"] for row in (outgoing.data or []) if row.get("child_asset_id") is not None
+            ]
 
             self._add_site_context(
                 current,
@@ -2073,25 +2082,21 @@ class AssetRepository:
         )
         assets_by_id = self._index_by_id(assets)
 
+        connections: dict[Any, set[str]] = {}
         for row in rows:
             if row.get("removed_at") is not None:
                 continue
-
-            child = assets_by_id.get(row.get("child_asset_id"))
-            if child is None:
+            parent_id, child_id = row.get("parent_asset_id"), row.get("child_asset_id")
+            parent, child = assets_by_id.get(parent_id), assets_by_id.get(child_id)
+            if parent is None or child is None:
                 continue
-
-            parent_id = row.get("parent_asset_id")
-            parent = assets_by_id.get(parent_id)
-
             child["current_usage_state"] = "connected"
             child["inventory_usage"] = USAGE_STATE_LABELS["connected"]
             child["connected_product_id"] = parent_id
-            child["connected_product"] = (
-                get_asset_identifier(parent)
-                if parent is not None
-                else str(parent_id or "")
-            )
+            connections.setdefault(child_id, set()).add(get_asset_identifier(parent))
+            connections.setdefault(parent_id, set()).add(get_asset_identifier(child))
+        for asset_id, labels in connections.items():
+            assets_by_id[asset_id]["connected_product"] = ", ".join(sorted(labels, key=str.casefold))
 
     # ------------------------------------------------------------------
     # Hilfsfunktionen

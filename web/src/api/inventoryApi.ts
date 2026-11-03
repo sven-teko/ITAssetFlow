@@ -143,11 +143,9 @@ export async function loadInventoryRows(): Promise<InventoryRow[]> {
   ).map(row => row._record_type === "stock" ? row : { ...row, stock_quantity: 1 });
 }
 
-export type DashboardSite = {
-  site_id: string | null;
+export type DashboardLocationSummary = {
   name: string;
   assets: number;
-  in_use: number;
   stock_positions: number;
   attention: number;
   known_value: number;
@@ -155,6 +153,14 @@ export type DashboardSite = {
   low_stock: number;
   changed_at: string | null;
   latest_item: string | null;
+};
+
+export type DashboardDepartment = DashboardLocationSummary & { id: string };
+
+export type DashboardSite = DashboardLocationSummary & {
+  site_id: string | null;
+  in_use: number;
+  departments?: DashboardDepartment[];
 };
 
 export type DashboardReviewItem = {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { loadInventoryDashboard, UnauthorizedError, type DashboardData } from "../api/inventoryApi";
+import { Fragment, useEffect, useState } from "react";
+import { loadInventoryDashboard, UnauthorizedError, type DashboardData, type DashboardLocationSummary } from "../api/inventoryApi";
 import type { InventoryRow } from "../types/inventory";
 import { formatDateTime } from "../utils/dateTime";
 import LoadingIndicator from "./LoadingIndicator";
@@ -27,6 +27,7 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 export default function InventoryDashboard({ inventory, onUnauthorized }: Props) {
   const [result, setResult] = useState<Result | null>(null);
   const [retry, setRetry] = useState(0);
+  const [expandedSites, setExpandedSites] = useState<Set<string>>(() => new Set());
   const [reviewLimit, setReviewLimit] = useState(REVIEW_PAGE_SIZE);
   const [sort, setSort] = useState({ key: "name" as SortKey, descending: false });
   useEffect(() => {
@@ -78,6 +79,21 @@ export default function InventoryDashboard({ inventory, onUnauthorized }: Props)
     </th>;
   }
 
+  function locationCells(row: DashboardLocationSummary) {
+    return <>
+            <td>{row.changed_at ? <time dateTime={row.changed_at}>{formatDateTime(row.changed_at)}</time> : <span className="dashboard-muted">Keine erfasst</span>}</td>
+            <td className="dashboard-item-cell">{row.latest_item || <span className="dashboard-muted">–</span>}</td>
+            <td>{money.format(row.known_value)}</td>
+            <td>{count.format(row.assets)}</td>
+            <td>{count.format(row.stock_positions)}</td>
+            <td><span className={row.attention ? "dashboard-attention" : undefined}>{count.format(row.attention)}</span></td>
+            {total.thresholds > 0 && <td>
+              {row.configured_thresholds ? <span className={row.low_stock ? "dashboard-attention" : undefined}>{count.format(row.low_stock)}</span>
+                : <span className="dashboard-muted" title="Kein Mindestbestand hinterlegt">–</span>}
+            </td>}
+    </>;
+  }
+
   return <div className="dashboard-content">
     <dl className="dashboard-metrics" aria-label="Inventar auf einen Blick">
       <Metric label="Gesamtwert" value={money.format(total.value)} detail="Erfasste Neupreise" />
@@ -102,19 +118,30 @@ export default function InventoryDashboard({ inventory, onUnauthorized }: Props)
             <th scope="col">Defekt / Reparatur</th>
             {total.thresholds > 0 && <th scope="col">Unter Mindestbestand</th>}
           </tr></thead>
-          <tbody>{rows.map(site => <tr key={site.site_id ?? "unassigned"}>
-            <th scope="row">{site.name}</th>
-            <td>{site.changed_at ? <time dateTime={site.changed_at}>{formatDateTime(site.changed_at)}</time> : <span className="dashboard-muted">Keine erfasst</span>}</td>
-            <td className="dashboard-item-cell">{site.latest_item || <span className="dashboard-muted">–</span>}</td>
-            <td>{money.format(site.known_value)}</td>
-            <td>{count.format(site.assets)}</td>
-            <td>{count.format(site.stock_positions)}</td>
-            <td><span className={site.attention ? "dashboard-attention" : undefined}>{count.format(site.attention)}</span></td>
-            {total.thresholds > 0 && <td>
-              {site.configured_thresholds ? <span className={site.low_stock ? "dashboard-attention" : undefined}>{count.format(site.low_stock)}</span>
-                : <span className="dashboard-muted" title="Kein Mindestbestand hinterlegt">–</span>}
-            </td>}
-          </tr>)}</tbody>
+          <tbody>{rows.map(site => {
+            const id = site.site_id ?? "unassigned";
+            const expanded = expandedSites.has(id);
+            const departments = site.departments ?? [];
+            return <Fragment key={id}>
+              <tr>
+                <th scope="row">{departments.length > 0
+                  ? <button type="button" className="dashboard-site-toggle" aria-expanded={expanded}
+                      onClick={() => setExpandedSites(previous => {
+                        const next = new Set(previous);
+                        if (next.has(id)) next.delete(id); else next.add(id);
+                        return next;
+                      })}>
+                      <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>{site.name}
+                    </button>
+                  : site.name}</th>
+                {locationCells(site)}
+              </tr>
+              {expanded && departments.map(department => <tr className="dashboard-department-row" key={department.id}>
+                <th scope="row">{department.name}</th>
+                {locationCells(department)}
+              </tr>)}
+            </Fragment>;
+          })}</tbody>
         </table>
       </div>
     </section>

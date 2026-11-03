@@ -12,7 +12,7 @@ import AssetDetailPanel from "../components/AssetDetailPanel";
 import ArchiveReasonDialog from "../components/ArchiveReasonDialog";
 import InventorySidebar from "../components/InventorySidebar";
 import LoadingIndicator from "../components/LoadingIndicator";
-import InventoryTable from "../components/InventoryTable";
+import InventoryTable, { type InventorySort } from "../components/InventoryTable";
 import InventoryDashboard from "../components/InventoryDashboard";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
@@ -56,6 +56,8 @@ export default function InventoryPage({
   const [imageWarning,setImageWarning]=useState(typeof location.state?.imageWarning === "string" ? location.state.imageWarning : "");
   const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
+  const [inventorySort, setInventorySort] = useState<InventorySort>({ column: null, direction: "asc" });
+  const inventoryAreaRef = useRef<HTMLElement>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("inventory");
   const [qrOpen, setQrOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<InventoryRow[] | null>(null);
@@ -333,6 +335,10 @@ export default function InventoryPage({
 
       <MainMenu
         onScan={() => setQrOpen(true)}
+        inventoryAreaRef={inventoryAreaRef}
+        toolbarLayoutKey={JSON.stringify([workspaceTab, isMobile, mobileView, docking.navigationVisible, docking.detailVisible, docking.navigationPosition, docking.detailPosition])}
+        sort={inventorySort}
+        onSort={setInventorySort}
         workspaceTabs={<div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
           {workspaceTabs.map(([tab, label]) => <button key={tab} id={`workspace-tab-${tab}`}
             type="button" role="tab" aria-selected={workspaceTab === tab} aria-controls={`workspace-panel-${tab}`}
@@ -521,7 +527,7 @@ export default function InventoryPage({
             ),
           )}
 
-        <main className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
+        <main ref={inventoryAreaRef} className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
           {data.loadError && (
             <div className="inventory-load-error" role="alert">
               <span>{data.loadError}</span>
@@ -533,6 +539,8 @@ export default function InventoryPage({
           {!data.meta && !data.loadError ? (
             <LoadingIndicator />
           ) : <InventoryTable
+            sort={inventorySort}
+            onSort={setInventorySort}
             rows={view.filteredRows}
             rowBindings={rowContext.bind}
             columns={

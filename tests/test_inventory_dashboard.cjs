@@ -61,6 +61,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     const { sites: limited, review_items: review, review_after_days: days } = await get(editor);
     assert.equal(limited.length, 1);
     const basel = limited[0];
+    assert.deepEqual(basel.departments.map(d => [d.name, d.assets, d.stock_positions, d.known_value]), [['IT', 2, 1, 364]]);
     assert.equal(basel.name, 'Basel');
     assert.equal(basel.assets, 2);
     assert.equal(basel.in_use, 1);

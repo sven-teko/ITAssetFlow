@@ -42,6 +42,7 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
         VALUES(101,11,'used',10,'receipt',10,'2026-01-01');`);
     for (const f of ["20261029093456_site_permissions","20261102145032_inventory_archive_images","20261102153129_stock_outcomes","20261102154643_stock_metadata_notes","20261103075158_archive_permanent_delete","20261103083104_archive_restore","20261103102308_inventory_write_integrity"])
       await seed(`supabase/migrations/${f}.sql`);
+    await seed("supabase/migrations/20261103122054_inventory_connections.sql");
     await as("admin", async () => {
       await q("SELECT public.set_employee_site_access(2,ARRAY[1,2]::bigint[])");
       await q("SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])");
@@ -73,6 +74,26 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       const created=await save(createdPayload);
       assert.deepEqual(await save(createdPayload),created);
       assert.equal((await q("SELECT employee_id FROM public.asset_assignments WHERE asset_id=$1 AND valid_to IS NULL",[created.id]))[0].employee_id,2);
+      const accessory = async tag => (await save({...createdPayload, request_id: randomUUID(), asset:{...createdPayload.asset, asset_tag:tag}})).id;
+      const display = await accessory("MONITOR");
+      const mouse = await accessory("MAUS");
+      const connect = async (data, edit) =>
+        (await q("SELECT public.save_inventory_entry_with_connections($1,$2) result",[data,edit]))[0].result;
+      const connected = {...createdPayload, request_id:randomUUID(), asset:{...createdPayload.asset,asset_tag:"PC-KOMPLETT"},
+        connection_changes:{add:[display,mouse],remove:[]}};
+      const pc = (await connect(connected,false)).id;
+      assert.equal((await connect(connected,false)).id,pc);
+      const children = async () => (await q("SELECT child_asset_id FROM public.asset_component_assignments WHERE parent_asset_id=$1 AND removed_at IS NULL ORDER BY child_asset_id",[pc])).map(row=>row.child_asset_id);
+      assert.deepEqual(await children(), [display, mouse]);
+      await fails(() => connect({...connected, request_id:randomUUID(), edit:{record_type:"asset",id:display},
+        asset:{...connected.asset,asset_tag:"MONITOR"}, parent_asset_id:pc, connection_changes:{add:[pc],remove:[]}},true),"P0001");
+      await fails(() => connect({...connected, request_id:randomUUID(), edit:{record_type:"asset",id:pc},
+        connection_changes:{add:[30],remove:[display]}},true),"42501");
+      assert.deepEqual(await children(), [display, mouse]);
+      await connect({...connected, request_id:randomUUID(), edit:{record_type:"asset",id:pc},connection_changes:{add:[],remove:[display]}},true);
+      assert.deepEqual(await children(), [mouse]);
+      assert.equal((await connect(connected,false)).id,pc);
+      assert.deepEqual(await children(), [mouse]); // Retry cannot resurrect a removed link.
       const snapshot=(await q("SELECT updated_at::text FROM public.assets WHERE id=10"))[0].updated_at;
       await save({...asset,edit:{...asset.edit,updated_at:snapshot},assignment:{department_id:10,employee_id:2}},true);
       await fails(() => save({...asset,edit:{...asset.edit,updated_at:snapshot},assignment:{department_id:10,employee_id:2}},true),"40001");
