@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import threading
@@ -988,6 +989,21 @@ def inventory(
         for row in rows
         if isinstance(row, dict)
     ]
+
+
+@app.get("/api/inventory/dashboard")
+def inventory_dashboard(
+    response: Response, web_session: WebSession = Depends(get_web_session),
+) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        data = web_session.client.rpc("inventory_dashboard", {}).execute().data
+        if not isinstance(data, dict) or not isinstance(data.get("sites"), list):
+            raise RuntimeError("Ungültige Dashboard-Antwort.")
+        return data
+    except Exception as error:
+        logging.getLogger(__name__).exception("Dashboard-Abfrage fehlgeschlagen")
+        raise HTTPException(503, "Das Dashboard konnte nicht geladen werden. Bitte erneut versuchen.") from error
 
 
 @app.get(

@@ -54,10 +54,7 @@
   .mobile-portrait .filter-option { min-height: 44px; }
   .mobile-portrait .sidebar-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
   .mobile-portrait .sidebar-actions > label, .sidebar-product-models-button { grid-column: 1 / -1; }
-  .mobile-portrait .page-header { flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .mobile-portrait .page-header h1 { font-size: 21px; }
-  .mobile-portrait .inventory-header-actions { flex: 1; gap: 8px; justify-content: space-between; }
-  .mobile-portrait .inventory-header-actions > span { font-size: 12px; }
+  .mobile-portrait .inventory-header-actions { gap: 8px; }
   .mobile-portrait .inventory-header-actions button { min-height: 40px; font-size: 13px; }
   .mobile-portrait .desktop-qr-button { display: none; }
   .mobile-portrait .inventory-status { font-size: 11px; min-height: 22px; }

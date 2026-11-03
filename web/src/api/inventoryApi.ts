@@ -143,6 +143,32 @@ export async function loadInventoryRows(): Promise<InventoryRow[]> {
   ).map(row => row._record_type === "stock" ? row : { ...row, stock_quantity: 1 });
 }
 
+export type DashboardSite = {
+  site_id: string | null;
+  name: string;
+  assets: number;
+  in_use: number;
+  stock_positions: number;
+  attention: number;
+  known_value: number;
+  missing_prices: number;
+  configured_thresholds: number;
+  low_stock: number;
+  changed_at: string | null;
+};
+
+export async function loadInventoryDashboard(signal: AbortSignal): Promise<DashboardSite[]> {
+  const response = await fetch(`${API_BASE}/api/inventory/dashboard`, {
+    credentials: "include", cache: "no-store", signal,
+  });
+  ensureAuthorized(response);
+  const data = await readJson(response);
+  if (!response.ok || !isRecord(data) || !Array.isArray(data.sites)) {
+    throw new Error(errorDetail(data, "Das Dashboard konnte nicht geladen werden."));
+  }
+  return data.sites;
+}
+
 export async function loadInventoryRevision(): Promise<number> {
   const response = await fetch(
     `${API_BASE}/api/inventory/revision`,

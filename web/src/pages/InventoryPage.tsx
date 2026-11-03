@@ -13,6 +13,7 @@ import ArchiveReasonDialog from "../components/ArchiveReasonDialog";
 import InventorySidebar from "../components/InventorySidebar";
 import LoadingIndicator from "../components/LoadingIndicator";
 import InventoryTable from "../components/InventoryTable";
+import InventoryDashboard from "../components/InventoryDashboard";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
 import InventoryOperationDialog from "../components/InventoryOperationDialog";
@@ -36,6 +37,9 @@ type AppRole =
   | "user"
   | "viewer";
 
+const workspaceTabs = [["inventory", "IT-Inventar"], ["dashboard", "Dashboard"]] as const;
+type WorkspaceTab = typeof workspaceTabs[number][0];
+
 type InventoryPageProps = {
   email: string;
   role: AppRole;
@@ -52,6 +56,7 @@ export default function InventoryPage({
   const [imageWarning,setImageWarning]=useState(typeof location.state?.imageWarning === "string" ? location.state.imageWarning : "");
   const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("inventory");
   const [qrOpen, setQrOpen] = useState(false);
   const [bulkRows, setBulkRows] = useState<InventoryRow[] | null>(null);
   const [operation, setOperation] = useState<{ kind: "move" | "stock"; row: InventoryRow } | null>(null);
@@ -413,6 +418,31 @@ export default function InventoryPage({
         }
       />
 
+      <div className="page-header workspace-header">
+        <div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
+          {workspaceTabs.map(([tab, label]) => <button key={tab} id={`workspace-tab-${tab}`}
+            type="button" role="tab" aria-selected={workspaceTab === tab} aria-controls={`workspace-panel-${tab}`}
+            tabIndex={workspaceTab === tab ? 0 : -1}
+            onClick={() => { closeContext(); setWorkspaceTab(tab); }}
+            onKeyDown={event => {
+              const next = event.key === "Home" ? "inventory" : event.key === "End" ? "dashboard"
+                : event.key === "ArrowLeft" || event.key === "ArrowRight"
+                  ? (tab === "inventory" ? "dashboard" : "inventory") : null;
+              if (!next) return;
+              event.preventDefault();
+              closeContext();
+              setWorkspaceTab(next);
+              document.getElementById(`workspace-tab-${next}`)?.focus();
+            }}>{label}</button>)}
+        </div>
+        {workspaceTab === "inventory" && <div className="inventory-header-actions">
+          {!isMobile && <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>Scanner</button>}
+          {isMobile && canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
+        </div>}
+      </div>
+
+      <section className="inventory-workspace-panel" id="workspace-panel-inventory" role="tabpanel"
+        aria-labelledby="workspace-tab-inventory" hidden={workspaceTab !== "inventory"}>
       {isMobile && <nav className="mobile-inventory-toolbar" aria-label="Mobile Inventaransicht">
         <div role="tablist" aria-label="Inventarbereiche" onPointerDown={event => { if (event.pointerType !== "mouse") swipeStart.current = { x: event.clientX, y: event.clientY }; }}
           onPointerUp={event => swipeEnd(event.clientX, event.clientY)} onPointerCancel={() => { swipeStart.current = null; }}>
@@ -494,14 +524,6 @@ export default function InventoryPage({
           )}
 
         <main className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
-          <div className="page-header">
-            <h1>IT-Inventar</h1>
-            <div className="inventory-header-actions">
-              <button type="button" className="primary-button desktop-qr-button" onClick={() => setQrOpen(true)}>Scanner</button>
-              {isMobile && canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
-            </div>
-          </div>
-
           {data.loadError && (
             <div className="inventory-load-error" role="alert">
               <span>{data.loadError}</span>
@@ -568,6 +590,11 @@ export default function InventoryPage({
             ),
           )}
       </div>
+      </section>
+      <section className="dashboard-panel" id="workspace-panel-dashboard" role="tabpanel"
+        aria-labelledby="workspace-tab-dashboard" hidden={workspaceTab !== "dashboard"}>
+        {workspaceTab === "dashboard" && <InventoryDashboard inventory={data.inventory} onUnauthorized={handleUnauthorized} />}
+      </section>
 
       <AboutDialog
         open={aboutOpen}
@@ -605,7 +632,7 @@ export default function InventoryPage({
 
       <div className="status-bar">
         <span>
-          {view.countText}
+          {workspaceTab === "dashboard" ? "Standortübersicht" : view.countText}
         </span>
 
         <span

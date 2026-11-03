@@ -261,6 +261,7 @@ input:focus {
   display: grid;
   grid-template-rows:
     46px
+    auto
     minmax(0, 1fr)
     28px;
   overflow: hidden;
