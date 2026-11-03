@@ -27,10 +27,7 @@ class ArchiveApiTests(unittest.TestCase):
         self.db.rpc.assert_not_called()
 
     def test_quantity_selection_translates_to_canonical_archive_key(self):
-        row = {"id": "stock:101:11:used", "_record_type": "stock", "product_model_id": 101,
-               "storage_location_id": 11, "condition": "used"}
-        with patch("web_backend.app.AssetRepository") as repo:
-            repo.return_value.load_inventory.return_value = [row]
+        with patch("infrastructure.asset_repository.AssetRepository.load_inventory", side_effect=AssertionError("Inventar erneut geladen")):
             response = self.client.post("/api/inventory/delete", json={
                 "entry_keys": ["stock:stock:101:11:used:101:11:used"],
                 "reason": {"reason": "defective", "destroyed": False},
@@ -83,6 +80,55 @@ class ArchiveApiTests(unittest.TestCase):
         query.eq.return_value.execute.return_value = SimpleNamespace(data=[])
         self.assertEqual(self.client.delete(url).status_code, 404)
 
+    def test_archive_restore_for_editor_and_returns_changed_stock(self):
+        archive_id = "00000000-0000-0000-0000-000000000001"
+        url = f"/api/archive/{archive_id}/restore"
+        self.session.role = "viewer"
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.db.rpc.assert_not_called()
+        self.session.role = "user"
+        result = {"restored": True, "quantity": 2, "key": "stock:101:11:used"}
+        self.db.rpc.return_value.execute.return_value = SimpleNamespace(data=result)
+        self.assertEqual(self.client.post(url).json(), result)
+        self.db.rpc.assert_called_once_with("restore_inventory_archive", {"p_archive_id": archive_id})
+        for code, expected in (("P0001", 409), ("P0002", 404), ("42501", 403)):
+            error = RuntimeError("Rücknahme nicht möglich")
+            error.code = code
+            error.message = str(error)
+            self.db.rpc.return_value.execute.side_effect = error
+            self.assertEqual(self.client.post(url).status_code, expected)
+
+    def test_inventory_operations_use_role_and_canonical_stock_key(self):
+        from uuid import uuid4
+        payload = {"request_id": str(uuid4()), "entry_key": "stock:stock:101:11:used:101:11:used",
+                   "destination_id": 22, "quantity": 3, "expected_quantity": 10}
+        self.session.role = "viewer"
+        self.assertEqual(self.client.post("/api/inventory/move", json=payload).status_code, 403)
+        self.assertEqual(self.client.post("/api/inventory/stock", json={}).status_code, 403)
+        self.db.rpc.assert_not_called()
+        self.session.role = "user"
+        error = RuntimeError("Der Lagerbestand wurde inzwischen geändert.")
+        error.code = "40001"
+        error.details = "8.000"
+        self.db.rpc.return_value.execute.side_effect = error
+        response = self.client.post("/api/inventory/move", json=payload)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["available"], 8)
+        fn, args = self.db.rpc.call_args.args
+        self.assertEqual(fn, "move_inventory_entry")
+        self.assertEqual(args["p_key"], "stock:101:11:used")
+        self.assertEqual(args["p_destination"], 22)
+
+    def test_archive_filters_are_validated_and_forwarded(self):
+        self.db.rpc.return_value.execute.return_value = SimpleNamespace(data={"items": [], "total": 0})
+        url = "/api/archive?site=Basel&q=aabbcc112233&reason=lost&date_from=2026-11-02&date_until=2026-11-03"
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.db.rpc.assert_called_once_with("search_inventory_archive", {
+            "p_offset": 0, "p_query": "aabbcc112233", "p_site": "Basel", "p_reason": "lost",
+            "p_from": "2026-11-02", "p_until": "2026-11-03",
+        })
+        self.assertEqual(self.client.get("/api/archive?date_from=2026-11-03&date_until=2026-11-02").status_code, 422)
+
     def test_unconfirmed_stock_reduction_returns_dialog_signal(self):
         from decimal import Decimal
         from infrastructure.stock_booking import StockWithdrawalRequired
@@ -112,6 +158,13 @@ class ScannerIdentifierTests(unittest.TestCase):
             result = QrService(db).lookup(code)
             self.assertEqual(result["code_type"], "mac")
             self.assertEqual(result["matches"][0]["key"], "asset:1")
+
+    def test_mac_stored_as_product_identifier_matches_other_spellings(self):
+        db = Database()
+        db.rows["assets"][0]["asset_tag"] = "aAbB.Cc11.2233"
+        result = QrService(db).lookup("AA-BB-CC-11-22-33")
+        self.assertEqual(result["code_type"], "mac")
+        self.assertEqual(result["matches"][0]["key"], "asset:1")
 
     def test_arbitrary_serial_and_archived_asset_exclusion(self):
         db = Database()

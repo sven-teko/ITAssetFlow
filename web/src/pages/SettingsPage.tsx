@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import ProductModelsPage, { type ProductModelsHandle } from "./ProductModelsPage";
 import "./SettingsPage.css";
 import EmployeesSettings, { type EmployeeRow } from "../components/EmployeesSettings";
+import useMediaQuery from "../hooks/useMediaQuery";
 import LoadingIndicator from "../components/LoadingIndicator";
 import SiteAccessDropdown from "../components/SiteAccessDropdown";
 
@@ -58,6 +59,13 @@ const SETTINGS_TABS: Array<[SettingsTab, string]> = [
   ["permissions", "Berechtigungen"],
   ["columns", "Standardspalten"],
 ];
+
+const STRUCTURE_TABS = [
+  ["sites", "Standorte"],
+  ["departments", "Abteilungen"],
+  ["locations", "Lagerorte"],
+] as const;
+type StructureTab = typeof STRUCTURE_TABS[number][0];
 
 type DeleteKey =
   | "sites"
@@ -358,6 +366,8 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
   const [message, setMessage] = useState("Einstellungen werden geladen ...");
   const [messageTone, setMessageTone] = useState<MessageTone>("info");
 
+  const [structureTab, setStructureTab] = useState<StructureTab>("sites");
+  const compactStructure = useMediaQuery("(max-width: 620px)");
   const [sites, setSites] = useState<SiteRow[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
@@ -460,7 +470,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     return `new:${prefix}:${counter.current}`;
   }
 
-  function startEditing(key: string | null, label = "Eintrag"): void {
+  function startEditing(key: string | null, label = "Eintrag", exclusiveKeys: string[] = []): void {
     if (!key) {
       showMessage("Bitte zuerst einen Eintrag auswählen.", "warning");
       return;
@@ -468,6 +478,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
 
     setEditingRows((current) => {
       const next = new Set(current);
+      exclusiveKeys.forEach((other) => next.delete(other));
       next.add(key);
       return next;
     });
@@ -489,7 +500,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     );
   }
 
-  function toggleEditing(key: string | null, label: string): void {
+  function toggleEditing(key: string | null, label: string, exclusiveKeys?: string[]): void {
     if (!key) {
       showMessage(`Bitte zuerst ${label.toLocaleLowerCase()} auswählen.`, "warning");
       return;
@@ -498,7 +509,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     if (editingRows.has(key)) {
       stopEditing(key, label);
     } else {
-      startEditing(key, label);
+      startEditing(key, label, exclusiveKeys);
     }
   }
 
@@ -614,12 +625,10 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           return {
             id: row.id as RowId,
             client_key: idRef(row.id as RowId) ?? nextKey("employee"),
-            employee_number: text(row.employee_number),
             first_name: text(row.first_name),
             last_name: text(row.last_name),
             email: text(row.email),
             department_ref: idRef(row.department_id as RowId),
-            is_active: row.is_active !== false,
             auth_user_id: text(row.auth_user_id) || null,
             app_role: appRole,
             allowed_site_refs: Array.isArray(row.allowed_site_ids) ? row.allowed_site_ids.map((id) => idRef(id as RowId)).filter((ref): ref is string => Boolean(ref)) : [],
@@ -818,7 +827,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
       },
     ]);
     setSelectedManufacturer(clientKey);
-    startEditing(clientKey, "Neuer Hersteller");
+    startEditing(clientKey, "Neuer Hersteller", manufacturers.map(row => row.client_key));
   }
 
   function addSpecification(): void {
@@ -1129,7 +1138,6 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
     validateUniqueNames(manufacturers, "Hersteller");
 
     const employeeEmails = new Set<string>();
-    const employeeNumbers = new Set<string>();
     for (const employee of employees) {
       const label = [employee.first_name, employee.last_name].filter(Boolean).join(" ") || "ohne Name";
       if (!employee.first_name.trim() || !employee.last_name.trim()) {
@@ -1144,9 +1152,6 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
       }
       if (address && employeeEmails.has(address)) errors.push(`E-Mail-Adresse „${address}“ ist doppelt vorhanden.`);
       if (address) employeeEmails.add(address);
-      const number = employee.employee_number.trim().toLocaleLowerCase();
-      if (number && employeeNumbers.has(number)) errors.push(`Personalnummer „${employee.employee_number}“ ist doppelt vorhanden.`);
-      if (number) employeeNumbers.add(number);
     }
 
     for (const department of departments) {
@@ -1263,12 +1268,10 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
       employees: employees.map((row) => ({
         id: row.id,
         client_key: row.client_key,
-        employee_number: row.employee_number.trim() || null,
         first_name: row.first_name.trim(),
         last_name: row.last_name.trim(),
         email: row.email.trim() || null,
         department_ref: row.department_ref,
-        is_active: row.is_active,
         app_role: row.app_role,
         ...(sitePermissionsAvailable ? { allowed_site_refs: row.allowed_site_refs } : {}),
       })),
@@ -1401,7 +1404,31 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           <h2>Standorte und Zuordnungen</h2>
           <p>Standort → Abteilung → Lagerort. Wähle eine Zeile aus und klicke auf „Bearbeiten“.</p>
         </header>
-        <section className="settings-section">
+        <div className="settings-structure-layout">
+          <nav className="settings-structure-tabs" role="tablist" aria-label="Strukturbereiche"
+            aria-orientation={compactStructure ? "horizontal" : "vertical"}>
+            {STRUCTURE_TABS.map(([key, label], index) => (
+              <button key={key} type="button" role="tab" id={`structure-tab-${key}`}
+                aria-selected={structureTab === key} aria-controls={`structure-panel-${key}`}
+                tabIndex={structureTab === key ? 0 : -1} disabled={saving}
+                onClick={() => setStructureTab(key)}
+                onKeyDown={event => {
+                  const count = STRUCTURE_TABS.length;
+                  let next: number;
+                  if (event.key === "Home") next = 0;
+                  else if (event.key === "End") next = count - 1;
+                  else if (event.key === (compactStructure ? "ArrowRight" : "ArrowDown")) next = (index + 1) % count;
+                  else if (event.key === (compactStructure ? "ArrowLeft" : "ArrowUp")) next = (index + count - 1) % count;
+                  else return;
+                  event.preventDefault();
+                  const target = STRUCTURE_TABS[next][0];
+                  setStructureTab(target);
+                  document.getElementById(`structure-tab-${target}`)?.focus();
+                }}>{label}</button>
+            ))}
+          </nav>
+          {structureTab === "sites" && <section className="settings-section" role="tabpanel"
+            id="structure-panel-sites" aria-labelledby="structure-tab-sites">
           <div className="settings-section-header">
             <div>
               <h3>
@@ -1523,8 +1550,9 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
               </tbody>
             </table>
           </div>
-        </section>
-        <section className="settings-section">
+          </section>}
+          {structureTab === "departments" && <section className="settings-section" role="tabpanel"
+            id="structure-panel-departments" aria-labelledby="structure-tab-departments">
           <div className="settings-section-header">
             <div>
               <h3>
@@ -1639,8 +1667,9 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
               </tbody>
             </table>
           </div>
-        </section>
-        <section className="settings-section">
+          </section>}
+          {structureTab === "locations" && <section className="settings-section" role="tabpanel"
+            id="structure-panel-locations" aria-labelledby="structure-tab-locations">
           <div className="settings-section-header">
             <div>
               <h3>
@@ -1787,7 +1816,8 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
               </tbody>
             </table>
           </div>
-        </section>
+          </section>}
+        </div>
       </div>
     );
   }
@@ -2079,7 +2109,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
           </button>
           <button
             type="button"
-            onClick={() => toggleEditing(selectedManufacturer, "Hersteller")}
+            onClick={() => toggleEditing(selectedManufacturer, "Hersteller", manufacturers.map(row => row.client_key))}
             disabled={saving || !selectedManufacturer || selectedProtected}
           >
             {selectedManufacturer && editingRows.has(selectedManufacturer)
@@ -2124,7 +2154,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                       if (!editingRows.has(row.client_key)) selectionHint("Hersteller", row.name);
                     }}
                     onDoubleClick={() =>
-                      !protectedRow && startEditing(row.client_key, "Hersteller")
+                      !protectedRow && !saving && startEditing(row.client_key, "Hersteller", manufacturers.map(item => item.client_key))
                     }
                   >
                     <td>
@@ -2155,12 +2185,6 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
 
     return (
       <div className="settings-single-page">
-        <div className="settings-permissions-intro">
-          <strong>Benutzerberechtigungen</strong>
-          <span>
-            {sitePermissionsAvailable ? "Bearbeiter und Betrachter sehen nur die freigegebenen Standorte und deren Daten. Administratoren haben Zugriff auf alle Standorte." : "Die Standortbeschränkung ist noch nicht aktiviert."} Änderungen mit „Übernehmen“ speichern.
-          </span>
-        </div>
         {!sitePermissionsAvailable && <p className="settings-permissions-pending" role="status">Die Standortmigration fehlt noch. Rollen und andere Einstellungen bleiben bearbeitbar; Standortfreigaben können erst nach der Aktivierung geändert werden.</p>}
         <div className="settings-table-wrap settings-table-grow">
           <table className="settings-table settings-permissions-table">
@@ -2353,7 +2377,7 @@ export default function SettingsPage({ email, onSessionExpired }: SettingsPagePr
                   {activeTab === "structure" && renderStructure()}
                   {activeTab === "employees" && <EmployeesSettings
                     employees={employees} sites={sortedSites} departments={sortedDepartments}
-                    saving={saving} email={email} setEmployees={setEmployees}
+                    saving={saving} setEmployees={setEmployees}
                     nextKey={() => nextKey("employee")} onMessage={(value) => showMessage(value)}
                     onDelete={(row) => {
                       rememberDeleted("employees", row.id);

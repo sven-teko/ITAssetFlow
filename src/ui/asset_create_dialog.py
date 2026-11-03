@@ -1590,6 +1590,7 @@ class AssetCreateDialog(QDialog):
                 "condition": original.get("condition"),
                 "stock_quantity": original.get("stock_quantity"),
                 "source_movement_id": original.get("source_movement_id"),
+                "updated_at": original.get("updated_at"),
             }
 
         return payload

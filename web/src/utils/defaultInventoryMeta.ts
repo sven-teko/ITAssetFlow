@@ -5,7 +5,6 @@ export const DEFAULT_INVENTORY_META: InventoryMeta = {
   "column_order": [
     "asset_tag",
     "serial_number",
-    "mac_address",
     "product_model_name",
     "manufacturer_name",
     "product_category_name",

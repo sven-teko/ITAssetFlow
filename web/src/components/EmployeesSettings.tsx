@@ -3,12 +3,10 @@ import { useState, type Dispatch, type SetStateAction } from "react";
 export type EmployeeRow = {
   id: string | number | null | undefined;
   client_key: string;
-  employee_number: string;
   first_name: string;
   last_name: string;
   email: string;
   department_ref: string | null;
-  is_active: boolean;
   auth_user_id: string | null;
   app_role: "admin" | "user" | "viewer";
   allowed_site_refs: string[];
@@ -19,7 +17,6 @@ type Props = {
   sites: { client_key: string; name: string }[];
   departments: { client_key: string; name: string; site_ref: string | null }[];
   saving: boolean;
-  email: string;
   setEmployees: Dispatch<SetStateAction<EmployeeRow[]>>;
   nextKey: () => string;
   onDelete: (employee: EmployeeRow) => void;
@@ -27,12 +24,11 @@ type Props = {
 };
 
 export default function EmployeesSettings({
-  employees, sites, departments, saving, email, setEmployees, nextKey, onDelete, onMessage,
+  employees, sites, departments, saving, setEmployees, nextKey, onDelete, onMessage,
 }: Props) {
   const [siteFilter, setSiteFilter] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
   const [search, setSearch] = useState("");
-  const [showInactive, setShowInactive] = useState(true);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
@@ -44,8 +40,7 @@ export default function EmployeesSettings({
     const department = departmentByKey.get(row.department_ref ?? "");
     return (!siteFilter || department?.site_ref === siteFilter)
       && (!departmentFilter || row.department_ref === departmentFilter)
-      && (showInactive || row.is_active)
-      && (!search.trim() || `${name(row)} ${row.email} ${row.employee_number}`
+      && (!search.trim() || `${name(row)} ${row.email}`
         .toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   }).sort((a, b) => `${a.last_name} ${a.first_name}`.localeCompare(
     `${b.last_name} ${b.first_name}`, "de-CH", { sensitivity: "base" },
@@ -66,8 +61,8 @@ export default function EmployeesSettings({
     }
     const key = nextKey();
     setEmployees((current) => [...current, {
-      id: null, client_key: key, employee_number: "", first_name: "", last_name: "", email: "",
-      department_ref: departmentRef, is_active: true, auth_user_id: null, app_role: "viewer", allowed_site_refs: [],
+      id: null, client_key: key, first_name: "", last_name: "", email: "",
+      department_ref: departmentRef, auth_user_id: null, app_role: "viewer", allowed_site_refs: [],
     }]);
     setSearch("");
     setSelectedKey(key);
@@ -75,7 +70,7 @@ export default function EmployeesSettings({
     onMessage("Mitarbeiter angelegt. Vorname und Nachname ausfüllen und mit „Übernehmen“ speichern.");
   }
 
-  function field(row: EmployeeRow, key: "first_name" | "last_name" | "email" | "employee_number", label: string) {
+  function field(row: EmployeeRow, key: "first_name" | "last_name" | "email", label: string) {
     if (editingKey !== row.client_key || (key === "email" && row.auth_user_id)) {
       return <span className="settings-cell-text">{row[key] || "—"}</span>;
     }
@@ -117,12 +112,8 @@ export default function EmployeesSettings({
           </select>
         </label>
         <label>Suche
-          <input type="search" aria-label="Mitarbeiter suchen" placeholder="Name, E-Mail oder Personalnummer"
+          <input type="search" aria-label="Mitarbeiter suchen" placeholder="Name oder E-Mail"
             value={search} disabled={saving} onChange={(event) => setSearch(event.target.value)} />
-        </label>
-        <label className="settings-employee-checkbox">
-          <input type="checkbox" checked={showInactive} disabled={saving}
-            onChange={(event) => setShowInactive(event.target.checked)} /> Inaktive anzeigen
         </label>
       </div>
       <div className="settings-actions settings-actions-left">
@@ -144,14 +135,13 @@ export default function EmployeesSettings({
       <div className="settings-table-wrap settings-table-grow">
         <table className="settings-table settings-employees-table" aria-label="Mitarbeiter">
           <thead><tr>
-            <th>Vorname</th><th>Nachname</th><th>E-Mail (optional)</th><th>Personalnr.</th>
-            <th>Standort</th><th>Abteilung</th><th>Aktiv</th>
+            <th>Vorname</th><th>Nachname</th><th>E-Mail (optional)</th>
+            <th>Standort</th><th>Abteilung</th>
           </tr></thead>
           <tbody>
             {visible.map((row) => {
               const department = departmentByKey.get(row.department_ref ?? "");
               const editing = editingKey === row.client_key;
-              const ownAccount = Boolean(row.auth_user_id) && row.email.toLocaleLowerCase() === email.toLocaleLowerCase();
               return <tr key={row.client_key}
                 className={[selectedKey === row.client_key ? "selected" : "", editing ? "editing" : ""].join(" ")}
                 tabIndex={0} aria-selected={selectedKey === row.client_key}
@@ -168,7 +158,6 @@ export default function EmployeesSettings({
                 <td title={row.auth_user_id ? "Die Anmelde-E-Mail wird über die Benutzerverwaltung gepflegt." : undefined}>
                   {field(row, "email", "E-Mail")}
                 </td>
-                <td>{field(row, "employee_number", "Personalnummer")}</td>
                 <td><span className="settings-cell-text">{siteByKey.get(department?.site_ref ?? "")?.name || "Nicht zugeordnet"}</span></td>
                 <td>{editing ? <select className="settings-cell-editor" aria-label={`Abteilung für ${name(row) || "neuen Mitarbeiter"}`}
                   value={row.department_ref ?? ""} disabled={saving}
@@ -178,18 +167,13 @@ export default function EmployeesSettings({
                     {siteByKey.get(item.site_ref ?? "")?.name || "Ohne Standort"} · {item.name}
                   </option>)}
                 </select> : <span className="settings-cell-text">{department?.name || "Nicht zugeordnet"}</span>}</td>
-                <td className="settings-employee-active"><input type="checkbox"
-                  aria-label={`Aktiv: ${name(row) || "neuer Mitarbeiter"}`} checked={row.is_active}
-                  disabled={saving || !editing || ownAccount}
-                  title={ownAccount ? "Das eigene Benutzerkonto kann hier nicht deaktiviert werden." : undefined}
-                  onChange={(event) => update(row.client_key, { is_active: event.target.checked })} /></td>
               </tr>;
             })}
-            {visible.length === 0 && <tr><td colSpan={7} className="settings-empty-state">Keine Mitarbeiter gefunden.</td></tr>}
+            {visible.length === 0 && <tr><td colSpan={5} className="settings-empty-state">Keine Mitarbeiter gefunden.</td></tr>}
           </tbody>
         </table>
       </div>
-      <p className="settings-employee-note">Eine E-Mail-Adresse ist optional. Neue Mitarbeiter erhalten hier keinen Anmeldezugang. Bereits verwendete Mitarbeiter können deaktiviert werden, damit Zuordnungen erhalten bleiben.</p>
+      <p className="settings-employee-note">Eine E-Mail-Adresse ist optional. Neue Mitarbeiter erhalten hier keinen Anmeldezugang.</p>
     </div>
   );
 }

@@ -56,23 +56,47 @@ class QrService:
 
     def _assets_for_code(self, code: str) -> list[dict[str, Any]]:
         found = {}
+        try:
+            mac = normalize_mac(code)
+        except ValueError:
+            mac = None
+        if mac:
+            compact = mac.replace(":", "")
+            mac_variants = (mac, mac.replace(":", "-"), compact, ".".join(compact[i:i+4] for i in range(0, 12, 4)))
+        else:
+            mac_variants = ()
+
         for field in ("qr_code", "ean", "asset_tag", "serial_number", "mac_address"):
-            try:
-                searched = normalize_mac(code) if field == "mac_address" else code
-            except ValueError:
+            if field == "mac_address" and not mac_variants:
                 continue
+
+            def query(columns: str):
+                request = self.client.table("assets").select(columns).is_("archived_at", "null")
+                if mac_variants and field in {"asset_tag", "mac_address"}:
+                    # All patterns are validated hex and fixed punctuation, so ILIKE is exact apart from case.
+                    filters = [f"{field}.ilike.{variant}" for variant in mac_variants]
+                    if field == "asset_tag" and code.casefold() not in {variant.casefold() for variant in mac_variants}:
+                        # A tag may contain a literal prefix such as "MAC: ".
+                        filters.append(f'{field}.eq."{code}"')
+                    return request.or_(",".join(filters))
+                return request.eq(field, code)
+
             try:
                 response = select_scanner_compatible(
-                    lambda columns: self.client.table("assets").select(columns).eq(field, searched).is_("archived_at", "null"),
-                    "assets", "id,asset_tag,serial_number,mac_address,qr_code,ean,product_model_id,condition,status",
+                    query, "assets", "id,asset_tag,serial_number,mac_address,qr_code,ean,product_model_id,condition,status",
                 )
             except Exception as error:
                 if missing_scanner_column(error, "assets") == field:
                     continue
                 raise
             for row in self._data(response):
-                if field in {"serial_number", "mac_address"}:
-                    row["matched_identifier"] = "mac" if field == "mac_address" else "serial"
+                previous = found.get(row["id"], {}).get("matched_identifier")
+                if field == "mac_address" or (field == "asset_tag" and mac_variants):
+                    row["matched_identifier"] = "mac"
+                elif field == "serial_number" and previous != "mac":
+                    row["matched_identifier"] = "serial"
+                elif previous:
+                    row["matched_identifier"] = previous
                 found[row["id"]] = row
         return list(found.values())
 

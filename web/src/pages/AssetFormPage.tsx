@@ -1,3 +1,4 @@
+import { newBookingId } from "../api/stockBooking";
 import { API_BASE } from "../api/config";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -271,6 +272,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [meta, setMeta] = useState<InventoryMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const pendingSave = useRef<{ signature: string; id: string } | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set());
 
@@ -286,9 +288,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
   const [newPrice, setNewPrice] = useState("");
 
-  const [assetTag, setAssetTag] = useState(!scannedEan && scannedCode.length <= 50 ? scannedCode : "");
+  const scannedMac = scannedType === "mac" ? normalizeMac(scannedCode) : null;
+  const [assetTag, setAssetTag] = useState(!scannedEan && scannedCode.length <= 50 ? scannedMac ?? scannedCode : "");
   const [serialNumber, setSerialNumber] = useState(scannedType === "serial" ? scannedCode : "");
-  const [macAddress,setMacAddress]=useState(scannedType === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
+  const [macAddress, setMacAddress] = useState(scannedType === "mac" ? scannedMac ?? scannedCode : "");
+  const [showMacField, setShowMacField] = useState(false);
   const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
   const [imagePreparing,setImagePreparing]=useState(false);
   const [pendingWithdrawal, setPendingWithdrawal] = useState<{ payload: GenericRow; available: number; amount: number } | null>(null);
@@ -932,6 +936,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         condition: editEntry.condition ?? null,
         stock_quantity: startingQuantity,
         source_movement_id: editEntry.source_movement_id ?? null,
+        updated_at: editEntry.updated_at ?? null,
       };
     }
 
@@ -1000,13 +1005,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         if (!originalImage.ok) throw new Error("Das Artikelbild konnte vor der Verschiebung nicht geladen werden. Bitte erneut versuchen.");
         imageToSave = await originalImage.blob();
       }
+      const signature = JSON.stringify(payload);
+      if (pendingSave.current?.signature !== signature) pendingSave.current = { signature, id: newBookingId() };
       const response = await fetch(`${API_BASE}/api/inventory`, {
         method: isEditMode ? "PUT" : "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, request_id: pendingSave.current.id }),
       });
 
       if (response.status === 401) {
@@ -1026,12 +1033,23 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           const available = readStockQuantity(detail.available);
           if (available !== null && prepareWithdrawal(payload, available)) return;
         }
+        if (response.status === 409 && detail?.code === "stock_conflict") {
+          const available = readStockQuantity(detail.available);
+          if (available !== null) {
+            setPendingWithdrawal(null);
+            setEditEntry(current => current ? { ...current, stock_quantity: available } : current);
+            setQuantity(String(available));
+            setErrorMessage(errorDetail(data, saveErrorMessage));
+            return;
+          }
+        }
         throw new QrRequestError(errorDetail(data, `${saveErrorMessage} (HTTP ${response.status})`),response.status);
       }
       if (!data || typeof data !== "object" || (payload.withdrawal && (data as GenericRow).saved !== true)) {
         throw new QrRequestError("Der Server hat die Speicherung nicht bestätigt.", 502);
       }
 
+      pendingSave.current = null;
       let imageWarning="";
       if (imageToSave !== undefined) {
         const saved=data as GenericRow;
@@ -1057,7 +1075,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   if (loading) {
     return (
       <div className="asset-form-page">
-        <div className="asset-form-loading">
+        <div className="asset-form-loading" role="status">
+          <span className="asset-form-spinner" aria-hidden="true" />
           {isEditMode
             ? "Daten für den Inventareintrag " + "werden geladen ..."
             : "Stammdaten für den neuen Eintrag " + "werden geladen ..."}
@@ -1118,7 +1137,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         {scannedCode && scannedType !== "qr" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
           <label>Barcode enthält <select value={barcodeAssignment} onChange={event=>{
             const value=event.target.value as "mac" | "serial";setBarcodeAssignment(value);
-            setSerialNumber(value === "serial" ? scannedCode : "");setMacAddress(value === "mac" ? normalizeMac(scannedCode) ?? scannedCode : "");
+            const normalized = normalizeMac(scannedCode);
+            setSerialNumber(value === "serial" ? scannedCode : "");
+            setMacAddress(value === "mac" ? normalized ?? scannedCode : "");
+            setAssetTag(tag => tag === scannedCode || tag === normalized ? (value === "mac" ? normalized ?? scannedCode : scannedCode) : tag);
           }}><option value="serial">Seriennummer</option><option value="mac">MAC-Adresse</option></select></label>
         </div>}
         {scannedCode && <div className="asset-form-qr-notice">
@@ -1278,7 +1300,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             </fieldset>
             <fieldset className="asset-form-group">
               <legend>Spezifikationen – {categoryLabel(currentCategory)}</legend>
-              {currentSpecificationFields.length === 0 && (
+              {currentSpecificationFields.length === 0 && currentEntryType !== "asset" && (
                 <div className="asset-form-empty-info">
                   Für diese Kategorie sind keine Spezifikationsfelder definiert.
                 </div>
@@ -1337,6 +1359,18 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   </div>
                 );
               })}
+              {currentEntryType === "asset" && (showMacField || macAddress ? (
+                <div className="asset-form-row">
+                  <label htmlFor="asset-mac">MAC-Adresse:</label>
+                  <input id="asset-mac" className="asset-form-control" maxLength={50} value={macAddress} disabled={saving}
+                    autoCapitalize="characters" spellCheck={false} placeholder="AA:BB:CC:DD:EE:FF"
+                    onChange={event => { setShowMacField(true); setMacAddress(event.target.value); }}
+                    onBlur={() => {
+                      const mac = normalizeMac(macAddress);
+                      if (mac && !assetTag.trim() && !isEditMode) setAssetTag(mac);
+                    }} />
+                </div>
+              ) : <button type="button" className="asset-form-add-mac" disabled={saving} onClick={() => setShowMacField(true)}>MAC-Adresse hinzufügen</button>)}
             </fieldset>
             {/* Hybrid-Eintragsart */}
             {!isEditMode && currentTrackingMode === "hybrid" && (
@@ -1461,9 +1495,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     onChange={(event) => setSerialNumber(event.target.value)}
                   />
                 </div>
-              <div className="asset-form-row"><label htmlFor="asset-mac">MAC-Adresse:</label>
-                <input id="asset-mac" className="asset-form-control" maxLength={50} value={macAddress} disabled={saving}
-                  placeholder="AA:BB:CC:DD:EE:FF" onChange={event=>setMacAddress(event.target.value)}/></div>
                 <div className="asset-form-row">
                   <label htmlFor="asset-warranty-until">Garantie bis:</label>
                   <input

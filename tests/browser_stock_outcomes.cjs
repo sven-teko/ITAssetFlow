@@ -9,6 +9,7 @@ const run=(async()=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   let quantity=10,postCount=0,putCount=0,dropResponse=false,lastBooking=null,lastEdit=null,missingSnapshot=false,failSave=false,modelName="Router";
   const operations=new Map(),assets=[],archived=[];
+  let lastMove=null, staleMove=true, filterQuery=null;
   const meta={column_order:['asset_tag','product_model_name','stock_quantity','site_name'],default_visible_columns:['asset_tag','product_model_name','stock_quantity','site_name'],headers:{asset_tag:'Produkterkennung',product_model_name:'Produktmodell',stock_quantity:'Menge',site_name:'Standort'},status_labels:{available:'Verfügbar',in_use:'Im Einsatz'},condition_labels:{new:'Neu',used:'Gebraucht'},inventory_group_labels:{device:'Gerät'}};
   const source=()=>({id:'stock:101:11:new',_record_type:'stock',product_model_id:101,product_model_name:modelName,stock_quantity:quantity,storage_location_id:11,site_id:1,department_id:10,site_name:'Lager',department_name:'IT',storage_location:'Kiste',condition:'new',status:'available',purchase_date:'2026-11-02',_web_inventory_group:'device',_web_category_key:'router',_web_condition_key:'new'});
   const form={sites:[{id:1,name:'Lager'},{id:2,name:'Büro'}],departments:[{id:10,name:'IT',site_id:1},{id:20,name:'Betrieb',site_id:2}],storage_locations:[{id:11,name:'Kiste',site_id:1,department_id:10,is_active:true},{id:22,name:'Empfang',site_id:2,department_id:20,is_active:true}],employees:[],manufacturers:[{id:1,name:'Test'}],product_categories:[{id:1,name:'Router',code:'router',inventory_group:'device',specification_schema:{fields:[]}}],product_models:[{id:101,name:'Router',category_id:1,manufacturer_id:1,tracking_mode:'quantity',is_active:true,qr_code:'QR-CABLE',specifications:{}}],parent_assets:[]};
@@ -17,7 +18,7 @@ const run=(async()=>{
    lastBooking=body;quantity+=body.direction==='add'?body.quantity:-body.quantity;
    const detail=body.withdrawal;
    if(detail?.action==='archive')archived.push({id:'archive-'+archived.length,label:'Router',snapshot:{...source(),stock_quantity:body.quantity},...detail.reason,archived_at:'2026-11-02T12:00:00Z',archived_by_name:'Lagerist'});
-   if(detail?.action==='assets')for(const unit of detail.units)assets.push({...source(),...unit,id:assets.length+1,_record_type:'asset',stock_quantity:null,site_name:'Büro',condition:detail.target_condition,status:detail.target_status});
+   if(detail?.action==='assets')for(const unit of detail.units)assets.push({...source(),...unit,id:assets.length+1,_record_type:'asset',stock_quantity:null,site_name:'Büro',storage_location_id:detail.target_location_id,condition:detail.target_condition,status:detail.target_status});
    const result={saved:true,quantity,changed_quantity:body.quantity,asset_count:detail?.units?.length??0};operations.set(body.request_id,result);return result;
   };
   await page.route(url=>url.pathname.startsWith('/api/'),async route=>{
@@ -46,7 +47,21 @@ const run=(async()=>{
     postCount++;const body=req.postDataJSON();const result=book(body);
     if(dropResponse){dropResponse=false;return route.abort('failed');}return json(result);
    }
-   if(p==='/api/archive')return json({items:archived,total:archived.length});
+   if(p==='/api/inventory/move'){
+    lastMove=req.postDataJSON();
+    if(lastMove.entry_key.startsWith('stock:')){
+      if(staleMove){staleMove=false;quantity++;}
+      if(lastMove.expected_quantity!==quantity)return json({detail:{code:'stock_conflict',message:`Aktuell verfügbar: ${quantity} Stück.`,available:quantity}},409);
+      quantity-=lastMove.quantity;
+    }
+    return json({saved:true,quantity:lastMove.quantity??1});
+   }
+   if(p==='/api/inventory/stock')return json(book(req.postDataJSON()));
+   if(p==='/api/archive'){
+    filterQuery=Object.fromEntries(url.searchParams.entries());
+    const matches=archived.filter(row=>!filterQuery.reason||row.reason===filterQuery.reason);
+    return json({items:matches,total:matches.length});
+   }
    return json({detail:`Unbekannter Test-Endpunkt ${p}`},404);
   });
   const screenshot=async name=>{if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.SCREENSHOT_DIR,name+'.png')});}};
@@ -120,13 +135,66 @@ const run=(async()=>{
   await page.getByRole('button',{name:'Datei',exact:true}).click();await page.getByRole('button',{name:'Archiv',exact:true}).click();
   await page.getByRole('cell',{name:'Bei Kunde',exact:true}).waitFor();await page.getByRole('columnheader',{name:'Anzahl',exact:true}).waitFor();
   assert.equal(archived[0].snapshot.stock_quantity,2);
+  const filters=page.getByRole('form',{name:'Archiv filtern'});
+  await filters.getByLabel('Artikel suchen').fill('Router');
+  await filters.getByLabel('Standort').fill('Lager');
+  await filters.getByLabel('Archivgrund').selectOption('lost');
+  await filters.getByLabel('Von').fill('2026-11-02');
+  await filters.getByLabel('Bis').fill('2026-11-03');
+  await filters.getByRole('button',{name:'Filtern',exact:true}).click();
+  await page.getByText('Keine Treffer für diese Filter.').waitFor();
+  assert.deepEqual(filterQuery,{offset:'0',q:'Router',site:'Lager',reason:'lost',date_from:'2026-11-02',date_until:'2026-11-03'});
+  await filters.getByRole('button',{name:'Zurücksetzen',exact:true}).click();
+  await page.getByRole('cell',{name:'Bei Kunde',exact:true}).waitFor();
   await page.getByRole('button',{name:'Zurück zum Inventar',exact:true}).click();
   await page.setViewportSize({width:360,height:844});await openScanner();dialog=await withdraw(1);
   await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');await dialog.getByLabel('Grund *',{exact:true}).selectOption('other');
   await dialog.getByLabel('Eigener Löschgrund *',{exact:true}).fill('Verbraucht');await screenshot('mobile-entnahme');
   assert.equal(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
   await dialog.getByRole('button',{name:'Abbrechen',exact:true}).click();assert.equal(quantity,2);
+  await page.getByRole('button',{name:'Scanner schliessen'}).click();
+  await page.setViewportSize({width:1440,height:1000});
+  const search=page.getByLabel('Inventar durchsuchen');
+  await search.fill('aabb.cc11.2233');
+  const created=page.getByRole('cell',{name:'ROUTER-NEU-1',exact:true});
+  await created.waitFor();
+  await page.waitForFunction(()=>document.querySelectorAll('.inventory-table tbody tr').length===1);
+  await created.click({button:'right'});
+  assert.equal(await page.getByRole('menuitem',{name:'Lagerbestand ändern',exact:true}).count(),0);
+  await page.getByRole('menuitem',{name:'Umlagern',exact:true}).click();
+  const move=page.getByRole('dialog',{name:'Umlagern',exact:true});
+  await move.getByLabel('Ziellagerort *').selectOption('11');
+  await move.getByRole('button',{name:'Umlagern',exact:true}).click();
+  await move.waitFor({state:'hidden'});
+  assert.equal(lastMove.entry_key,'asset:1');
+  await search.clear();
+  const quantityCell=() => page.getByRole('cell',{name:String(quantity),exact:true});
+  await quantityCell().click({button:'right'});
+  await page.getByRole('menuitem',{name:'Umlagern',exact:true}).click();
+  await move.getByLabel('Ziellagerort *').selectOption('22');
+  await move.getByRole('button',{name:'Umlagern',exact:true}).click();
+  await move.getByRole('alert').filter({hasText:'Aktuell verfügbar: 3 Stück.'}).waitFor();
+  await move.getByText(/3 Stück verfügbar/).waitFor();
+  await move.getByRole('button',{name:'Umlagern',exact:true}).click();
+  await move.waitFor({state:'hidden'});
+  assert.equal(lastMove.expected_quantity,3);assert.equal(lastMove.quantity,1);assert.equal(quantity,2);
+  await quantityCell().click({button:'right'});
+  await page.getByRole('menuitem',{name:'Lagerbestand ändern',exact:true}).click();
+  const change=page.getByRole('dialog',{name:'Lagerbestand ändern',exact:true});
+  await change.getByLabel('Menge [Stück] *').fill('2');
+  await change.getByRole('button',{name:'Zugang buchen',exact:true}).click();
+  await change.waitFor({state:'hidden'});assert.equal(quantity,4);
+  await quantityCell().click({button:'right'});
+  await page.getByRole('menuitem',{name:'Lagerbestand ändern',exact:true}).click();
+  await change.getByLabel('Buchungsart').selectOption('remove');
+  await change.getByRole('button',{name:'Weiter zur Entnahme',exact:true}).click();
+  await dialog.getByLabel('Verwendung *',{exact:true}).selectOption('archive');
+  await dialog.getByLabel('Grund *',{exact:true}).selectOption('lost');
+  await dialog.getByRole('button',{name:'Entnahme buchen',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  assert.equal(quantity,3);
   assert.deepEqual(errors,[]);
+  console.log('PASS: Suche nach versteckter MAC, Archivfilter, Einzel-/Teilumlagerung, Konflikt mit Wiederbestätigung, Zugang und Entnahme über das Kontextmenü.');
   console.log('PASS: Archiv zeigt entnommene Anzahl; mobile Entnahme ohne Überlauf, Abbrechen ohne Buchung');
  }finally{await browser.close();await vite.close();}
 })();run.catch(e=>{console.error(e);process.exitCode=1;});module.exports=run;

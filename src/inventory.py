@@ -130,7 +130,6 @@ INVENTORY_GROUP_ALIASES = {
 PREFERRED_COLUMN_ORDER = [
     "asset_tag",
     "serial_number",
-    "mac_address",
     "product_model_name",
     "manufacturer_name",
     "product_category_name",

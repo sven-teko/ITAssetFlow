@@ -486,7 +486,9 @@ input:focus {
   background: #ffffff;
   border: 1px solid #d8dde5;
   border-radius: 6px;
+  min-width: 0;
   white-space: pre-line;
+  overflow-wrap: anywhere;
   user-select: text;
 }
 

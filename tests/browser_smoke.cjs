@@ -45,7 +45,7 @@ const run = (async () => {
       departments:[{id:10,name:'IT',site_id:1,organization_id:1},{id:20,name:'IT',site_id:2,organization_id:1}],
       storage_locations:[{id:11,name:'Lager',site_id:1,department_id:10,is_active:true,location_type:'warehouse'}],
       product_categories:[{id:1,name:'Laptop',code:'laptop',inventory_group:'device',specification_schema:{fields:[]}}],
-      manufacturers:[{id:1,name:'Keiner'}],
+      manufacturers:[{id:1,name:'Keiner'},{id:2,name:'Alpha'},{id:3,name:'Beta'}],
       employees:[
         {id:1,first_name:'Test',last_name:'Admin',email:'admin@example.test',department_id:10,is_active:true,auth_user_id:'auth-admin',app_role:'admin'},
         {id:2,first_name:'Maria',last_name:'Muster',email:'maria@example.test',department_id:20,is_active:true,auth_user_id:null,app_role:'viewer'},
@@ -148,13 +148,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.4.2 · 03.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.7.0 · 03.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.4.2');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.7.0');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -247,7 +247,8 @@ const run = (async () => {
     await page.getByRole('textbox',{name:'Vorname',exact:true}).fill('Anna');
     await page.getByRole('textbox',{name:'Nachname',exact:true}).fill('Beispiel');
     await page.getByRole('textbox',{name:'E-Mail (optional)',exact:true}).fill('anna@example.test');
-    await page.getByRole('textbox',{name:'Personalnummer',exact:true}).fill('E-200');
+    assert.equal(await page.getByRole('columnheader',{name:/Personalnr|Aktiv/}).count(),0);
+    assert.equal(await page.getByText('Inaktive anzeigen',{exact:true}).count(),0);
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     const saveProgress=page.getByRole('button',{name:'Wird gespeichert …',exact:true});
     await saveProgress.waitFor();
@@ -258,18 +259,15 @@ const run = (async () => {
     await page.getByText('Anna',{exact:true}).waitFor();
     const newEmployee=lastSettings.employees.find(row=>row.first_name==='Anna');
     assert.equal(newEmployee.department_ref,'id:20');
-    assert.equal(newEmployee.is_active,true);
+    assert.ok(!('is_active' in newEmployee));
+    assert.ok(!('employee_number' in newEmployee));
     assert.ok(!('auth_user_id' in newEmployee));
     const annaRow=page.getByRole('table',{name:'Mitarbeiter'}).locator('tbody tr').filter({hasText:'Anna'});
     await annaRow.dblclick();
     await page.getByRole('textbox',{name:'E-Mail (optional)',exact:true}).fill('anna.updated@example.test');
-    await page.getByLabel('Aktiv: Anna Beispiel',{exact:true}).uncheck();
     await page.getByRole('button',{name:'Übernehmen',exact:true}).click();
     await page.getByText('anna.updated@example.test',{exact:true}).waitFor();
-    assert.equal(lastSettings.employees.find(row=>row.first_name==='Anna').is_active,false);
-    await page.getByLabel('Inaktive anzeigen',{exact:true}).uncheck();
-    assert.equal(await page.getByText('Anna',{exact:true}).count(),0);
-    await page.getByLabel('Inaktive anzeigen',{exact:true}).check();
+    assert.ok(!('is_active' in lastSettings.employees.find(row=>row.first_name==='Anna')));
     await page.getByText('Anna',{exact:true}).click();
     page.once('dialog',dialog=>dialog.accept());
     await page.getByRole('button',{name:'Löschen',exact:true}).click();
@@ -279,11 +277,46 @@ const run = (async () => {
     assert.ok(lastSettings.deleted.employees.length>0);
     await page.getByLabel('Mitarbeiter nach Standort filtern').selectOption('id:1');
     await page.getByRole('table',{name:'Mitarbeiter'}).locator('tbody tr').filter({hasText:'Admin'}).dblclick();
-    assert.ok(await page.getByLabel('Aktiv: Test Admin',{exact:true}).isDisabled());
+    assert.equal(await page.getByRole('columnheader',{name:'Aktiv',exact:true}).count(),0);
     assert.ok(await page.getByRole('button',{name:'Löschen',exact:true}).isDisabled());
-    console.log('PASS: Mitarbeiter anlegen, bearbeiten, deaktivieren, löschen, Standortzuordnung und Kontoschutz');
+    console.log('PASS: Mitarbeiter anlegen, bearbeiten, löschen, Standortzuordnung und Kontoschutz ohne Personalnummer und Aktivstatus');
 
+    await page.getByRole('tab',{name:'Struktur',exact:true}).click();
+    const structure = page.getByRole('tablist',{name:'Strukturbereiche'});
+    const sitesTab = structure.getByRole('tab',{name:'Standorte',exact:true});
+    const departmentsTab = structure.getByRole('tab',{name:'Abteilungen',exact:true});
+    const locationsTab = structure.getByRole('tab',{name:'Lagerorte',exact:true});
+    assert.equal(await structure.getAttribute('aria-orientation'),'vertical');
+    await page.getByRole('table',{name:'Standorte',exact:true}).waitFor();
+    assert.equal(await page.getByRole('table',{name:'Abteilungen',exact:true}).count(),0);
+    await sitesTab.press('ArrowDown');
+    assert.equal(await departmentsTab.getAttribute('aria-selected'),'true');
+    await page.getByRole('table',{name:'Abteilungen',exact:true}).waitFor();
+    await locationsTab.click();
+    await page.getByRole('table',{name:'Lagerorte',exact:true}).waitFor();
+    assert.equal(await page.getByRole('table',{name:'Abteilungen',exact:true}).count(),0);
+    await page.setViewportSize({width:390,height:844});
+    await page.waitForFunction(()=>document.querySelector('.settings-structure-tabs')?.getAttribute('aria-orientation')==='horizontal');
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await locationsTab.press('ArrowRight');
+    await page.getByRole('table',{name:'Standorte',exact:true}).waitFor();
+    await page.setViewportSize({width:1440,height:1000});
+    await page.getByRole('tab',{name:'Hersteller',exact:true}).click();
+    const makers = page.getByRole('tabpanel',{name:'Hersteller',exact:true});
+    await makers.getByRole('row',{name:'Alpha',exact:true}).dblclick();
+    const makerInput = makers.locator('tbody input');
+    await makerInput.fill('Alpha angepasst');
+    await makers.getByRole('row',{name:'Beta',exact:true}).dblclick();
+    assert.equal(await makerInput.count(),1);
+    await makers.getByRole('cell',{name:'Alpha angepasst',exact:true}).waitFor();
+    await makers.getByRole('cell',{name:'Alpha angepasst',exact:true}).click();
+    await makers.getByRole('button',{name:'Bearbeiten',exact:true}).click();
+    assert.equal(await makerInput.count(),1);
+    assert.equal(await makerInput.inputValue(),'Alpha angepasst');
+    await makerInput.fill('Alpha');
+    console.log('PASS: Strukturtabs seitlich und mobil, Tastatur, Hersteller einzeln bearbeiten mit erhaltenem Entwurf');
     await page.getByRole('tab',{name:'Berechtigungen',exact:true}).click();
+    assert.equal(await page.getByText('Benutzerberechtigungen',{exact:true}).count(),0);
     const permissions=page.getByRole('group',{name:'Standorte für Lara Standort',exact:true});
     const siteTrigger=page.getByRole('button',{name:'Standorte für Lara Standort auswählen',exact:true});
     const adminTrigger=page.getByRole('button',{name:'Standorte für Test Admin auswählen',exact:true});

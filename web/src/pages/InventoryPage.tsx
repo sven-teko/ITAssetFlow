@@ -15,6 +15,7 @@ import LoadingIndicator from "../components/LoadingIndicator";
 import InventoryTable from "../components/InventoryTable";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
+import InventoryOperationDialog from "../components/InventoryOperationDialog";
 import EntryContextMenu from "../components/EntryContextMenu";
 import useRowContextMenu from "../hooks/useRowContextMenu";
 import useMediaQuery from "../hooks/useMediaQuery";
@@ -23,7 +24,7 @@ import useInventoryActions from "../hooks/useInventoryActions";
 import useInventoryColumns from "../hooks/useInventoryColumns";
 import useInventoryData from "../hooks/useInventoryData";
 import useInventoryView from "../hooks/useInventoryView";
-import type { DockPanelKind } from "../types/inventory";
+import type { DockPanelKind, InventoryRow } from "../types/inventory";
 import {
   getIdentifier,
   getRowKey,
@@ -51,6 +52,7 @@ export default function InventoryPage({
   const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [qrOpen, setQrOpen] = useState(false);
+  const [operation, setOperation] = useState<{ kind: "move" | "stock"; row: InventoryRow } | null>(null);
   const swipeStart = useRef<{ x: number; y: number; left?: boolean; right?: boolean } | null>(null);
   const tabs = ["navigation", "inventory", "detail"] as const;
   function switchTab(tab: typeof mobileView) { setMobileView(tab); }
@@ -107,8 +109,6 @@ export default function InventoryPage({
   const view = useInventoryView({
     inventory: data.inventory,
     meta: data.meta,
-    displayedColumns:
-      columns.displayedColumns,
     formatValue:
       columns.formatValue,
   });
@@ -589,7 +589,16 @@ export default function InventoryPage({
 
       {rowContext.menu && <EntryContextMenu x={rowContext.menu.x} y={rowContext.menu.y} disabled={!canEdit || loading}
         onClose={closeContext} onEdit={() => navigate(`/inventory/${encodeURIComponent(getRowKey(rowContext.menu!.row))}/edit`)}
+        onMove={() => setOperation({ kind: "move", row: rowContext.menu!.row })}
+        onChangeStock={rowContext.menu.row._record_type === "stock" ? () => setOperation({ kind: "stock", row: rowContext.menu!.row }) : undefined}
         onDelete={() => void actions.deleteEntries([rowContext.menu!.row])} />}
+      {operation && <InventoryOperationDialog kind={operation.kind} row={operation.row}
+        onCancel={() => setOperation(null)} onUnauthorized={handleUnauthorized}
+        onSuccess={async message => {
+          setOperation(null);
+          await data.loadData();
+          setStatus(message);
+        }} />}
 
       <div className="status-bar">
         <span>

@@ -127,7 +127,7 @@ class DateTests(unittest.TestCase):
         client.table.assert_not_called()
 
     def test_normalized_dates_reach_create_and_edit(self):
-        repo = AssetRepository(Mock())
+        repo = AssetRepository(Mock(), atomic_writes=False)
         payload = {"entry_type": "asset", "model": {"mode": "existing", "id": 1}, "asset": {"purchase_date": "21.10.2026", "warranty_until": "21.10.2028"}, "assignment": {"department_id": 10}, "edit": {"record_type": "asset", "id": 2}}
         with patch.object(repo, "_resolve_or_create_product_model", return_value=(1, "serialized", None, None)), patch.object(repo, "_validate_location_department"), patch.object(repo, "_create_serialized_asset", return_value={"id": 2}) as create, patch.object(repo, "_update_serialized_asset", return_value={"id": 2}) as update:
             repo.create_inventory_entry(payload)
@@ -137,6 +137,15 @@ class DateTests(unittest.TestCase):
 
 
 class EmployeeTests(unittest.TestCase):
+    def test_employee_settings_preserve_hidden_existing_fields(self):
+        current = {"id": 1, "email": None, "first_name": "Test", "last_name": "Alt",
+                   "employee_number": "E-200", "is_active": False, "auth_user_id": None}
+        client = FakeClient({"employees": [current]})
+        SettingsService(client).save({"employees": [{"id": 1, "first_name": "Test", "last_name": "Neu"}]})
+        self.assertEqual(client.rows["employees"][0]["employee_number"], "E-200")
+        self.assertFalse(client.rows["employees"][0]["is_active"])
+        self.assertEqual(client.rows["employees"][0]["last_name"], "Neu")
+
     def test_new_employee_uses_department_and_cannot_grant_login(self):
         client = FakeClient()
         SettingsService(client).save({"employees": [employee(app_role="admin", auth_user_id="spoofed")]})

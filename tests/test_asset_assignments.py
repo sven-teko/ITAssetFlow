@@ -46,7 +46,7 @@ class AssignmentDatabase(Database):
 class AssetAssignmentTests(unittest.TestCase):
     def setUp(self):
         self.db = AssignmentDatabase()
-        self.repo = AssetRepository(self.db)
+        self.repo = AssetRepository(self.db, atomic_writes=False)
         self.payload = {
             "entry_type": "asset", "edit": {"record_type": "asset", "id": 1},
             "model": {"mode": "existing", "id": 11}, "condition": "used",

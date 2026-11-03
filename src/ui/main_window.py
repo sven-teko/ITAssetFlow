@@ -17,6 +17,7 @@ from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
 from supabase import Client
 
 from settings_manager import SettingsManager
+from infrastructure.archive_reason import ArchiveReason
 from infrastructure.data_transfer_service import DataTransferService
 
 from .asset_create_dialog import AssetCreateDialog
@@ -2125,99 +2127,39 @@ class MainWindow(QMainWindow):
     @Slot()
     def show_delete_assets_dialog(self) -> None:
         assets = self.asset_table.get_selected_assets()
-
         if not assets:
-            QMessageBox.information(
-                self,
-                "Einträge löschen",
-                "Bitte zuerst mindestens einen Eintrag auswählen.",
-            )
+            QMessageBox.information(self, "Archivieren", "Bitte zuerst mindestens einen Eintrag auswählen.")
             return
 
-        identifiers = [
-            get_asset_identifier(asset)
-            for asset in assets[:8]
-        ]
-        preview = "\n".join(
-            f"• {identifier}"
-            for identifier in identifiers
-        )
-
+        reasons = {"Bei Kunde": "customer", "Defekt": "defective", "Ausgemustert": "retired",
+                   "Verloren": "lost", "Anderer Grund": "other"}
+        label, accepted = QInputDialog.getItem(self, "Archivieren", "Archivgrund:", list(reasons), editable=False)
+        if not accepted:
+            return
+        details: dict[str, Any] = {"reason": reasons[label]}
+        if label == "Bei Kunde":
+            value, accepted = QInputDialog.getText(self, "Archivieren", "Kundenname:")
+            details["customer_name"] = value
+        elif label == "Anderer Grund":
+            value, accepted = QInputDialog.getMultiLineText(self, "Archivieren", "Grund:")
+            details["note"] = value
+        elif label == "Defekt":
+            value, accepted = QInputDialog.getItem(self, "Archivieren", "Wurde der Artikel vernichtet?", ["Nein", "Ja"], editable=False)
+            details["destroyed"] = value == "Ja"
+        if not accepted:
+            return
+        try:
+            reason = ArchiveReason.model_validate(details)
+        except ValueError:
+            QMessageBox.warning(self, "Archivieren", "Bitte den Grund bzw. den Kundennamen vollständig eingeben.")
+            return
+        preview = "\n".join(f"• {get_asset_identifier(asset)}" for asset in assets[:8])
         if len(assets) > 8:
-            preview += (
-                f"\n• … und {len(assets) - 8} weitere"
-            )
-
-        stock_count = sum(
-            1
-            for asset in assets
-            if str(
-                asset.get("_record_type")
-                or ""
-            ).strip().casefold()
-            == "stock"
-        )
-        asset_count = len(assets) - stock_count
-
-        details: list[str] = []
-        if asset_count:
-            details.append(
-                (
-                    f"{asset_count} Einzelartikel wird endgültig gelöscht."
-                    if asset_count == 1
-                    else f"{asset_count} Einzelartikel werden endgültig gelöscht."
-                )
-            )
-        if stock_count:
-            details.append(
-                (
-                    f"{stock_count} Mengenbestand wird vollständig ausgebucht."
-                    if stock_count == 1
-                    else f"{stock_count} Mengenbestände werden vollständig ausgebucht."
-                )
-            )
-
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Löschen bestätigen")
-        dialog.setIcon(QMessageBox.Icon.Warning)
-        dialog.setText(
-            "<b>Wirklich löschen?</b>"
-        )
-        dialog.setInformativeText(
-            "\n".join(details)
-            + "\n\n"
-            + preview
-            + "\n\nDieser Vorgang kann nicht rückgängig gemacht werden."
-        )
-        dialog.setStandardButtons(
-            QMessageBox.StandardButton.Yes
-            | QMessageBox.StandardButton.Cancel
-        )
-        dialog.setDefaultButton(
-            QMessageBox.StandardButton.Cancel
-        )
-
-        delete_button = dialog.button(
-            QMessageBox.StandardButton.Yes
-        )
-        if delete_button is not None:
-            delete_button.setText("Löschen")
-
-        cancel_button = dialog.button(
-            QMessageBox.StandardButton.Cancel
-        )
-        if cancel_button is not None:
-            cancel_button.setText("Abbrechen")
-
-        if (
-            dialog.exec()
-            != QMessageBox.StandardButton.Yes
-        ):
-            return
-
-        self.inventory_controller.delete_inventory_entries(
-            assets
-        )
+            preview += f"\n• … und {len(assets) - 8} weitere"
+        if QMessageBox.question(self, "Archivieren", f"{len(assets)} Einträge archivieren?\n\n{preview}\n\nGrund: {label}",
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                                QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Yes:
+            self.inventory_controller.delete_inventory_entries(assets, reason)
 
     @Slot(object)
     def _entries_deleted(
@@ -2256,24 +2198,24 @@ class MainWindow(QMainWindow):
         if asset_count:
             parts.append(
                 (
-                    f"{asset_count} Einzelartikel gelöscht"
+                    f"{asset_count} Einzelartikel archiviert"
                     if asset_count != 1
-                    else "1 Einzelartikel gelöscht"
+                    else "1 Einzelartikel archiviert"
                 )
             )
         if stock_count:
             parts.append(
                 (
-                    f"{stock_count} Mengenbestände ausgebucht"
+                    f"{stock_count} Mengenbestände archiviert"
                     if stock_count != 1
-                    else "1 Mengenbestand ausgebucht"
+                    else "1 Mengenbestand archiviert"
                 )
             )
 
         self.statusBar().showMessage(
             " · ".join(parts)
             if parts
-            else f"{deleted_count} Einträge gelöscht.",
+            else f"{deleted_count} Einträge archiviert.",
             5000,
         )
 
@@ -2284,7 +2226,7 @@ class MainWindow(QMainWindow):
     ) -> None:
         QMessageBox.critical(
             self,
-            "Einträge konnten nicht gelöscht werden",
+            "Einträge konnten nicht archiviert werden",
             message,
         )
 

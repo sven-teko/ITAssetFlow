@@ -7,6 +7,7 @@ from typing import Any
 
 from supabase import Client
 
+from infrastructure.archive_reason import ArchiveReason
 from infrastructure.date_validation import normalize_inventory_dates
 from infrastructure.qr_service import QrService, normalize_qr_code
 from infrastructure.scanner_codes import code_values, normalize_mac
@@ -40,9 +41,11 @@ class AssetRepository:
         self,
         client: Client,
         asset_table_name: str = "assets",
+        *, atomic_writes: bool = True,
     ) -> None:
         self.client = client
         self.asset_table_name = asset_table_name
+        self._atomic_writes = atomic_writes
         self.catalog_warning: str | None = None
 
     # ------------------------------------------------------------------
@@ -154,70 +157,59 @@ class AssetRepository:
                 if image.get("item_key") in keyed:
                     keyed[image["item_key"]]["image_id"] = image["id"]
 
-    def delete_inventory_entries(
-        self,
-        entries: list[dict[str, Any]],
-    ) -> dict[str, int]:
-        """Löscht ausgewählte Inventareinträge.
-
-        Einzelartikel werden inklusive ihrer direkten Zuordnungen gelöscht.
-        Mengenbestand wird aus Gründen der Bestandsnachvollziehbarkeit nicht
-        aus der Bewegungshistorie entfernt. Stattdessen wird der aktuell
-        vorhandene Bestand per Korrekturbuchung vollständig ausgebucht.
-        """
-
-        if not isinstance(entries, list) or not entries:
-            raise ValueError("Keine Inventareinträge zum Löschen ausgewählt.")
-
-        normalized = [
-            entry
-            for entry in entries
-            if isinstance(entry, dict)
-        ]
-        if not normalized:
-            raise ValueError("Die ausgewählten Inventareinträge sind ungültig.")
-
-        # Zuerst alle Datensätze prüfen, bevor die erste Schreiboperation läuft.
-        for entry in normalized:
-            record_type = str(
-                entry.get("_record_type")
-                or "asset"
-            ).strip().casefold()
-
-            if record_type == "stock":
-                self._validate_stock_delete(entry)
-            elif record_type == "asset":
-                if entry.get("id") is None:
-                    raise ValueError(
-                        "Ein ausgewählter Einzelartikel besitzt keine ID."
-                    )
+    def delete_inventory_entries(self, entries: list[dict[str, Any]], reason: ArchiveReason) -> dict[str, int]:
+        """Archiviert die gesamte Auswahl in einer Transaktion."""
+        if not entries:
+            raise ValueError("Keine Inventareinträge zum Archivieren ausgewählt.")
+        keys = []
+        for row in entries:
+            record_type = row.get("_record_type", "asset")
+            if record_type == "asset" and row.get("id") is not None:
+                keys.append(f"asset:{row['id']}")
+            elif record_type == "stock" and all(row.get(key) is not None for key in ("product_model_id", "storage_location_id", "condition")):
+                keys.append(f"stock:{row['product_model_id']}:{row['storage_location_id']}:{row['condition']}")
             else:
-                raise ValueError(
-                    f"Unbekannter Inventartyp: {record_type or 'leer'}"
-                )
+                raise ValueError("Ein ausgewählter Inventareintrag besitzt keine gültige Kennung.")
+        result = self.client.rpc("archive_inventory_items", {
+            "p_keys": list(dict.fromkeys(keys)), "p_reason": reason.model_dump(),
+        }).execute().data
+        if not isinstance(result, dict) or not result.get("deleted_count"):
+            raise RuntimeError("Die Archivierung wurde nicht bestätigt.")
+        return result
 
-        asset_count = 0
-        stock_count = 0
-
-        for entry in normalized:
-            record_type = str(
-                entry.get("_record_type")
-                or "asset"
-            ).strip().casefold()
-
-            if record_type == "stock":
-                if self._delete_stock_level(entry):
-                    stock_count += 1
-                continue
-
-            self._delete_asset(entry.get("id"))
-            asset_count += 1
-
-        return {
-            "deleted_count": asset_count + stock_count,
-            "asset_count": asset_count,
-            "stock_count": stock_count,
-        }
+    def _save_inventory_entry_atomic(self, payload: dict[str, Any], *, editing: bool) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Ungültige Inventardaten.")
+        payload = normalize_inventory_dates(payload)
+        codes = payload.get("scanner_codes")
+        if codes is not None:
+            if not isinstance(codes, dict):
+                raise ValueError("Ungültige Scanner-Kennungen.")
+            payload["scanner_codes"] = code_values(codes)
+        if payload.get("qr_code"):
+            payload["qr_code"] = normalize_qr_code(payload["qr_code"])
+        if isinstance(payload.get("asset"), dict):
+            asset = payload["asset"]
+            payload["asset"] = {**asset, **code_values(asset)}
+            if "mac_address" in asset:
+                payload["asset"]["mac_address"] = normalize_mac(asset["mac_address"])
+        edit = payload.get("edit")
+        stock = payload.get("stock")
+        if editing and not isinstance(edit, dict):
+            raise ValueError("Bearbeitungsinformationen fehlen.")
+        if editing and edit.get("record_type") == "stock" and isinstance(stock, dict):
+            from infrastructure.stock_booking import reduce_edited_stock
+            try:
+                desired = Decimal(str(stock.get("quantity")))
+                expected = Decimal(str(edit.get("stock_quantity")))
+            except (InvalidOperation, ValueError):
+                desired = expected = Decimal("NaN")
+            if payload.get("withdrawal") or (desired.is_finite() and expected.is_finite() and desired < expected):
+                return reduce_edited_stock(self.client, payload)
+        result = self.client.rpc("save_inventory_entry", {"p_payload": payload, "p_editing": editing}).execute().data
+        if not isinstance(result, dict) or result.get("entry_type") not in {"asset", "stock"}:
+            raise RuntimeError("Der Server hat die Speicherung nicht bestätigt.")
+        return result
 
     def load_create_form_data(self) -> dict[str, list[dict[str, Any]]]:
         """Lädt die Stammdaten für den Dialog ``Neuer Eintrag``.
@@ -347,7 +339,7 @@ class AssetRepository:
                 self.asset_table_name,
                 "id,product_model_id,asset_tag,serial_number,purchase_date,"
                 "new_price,warranty_until,note,retired_at,status,"
-                "specifications,condition,qr_code,ean,mac_address",
+                "specifications,condition,qr_code,ean,mac_address,updated_at",
             )
             rows = [
                 row
@@ -503,6 +495,8 @@ class AssetRepository:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         """Aktualisiert einen bestehenden Einzelartikel oder Mengenbestand."""
+        if self._atomic_writes:
+            return self._save_inventory_entry_atomic(payload, editing=True)
 
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Daten für den Inventareintrag.")
@@ -633,6 +627,9 @@ class AssetRepository:
         Der Aufruf benötigt aufgrund der vorhandenen RLS-Policies einen als
         ``admin`` verknüpften Supabase-Benutzer.
         """
+
+        if self._atomic_writes:
+            return self._save_inventory_entry_atomic(payload, editing=False)
 
         if not isinstance(payload, dict):
             raise ValueError("Ungültige Daten für den neuen Inventareintrag.")
@@ -1278,15 +1275,17 @@ class AssetRepository:
     def _latest_stock_metadata(self, model_id: Any, location_id: Any, condition: str) -> dict[str, Any]:
         candidates = []
         for direction in ("to", "from"):
-            response = (
+            query = (
                 self.client.table("stock_movements")
                 .select("id,department_id,purchase_date,new_price,status,note,moved_at")
                 .eq("product_model_id", model_id)
                 .eq(f"{direction}_storage_location_id", location_id)
                 .eq(f"{direction}_condition", condition)
                 .not_.is_("purchase_date", "null")
-                .order("moved_at", desc=True).order("id", desc=True).limit(1).execute()
             )
+            if direction == "from":
+                query = query.neq("movement_type", "transfer")
+            response = query.order("moved_at", desc=True).order("id", desc=True).limit(1).execute()
             candidates.extend(row for row in (response.data or []) if isinstance(row, dict))
         return max(candidates, key=lambda row: (str(row.get("moved_at") or ""), row.get("id") or 0), default={})
 
@@ -1529,110 +1528,6 @@ class AssetRepository:
 
         if isinstance(department, dict):
             entry["site_id"] = department.get("site_id")
-
-    @staticmethod
-    def _validate_stock_delete(
-        entry: dict[str, Any],
-    ) -> None:
-        required = (
-            ("product_model_id", "Produktmodell"),
-            ("storage_location_id", "Lagerort"),
-            ("condition", "Zustand"),
-        )
-        for field_name, label in required:
-            value = entry.get(field_name)
-            if value is None or not str(value).strip():
-                raise ValueError(
-                    f"Mengenbestand kann nicht gelöscht werden: {label} fehlt."
-                )
-
-    def _delete_asset(
-        self,
-        asset_id: Any,
-    ) -> None:
-        """Entfernt ein serialisiertes Asset samt direkten Zuordnungen."""
-
-        result = self.client.rpc("delete_scoped_asset", {"p_asset_id": asset_id}).execute()
-        if result.data is not True:
-            raise ValueError("Das Gerät wurde nicht gefunden oder konnte nicht gelöscht werden.")
-
-    def _delete_stock_level(
-        self,
-        entry: dict[str, Any],
-    ) -> bool:
-        """Bucht den aktuellen Mengenbestand der ausgewählten Zeile auf 0."""
-
-        product_model_id = entry.get("product_model_id")
-        storage_location_id = entry.get("storage_location_id")
-        condition = str(entry.get("condition") or "").strip().casefold()
-
-        response = (
-            self.client
-            .table("stock_levels")
-            .select("quantity")
-            .eq("product_model_id", product_model_id)
-            .eq("storage_location_id", storage_location_id)
-            .eq("condition", condition)
-            .limit(1)
-            .execute()
-        )
-
-        rows = [
-            row
-            for row in (response.data or [])
-            if isinstance(row, dict)
-        ]
-        if not rows:
-            return False
-
-        try:
-            current_quantity = Decimal(
-                str(rows[0].get("quantity") or 0)
-            )
-        except (InvalidOperation, ValueError, TypeError) as exc:
-            raise ValueError(
-                "Der aktuelle Mengenbestand konnte nicht gelesen werden."
-            ) from exc
-
-        if current_quantity <= 0:
-            return False
-
-        location_response = (
-            self.client
-            .table("storage_locations")
-            .select("department_id")
-            .eq("id", storage_location_id)
-            .limit(1)
-            .execute()
-        )
-        location_rows = [
-            row
-            for row in (location_response.data or [])
-            if isinstance(row, dict)
-        ]
-        department_id = (
-            location_rows[0].get("department_id")
-            if location_rows
-            else None
-        )
-
-        movement = {
-            "product_model_id": product_model_id,
-            "from_storage_location_id": storage_location_id,
-            "to_storage_location_id": None,
-            "quantity": float(current_quantity),
-            "movement_type": "adjustment",
-            "from_condition": condition,
-            "to_condition": None,
-            "department_id": department_id,
-            "note": (
-                "Bestand über ITAssetFlow über "
-                "„Einträge löschen“ vollständig ausgebucht."
-            ),
-        }
-
-        self.client.table("stock_movements").insert(movement).execute()
-        return True
 
     def _cleanup_failed_create(
         self,

@@ -372,7 +372,7 @@ export default function InventorySidebar({
         <input
           id="inventory-search"
           type="search"
-          placeholder="Alle sichtbaren Spalten durchsuchen ..."
+          placeholder="Name, Kennung, Seriennummer, Code …"
           value={search}
           disabled={loading}
           onChange={(event) =>
@@ -469,7 +469,7 @@ export default function InventorySidebar({
         </label>
 
 
-        <div className="selection-box">
+        <div className="selection-box" title={selectionCount === 1 ? selectedIdentifiers[0] : undefined}>
           {selectionText}
         </div>
 

@@ -28,8 +28,10 @@ const run=(async()=>{
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261029093456_site_permissions.sql'),'utf8'));
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261102145032_inventory_archive_images.sql'),'utf8'));
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261103075158_archive_permanent_delete.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261103083104_archive_restore.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/20261103103600_archive_restore_roles.sql'),'utf8'));
   await asUser('admin',async()=>{await q('SELECT public.set_employee_site_access(2,ARRAY[1]::bigint[])');await q('SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])');});
-  let archivedImage,hiddenImage;
+  let archivedImage,hiddenImage,assetArchiveId,stockArchiveId,hiddenArchiveId;
   await asUser('admin',async()=>{hiddenImage=(await q('SELECT public.set_inventory_image($1,$2) id',['asset:20','aGlkZGVu']))[0].id;});
   await asUser('editor',async()=>{
    const first=(await q('SELECT public.set_inventory_image($1,$2) id',['asset:10',Buffer.from('image-a').toString('base64')]))[0].id;
@@ -47,6 +49,7 @@ const run=(async()=>{
    const result=(await q('SELECT public.archive_inventory_items($1,$2) result',[['asset:10'],{reason:'customer',customer_name:'Kunde Beispiel',note:'Übergeben'}]))[0].result;
    assert.equal(result.deleted_count,1);
    const item=(await q('SELECT * FROM public.inventory_archive'))[0];
+   assetArchiveId=item.id;
    assert.equal(item.customer_name,'Kunde Beispiel');assert.equal(item.snapshot.serial_number,'SER-42');assert.equal(item.image_id,archivedImage);
    assert.ok((await q('SELECT archived_at FROM public.assets WHERE id=10'))[0].archived_at);
    assert.equal((await q('SELECT is_current FROM public.inventory_images WHERE id=$1',[archivedImage]))[0].is_current,false);
@@ -54,8 +57,9 @@ const run=(async()=>{
    await rejected('SELECT public.set_inventory_image($1,$2)',['asset:10','aW1hZ2U='],'42501');
    await q('SELECT public.archive_inventory_items($1,$2)',[['stock:101:11:used'],{reason:'defective',destroyed:true,note:'Vernichtet'}]);
    assert.equal(Number((await q('SELECT quantity FROM public.stock_levels WHERE product_model_id=101'))[0].quantity),0);
-   const stock=(await q("SELECT snapshot FROM public.inventory_archive WHERE record_type='stock'"))[0].snapshot;
-   assert.equal(Number(stock.stock_quantity),5);
+   const stock=(await q("SELECT id,snapshot FROM public.inventory_archive WHERE record_type='stock'"))[0];
+   stockArchiveId=stock.id;
+   assert.equal(Number(stock.snapshot.stock_quantity),5);
   });
   let movedImage;
   await asUser('admin',async()=>{
@@ -66,18 +70,42 @@ const run=(async()=>{
    assert.equal((await q('SELECT id FROM public.inventory_images WHERE id=$1',[movedImage])).length,0);
    await rejected('SELECT public.set_inventory_image($1,$2)',['asset:11','aW1hZ2U='],'42501');
   });
-  await asUser('admin',async()=>{await q('SELECT public.archive_inventory_items($1,$2)',[['asset:20'],{reason:'other',note:'Altbestand'}]);});
+  await asUser('admin',async()=>{
+   await q('SELECT public.archive_inventory_items($1,$2)',[['asset:20'],{reason:'other',note:'Altbestand'}]);
+   hiddenArchiveId=(await q("SELECT id FROM public.inventory_archive WHERE source_key='asset:20'"))[0].id;
+  });
   await asUser('viewer',async()=>{
+   await rejected('SELECT public.restore_inventory_archive($1)',[assetArchiveId],'42501');
    assert.equal(Number((await q('SELECT count(*) n FROM public.inventory_archive'))[0].n),2);
    assert.equal((await q('SELECT image_data FROM public.inventory_images WHERE id=$1',[archivedImage]))[0].image_data,Buffer.from('image-b').toString('base64'));
    await rejected('SELECT public.archive_inventory_items($1,$2)',[['asset:11'],{reason:'lost'}],'42501');
    await rejected('SELECT public.set_inventory_image($1,$2)',['asset:11','aW1hZ2U='],'42501');
    assert.equal((await q('DELETE FROM public.inventory_archive RETURNING id')).length,0);
   });
+  await asUser('admin',async()=>{
+   await q('UPDATE public.storage_locations SET department_id=20 WHERE id=11');
+   await rejected('SELECT public.restore_inventory_archive($1)',[stockArchiveId],'P0001');
+   assert.equal((await q('SELECT id FROM public.inventory_archive WHERE id=$1',[stockArchiveId])).length,1);
+   await q('UPDATE public.storage_locations SET department_id=10 WHERE id=11');
+  });
   await asUser('editor',async()=>{
+   await rejected('SELECT public.restore_inventory_archive($1)',[hiddenArchiveId],'P0002');
    assert.equal((await q('DELETE FROM public.inventory_archive RETURNING id')).length,0);
+   await rejected('UPDATE public.assets SET archived_at=NULL WHERE id=10',[],'42501');
+   const restore=async id=>(await q('SELECT public.restore_inventory_archive($1) result',[id]))[0].result;
+   assert.deepEqual(await restore(assetArchiveId),{restored:true,key:'asset:10',quantity:1});
+   assert.equal((await q('SELECT archived_at FROM public.assets WHERE id=10'))[0].archived_at,null);
+   assert.equal((await q('SELECT is_current FROM public.inventory_images WHERE id=$1',[archivedImage]))[0].is_current,true);
+   assert.equal((await q('SELECT serial_number FROM public.assets WHERE id=10'))[0].serial_number,'SER-42');
+   assert.deepEqual(await restore(stockArchiveId),{restored:true,key:'stock:101:11:used',quantity:5});
+   await rejected('SELECT public.restore_inventory_archive($1)',[stockArchiveId],'P0002');
+   assert.equal(Number((await q('SELECT quantity FROM public.stock_levels WHERE product_model_id=101'))[0].quantity),5);
+   assert.equal(Number((await q("SELECT count(*) n FROM public.stock_movements WHERE movement_type='return'"))[0].n),1);
   });
   await asUser('admin',async()=>{
+   const restore=async id=>(await q('SELECT public.restore_inventory_archive($1) result',[id]))[0].result;
+   assert.equal((await restore(hiddenArchiveId)).restored,true);
+   await q('SELECT public.archive_inventory_items($1,$2)',[['asset:10'],{reason:'lost'}]);
    const movements=(await q('SELECT count(*) n FROM public.stock_movements'))[0].n;
    assert.equal((await q("DELETE FROM public.inventory_archive WHERE source_key='asset:10' RETURNING id")).length,1);
    assert.equal((await q("SELECT id FROM public.inventory_archive WHERE source_key='asset:10'")).length,0);
@@ -85,6 +113,7 @@ const run=(async()=>{
    assert.equal((await q('SELECT count(*) n FROM public.stock_movements'))[0].n,movements);
    assert.equal((await q("DELETE FROM public.inventory_archive WHERE source_key='asset:10' RETURNING id")).length,0);
   });
+  console.log('PASS: Standortgeschützte Wiederherstellung durch Bearbeiter, Originalbild, Vollbestand und keine doppelte Rückbuchung');
   console.log('PASS: Nur Admins löschen Archiveinträge endgültig; Artikel und Lagerbuchungen bleiben unverändert');
   console.log('PASS: Archivgründe, Kundenname, Vernichtung, atomare Stapel, Geräte/Mengen, unveränderte Historie, dauerhafte Bilder und echte Standort-RLS');
  }finally{await db.close();}

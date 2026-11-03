@@ -393,22 +393,19 @@ class SettingsService:
                     "Abteilung des Mitarbeiters",
                 )
 
+            row_id = item.get("id")
             row = {
-                "employee_number": self._none_if_blank(
-                    item.get("employee_number")
-                ),
                 "first_name": first_name,
                 "last_name": last_name,
-                "email": self._none_if_blank(
-                    item.get("email")
-                ),
+                "email": self._none_if_blank(item.get("email")),
                 "department_id": department_id,
-                "is_active": bool(
-                    item.get("is_active", True)
-                ),
             }
-
-            row_id = item.get("id")
+            # Current clients do not edit these fields. Preserve existing data
+            # and account status when an older field is not supplied.
+            if "employee_number" in item:
+                row["employee_number"] = self._none_if_blank(item.get("employee_number"))
+            if "is_active" in item or row_id is None:
+                row["is_active"] = bool(item.get("is_active", True))
 
             if row_id is None:
                 # Normale Mitarbeiter ohne Auth-Verknüpfung können weiterhin

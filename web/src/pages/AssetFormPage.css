@@ -291,3 +291,24 @@ select.asset-form-control {
   .asset-form-actions { position: static; }
   .asset-form-page { scroll-padding-bottom: 16px; }
 }
+.asset-form-withdrawal-hint {
+  margin: 4px 0 12px;
+  padding: 9px 12px;
+  border-left: 3px solid #25718b;
+  background: #edf5f8;
+  color: #23465b;
+}
+
+.asset-form-loading { display: flex; align-items: center; gap: 12px; }
+.asset-form-spinner {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #cdd8e3;
+  border-top-color: #2b5f91;
+  border-radius: 50%;
+  animation: asset-form-spin .8s linear infinite;
+}
+@keyframes asset-form-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .asset-form-spinner { animation: none; } }
+.asset-form-add-mac { justify-self: start; }

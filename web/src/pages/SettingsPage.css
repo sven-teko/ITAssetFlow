@@ -6,11 +6,9 @@
 .settings-employee-filters select, .settings-employee-filters input[type="search"] {
   min-height: 34px; max-width: 260px; padding: 6px 8px; background: #fff; border: 1px solid #cbd3dd; border-radius: 4px;
 }
-.settings-employee-filters > .settings-employee-checkbox { flex-direction: row; align-items: center; min-height: 34px; }
-.settings-employees-table { min-width: 1000px; }
+.settings-employees-table { min-width: 640px; }
 .settings-employees-table th:nth-child(3) { width: 23%; }
-.settings-employees-table th:nth-child(6) { width: 22%; }
-.settings-employee-active { text-align: center; }
+.settings-employees-table th:nth-child(5) { width: 22%; }
 .settings-employee-count { margin-left: auto; color: #66717c; font-size: 13px; }
 .settings-employee-note { margin: 0; color: #66717c; font-size: 13px; line-height: 1.5; }
 
@@ -181,6 +179,41 @@
   flex-direction: column;
   gap: 16px;
   background: #fafbfc;
+}
+
+.settings-structure-layout {
+  display: grid;
+  grid-template-columns: minmax(120px, 155px) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+.settings-structure-tabs {
+  display: grid;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid #d8dde3;
+  border-radius: 6px;
+  background: #eef2f6;
+}
+.settings-structure-tabs button {
+  width: 100%;
+  min-height: 38px;
+  text-align: left;
+  color: #334155;
+  border: 1px solid transparent;
+  background: transparent;
+}
+.settings-structure-tabs button[aria-selected="true"] {
+  color: #17446d;
+  background: #fff;
+  border-color: #a5bfd8;
+  font-weight: 600;
+}
+.settings-structure-tabs button:focus-visible { outline: 2px solid #3e6c95; outline-offset: 1px; }
+@media (max-width: 620px) {
+  .settings-structure-layout { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .settings-structure-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .settings-structure-tabs button { text-align: center; padding-inline: 3px; }
 }
 
 .settings-single-page,
@@ -513,22 +546,6 @@ select.settings-cell-editor {
 }
 
 /* Benutzerberechtigungen. */
-
-.settings-permissions-intro {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  color: #4b5563;
-  background: #f8fafc;
-  border: 1px solid #d8dde3;
-  border-radius: 5px;
-}
-
-.settings-permissions-intro strong {
-  color: #111827;
-}
 
 .settings-role-select {
   width: calc(100% - 12px);

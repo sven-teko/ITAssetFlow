@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 
-type Props = { x: number; y: number; disabled: boolean; onEdit: () => void; onDelete: () => void; onClose: () => void };
+type Props = { x: number; y: number; disabled: boolean; onEdit: () => void; onMove: () => void; onChangeStock?: () => void; onDelete: () => void; onClose: () => void };
 
-export default function EntryContextMenu({ x, y, disabled, onEdit, onDelete, onClose }: Props) {
+export default function EntryContextMenu({ x, y, disabled, onEdit, onMove, onChangeStock, onDelete, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -19,10 +19,13 @@ export default function EntryContextMenu({ x, y, disabled, onEdit, onDelete, onC
       if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); onClose(); }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault(); const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
-        buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + 1) % buttons.length]?.focus();
+        const step = event.key === "ArrowUp" ? -1 : 1;
+        buttons[(buttons.indexOf(document.activeElement as HTMLButtonElement) + step + buttons.length) % buttons.length]?.focus();
       }
     }}>
     <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onEdit(); } }}>Eintrag bearbeiten</button>
+    <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onMove(); } }}>Umlagern</button>
+    {onChangeStock && <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onChangeStock(); } }}>Lagerbestand ändern</button>}
     <button type="button" role="menuitem" aria-disabled={disabled} onClick={() => { if (!disabled) { onClose(); onDelete(); } }}>Eintrag löschen</button>
   </div>;
 }

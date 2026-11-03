@@ -75,7 +75,7 @@ class ScannerSchemaTests(unittest.TestCase):
             "asset": {"asset_tag": "PC-001", "purchase_date": "2026-10-01", "note": "Bearbeitet", "status": "available"},
             "assignment": {"department_id": 2},
         }
-        AssetRepository(db).update_inventory_entry(payload)
+        AssetRepository(db, atomic_writes=False).update_inventory_entry(payload)
         asset = db.rows["assets"][0]
         self.assertEqual(asset["note"], "Bearbeitet")
         self.assertEqual(asset["serial_number"], None)

@@ -25,7 +25,6 @@ type AssetDetailPanelProps = {
 const GENERAL_DETAIL_FIELDS = [
   "asset_tag",
   "serial_number",
-  "mac_address",
   "product_model_name",
   "manufacturer_name",
   "product_category_name",
@@ -596,7 +595,7 @@ export default function AssetDetailPanel({
 
 
   const specificationRows =
-    specificationFields
+    specificationFields.filter(field => field !== "spec_mac_address")
       .map(
         (field) => {
           const value =
@@ -644,6 +643,12 @@ export default function AssetDetailPanel({
           row !== null,
       );
 
+
+  const macValues = rows.map(row => [row.mac_address, row.spec_mac_address].find(value => typeof value === "string" && value.trim()));
+  const mac = macValues[0];
+  if (typeof mac === "string" && macValues.every(value => value === mac)) {
+    specificationRows.push({ field: "spec_mac_address", label: "MAC-Adresse", value: mac });
+  }
 
   const title =
     multiple

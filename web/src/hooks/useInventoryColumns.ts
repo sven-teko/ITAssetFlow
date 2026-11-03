@@ -75,7 +75,7 @@ export default function useInventoryColumns({
 
   const availableColumns = useMemo(() => {
     if (!meta) return [];
-    const available = meta.column_order;
+    const available = meta.column_order.filter(column => column !== "mac_address");
     const columnOrder = preferences?.column_order ?? [];
     return [
       ...columnOrder.filter((column) => available.includes(column)),

@@ -7,6 +7,8 @@ import type {
   InventoryFilters,
 } from "../components/InventorySidebar";
 import type { InventoryMeta, InventoryRow } from "../types/inventory";
+import { DEFAULT_INVENTORY_META } from "../utils/defaultInventoryMeta";
+import { normalizeMac } from "../utils/scannerCodes";
 import { getIdentifier, getRowKey, normalizeText } from "../utils/inventory";
 
 function emptyFilters(): InventoryFilters {
@@ -55,14 +57,12 @@ function mapOptions(values: Map<string, string>): FilterOption[] {
 type UseInventoryViewOptions = {
   inventory: InventoryRow[];
   meta: InventoryMeta | null;
-  displayedColumns: string[];
   formatValue: (column: string, value: unknown) => string;
 };
 
 export default function useInventoryView({
   inventory,
   meta,
-  displayedColumns,
   formatValue,
 }: UseInventoryViewOptions) {
   const [search, setSearch] = useState("");
@@ -110,6 +110,12 @@ export default function useInventoryView({
 
   const filteredRows = useMemo(() => {
     const searchValue = search.trim().toLocaleLowerCase();
+    const macQuery = normalizeMac(searchValue);
+    const searchColumns = new Set([
+      ...(meta?.column_order ?? DEFAULT_INVENTORY_META.column_order),
+      "asset_tag", "serial_number", "mac_address", "qr_code", "ean",
+      "product_model_qr_code", "product_model_ean", "product_model_sku", "product_model_part_number",
+    ]);
 
     return inventory.filter((row) => {
       if (filters.statuses.size > 0 && !filters.statuses.has(normalizeText(row.status))) {
@@ -162,13 +168,13 @@ export default function useInventoryView({
         return true;
       }
 
-      return displayedColumns.some((column) =>
-        formatValue(column, row[column])
-          .toLocaleLowerCase()
-          .includes(searchValue),
-      );
+      if (macQuery && [row.mac_address, row.asset_tag].some(value => typeof value === "string" && normalizeMac(value) === macQuery)) return true;
+      for (const column of searchColumns) {
+        if (formatValue(column, row[column]).toLocaleLowerCase().includes(searchValue)) return true;
+      }
+      return false;
     });
-  }, [displayedColumns, filters, formatValue, inventory, search]);
+  }, [filters, formatValue, inventory, meta, search]);
 
   // Verdeckte Zeilen dürfen auch im Render unmittelbar nach einem Filterwechsel
   // nicht bearbeitet oder gelöscht werden.

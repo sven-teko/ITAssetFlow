@@ -5,3 +5,6 @@
 .item-image-picker input[type=file] { width: 100%; max-width: 100%; margin-bottom: 12px; }
 .inventory-image-warning { padding: 12px 18px; background: #fff5dc; color: #725013; display: flex; align-items: center; gap: 16px; }
 .inventory-image-warning button { margin-left: auto; }
+.item-image-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.item-image-camera { display: none; }
+@media (pointer: coarse), (max-width: 600px) { .item-image-camera { display: inline-flex; } }

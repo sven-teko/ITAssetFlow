@@ -70,7 +70,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(db.writes, [])
 
     def test_unknown_ean_never_replaces_internal_asset_tag(self):
-        repo = AssetRepository(Mock())
+        repo = AssetRepository(Mock(), atomic_writes=False)
         payload = {"scanner_codes": {"qr_code": None, "ean": "4006381333931"}, "model": {"mode": "existing", "id": 1}, "asset": {"asset_tag": "IT-123", "purchase_date": "2026-10-22"}, "assignment": {"department_id": 2}}
         with patch.object(repo, "_resolve_or_create_product_model", return_value=(1, "serialized", None, None)), patch.object(repo, "_validate_location_department"), patch.object(repo, "_create_serialized_asset", return_value={"id": 1}) as create:
             repo.create_inventory_entry(payload)

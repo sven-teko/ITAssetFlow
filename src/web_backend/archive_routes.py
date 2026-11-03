@@ -1,12 +1,14 @@
 """Standortgeschütztes Archiv und optionale Artikelbilder."""
 import base64
+from datetime import date
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from infrastructure.archive_reason import ArchiveReason
 
 
-def create_archive_router(get_web_session, require_editor_session, require_admin_session):
+def create_archive_router(get_web_session, require_editor_session, require_admin_session, on_inventory_changed):
     router = APIRouter(prefix="/api", tags=["archive", "images"])
 
     def change_image(web_session, key, data):
@@ -18,10 +20,24 @@ def create_archive_router(get_web_session, require_editor_session, require_admin
             raise HTTPException(503, "Das Artikelbild konnte nicht gespeichert werden. Bitte erneut versuchen.") from error
 
     @router.get("/archive")
-    def archive(response: Response, offset: int = Query(0, ge=0), web_session=Depends(get_web_session)):
+    def archive(response: Response, offset: int = Query(0, ge=0), q: str = Query("", max_length=160),
+                site: str = Query("", max_length=160), reason: Literal["", "customer", "defective", "retired", "lost", "other"] = "",
+                date_from: date | None = None, date_until: date | None = None,
+                web_session=Depends(get_web_session)):
+        response.headers["Cache-Control"] = "no-store"
+        if date_from and date_until and date_from > date_until:
+            raise HTTPException(422, "Das Enddatum muss am oder nach dem Startdatum liegen.")
+        if q.strip() or site.strip() or reason or date_from or date_until:
+            try:
+                return web_session.client.rpc("search_inventory_archive", {
+                    "p_offset": offset, "p_query": q.strip(), "p_site": site.strip(), "p_reason": reason,
+                    "p_from": date_from.isoformat() if date_from else None,
+                    "p_until": date_until.isoformat() if date_until else None,
+                }).execute().data
+            except Exception as error:
+                raise HTTPException(503, "Das Archiv konnte nicht durchsucht werden.") from error
         result = (web_session.client.table("inventory_archive").select("*", count="exact")
                   .order("archived_at", desc=True).order("id", desc=True).range(offset, offset+49).execute())
-        response.headers["Cache-Control"] = "no-store"
         return {"items": result.data or [], "total": result.count or 0}
 
     @router.delete("/archive/{archive_id}", status_code=204)
@@ -36,6 +52,24 @@ def create_archive_router(get_web_session, require_editor_session, require_admin
         if not result.data:
             raise HTTPException(404, "Dieser Archiveintrag ist nicht mehr vorhanden.")
         return Response(status_code=204)
+
+    @router.post("/archive/{archive_id}/restore")
+    def restore_archive_entry(archive_id: UUID, web_session=Depends(require_editor_session)):
+        try:
+            result = web_session.client.rpc("restore_inventory_archive", {"p_archive_id": str(archive_id)}).execute().data
+        except Exception as error:
+            code = str(getattr(error, "code", ""))
+            if code == "42501":
+                raise HTTPException(403, "Dieser Archiveintrag darf nicht wiederaufgenommen werden.") from error
+            if code == "P0002":
+                raise HTTPException(404, "Dieser Archiveintrag ist nicht mehr vorhanden.") from error
+            if code == "P0001":
+                raise HTTPException(409, getattr(error, "message", "Die Rücknahme ist nicht möglich.")) from error
+            raise HTTPException(503, "Der Archiveintrag konnte nicht wiederaufgenommen werden. Bitte erneut versuchen.") from error
+        if not isinstance(result, dict) or result.get("restored") is not True:
+            raise HTTPException(503, "Die Rücknahme konnte nicht bestätigt werden.")
+        on_inventory_changed()
+        return result
 
     @router.get("/images/{image_id}")
     def image(image_id: str, web_session=Depends(get_web_session)):

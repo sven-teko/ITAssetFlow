@@ -58,7 +58,7 @@ class StockDatabase(Database):
 class StockEditTests(unittest.TestCase):
     def setUp(self):
         self.db = StockDatabase()
-        self.repo = AssetRepository(self.db)
+        self.repo = AssetRepository(self.db, atomic_writes=False)
         self.original = deepcopy(self.db.rows["stock_movements"][0])
         self.payload = {
             "edit": {"record_type": "stock", "product_model_id": 10, "storage_location_id": 3,

@@ -25,7 +25,7 @@ const run=(async()=>{
    INSERT INTO public.manufacturers(id,name) VALUES(1,'Test');INSERT INTO public.product_categories(id,name,code,inventory_group) VALUES(1,'Router','router','device');
    INSERT INTO public.product_models(id,name,category_id,manufacturer_id,tracking_mode,qr_code) VALUES(100,'Router',1,1,'quantity','BOX-ROUTER');
    INSERT INTO public.stock_movements(product_model_id,to_storage_location_id,to_condition,quantity,movement_type,department_id,purchase_date,new_price,note) VALUES(100,11,'new',10,'receipt',10,'2026-01-01',49,'Ursprüngliche Notiz');`);
-  for(const name of ['20261029093456_site_permissions.sql','20261102145032_inventory_archive_images.sql','20261102153129_stock_outcomes.sql','20261102154643_stock_metadata_notes.sql'])await db.exec(fs.readFileSync(path.join(root,'supabase/migrations',name),'utf8'));
+  for(const name of ['20261029093456_site_permissions.sql','20261102145032_inventory_archive_images.sql','20261102153129_stock_outcomes.sql','20261102154643_stock_metadata_notes.sql','20261103075158_archive_permanent_delete.sql','20261103083104_archive_restore.sql'])await db.exec(fs.readFileSync(path.join(root,'supabase/migrations',name),'utf8'));
   await asUser('admin',async()=>{for(const [id,sites] of [[2,[1,2]],[3,[1]],[4,[1]]])await q('SELECT public.set_employee_site_access($1,$2)',[id,sites]);});
   let archivedId,imageId,convertedId;
   await asUser('editor',async()=>{
@@ -65,6 +65,12 @@ const run=(async()=>{
    assert.equal((await q('SELECT id FROM public.assets WHERE id=$1',[convertedId])).length,0);
    assert.equal((await q('SELECT image_data FROM public.inventory_images WHERE id=$1',[imageId]))[0].image_data,'cGhvdG8=');
    await assert.rejects(book({direction:'add'}),e=>e.code==='42501');
+  });
+  await asUser('admin',async()=>{
+   const restore=async id=>(await q('SELECT public.restore_inventory_archive($1) result',[id]))[0].result;
+   assert.equal((await restore(archivedId)).quantity,2);
+   assert.equal(Number((await q("SELECT quantity FROM public.stock_levels WHERE condition='new'"))[0].quantity),2);
+   assert.equal((await q('SELECT is_current FROM public.inventory_images WHERE id=$1',[imageId]))[0].is_current,true);
   });
   console.log('PASS: Teilarchivierung, Pflichtgründe, Einzelartikel/Ziel/Bilder, atomare Rückabwicklung, veraltete Mengen, vollständige Entnahme und wiederholbare Buchungen mit echter Standort-RLS');
  }finally{await db.close();}

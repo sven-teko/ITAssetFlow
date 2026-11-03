@@ -94,15 +94,18 @@ class SitePermissionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'nicht bestätigt'):
             SettingsService(client)._save_site_permissions([{'id': 2, 'allowed_site_refs': []}], {})
 
-    def test_scoped_delete_is_atomic_and_requires_confirmation(self):
+    def test_archive_is_atomic_and_requires_confirmation(self):
+        from infrastructure.archive_reason import ArchiveReason
         client = FakeClient()
-        client.rpc = Mock(return_value=SimpleNamespace(execute=lambda: SimpleNamespace(data=True)))
-        AssetRepository(client)._delete_asset(123)
-        client.rpc.assert_called_once_with('delete_scoped_asset', {'p_asset_id': 123})
+        client.rpc = Mock(return_value=SimpleNamespace(execute=lambda: SimpleNamespace(data={"deleted_count": 1})))
+        repo = AssetRepository(client)
+        reason = ArchiveReason(reason="lost")
+        repo.delete_inventory_entries([{"id": 123}], reason)
+        client.rpc.assert_called_once_with("archive_inventory_items", {"p_keys": ["asset:123"], "p_reason": reason.model_dump()})
         self.assertEqual(client.writes, [])
-        client.rpc.return_value = SimpleNamespace(execute=lambda: SimpleNamespace(data=False))
-        with self.assertRaises(ValueError):
-            AssetRepository(client)._delete_asset(123)
+        client.rpc.return_value = SimpleNamespace(execute=lambda: SimpleNamespace(data=None))
+        with self.assertRaisesRegex(RuntimeError, "nicht bestätigt"):
+            repo.delete_inventory_entries([{"id": 123}], reason)
 
     def test_settings_routes_reject_non_admin_before_database_access(self):
         from fastapi.testclient import TestClient

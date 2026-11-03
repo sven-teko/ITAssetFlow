@@ -7,8 +7,10 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID
 
 from fastapi import (
     Depends,
@@ -19,7 +21,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from supabase import Client
 
@@ -27,7 +29,7 @@ from config import get_app_config
 from infrastructure.asset_repository import AssetRepository
 from infrastructure.data_transfer_service import DataTransferService
 from infrastructure.qr_service import QrService
-from infrastructure.stock_booking import StockWithdrawalRequired
+from infrastructure.stock_booking import StockWithdrawalRequired, book_stock
 from infrastructure.supabase_client import (
     authenticate_user,
     get_session_tokens,
@@ -531,15 +533,27 @@ def _repository_http_exception(
         return HTTPException(409, detail={
             "code": "stock_withdrawal_required", "message": str(error), "available": error.available,
         })
-    message = str(error)
-    normalized = message.casefold()
-
     code = str(getattr(error, "code", ""))
+    message = str(getattr(error, "message", None) or error)
+    normalized = message.casefold()
+    if code in {"40001", "P0041"}:
+        try:
+            balance = Decimal(str(getattr(error, "details", "")))
+        except InvalidOperation:
+            balance = Decimal("NaN")
+        if balance.is_finite() and balance >= 0:
+            return HTTPException(409, detail={
+                "code": "stock_conflict" if code == "40001" else "stock_withdrawal_required",
+                "message": f"{message} Aktuell verfügbar: {balance.normalize():f} Stück.",
+                "available": float(balance),
+            })
+    if code == "PGRST202" and any(name in message for name in ("save_inventory_entry", "move_inventory_entry")):
+        return HTTPException(503, detail="Die Datenbank dieses Servers benötigt das aktuelle ITAssetFlow-Update.")
     if code in {"40001", "23505"}:
         status_code = 409
     elif code == "42501":
         status_code = 403
-    elif code in {"P0001", "23514", "22P02", "22003", "22007"}:
+    elif code in {"P0001", "23514", "22P02", "22001", "22003", "22007"}:
         status_code = 400
     elif isinstance(
         error,
@@ -1272,6 +1286,47 @@ def update_inventory_entry(
         ) from error
 
 
+@app.post("/api/inventory/stock")
+def change_inventory_stock(request: Request, payload: dict[str, Any],
+                           web_session: WebSession = Depends(require_editor_session)) -> dict[str, Any]:
+    try:
+        result = book_stock(web_session.client, payload)
+        INVENTORY_CHANGES.publish(_request_client_id(request))
+        return result
+    except Exception as error:
+        raise _repository_http_exception(error) from error
+
+
+class MoveInventoryPayload(BaseModel):
+    request_id: UUID
+    entry_key: str = Field(min_length=1, max_length=160)
+    destination_id: int = Field(gt=0)
+    quantity: int | None = Field(default=None, gt=0, le=1000000)
+    expected_quantity: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    expected_location_id: int | None = Field(default=None, gt=0)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+@app.post("/api/inventory/move")
+def move_inventory_entry(request: Request, payload: MoveInventoryPayload,
+                         web_session: WebSession = Depends(require_editor_session)) -> dict[str, Any]:
+    repository = AssetRepository(web_session.client)
+    try:
+        entry = _find_inventory_entry(repository, payload.entry_key)
+        key = entry["id"] if entry.get("_record_type") == "stock" else f"asset:{entry['id']}"
+        result = web_session.client.rpc("move_inventory_entry", {
+            "p_key": key, "p_destination": payload.destination_id, "p_request_id": str(payload.request_id),
+            "p_quantity": payload.quantity, "p_expected_quantity": payload.expected_quantity,
+            "p_expected_location": payload.expected_location_id, "p_note": payload.note,
+        }).execute().data
+        if not isinstance(result, dict) or result.get("saved") is not True:
+            raise RuntimeError("Die Umlagerung wurde nicht bestätigt.")
+        INVENTORY_CHANGES.publish(_request_client_id(request))
+        return result
+    except Exception as error:
+        raise _repository_http_exception(error) from error
+
+
 @app.post("/api/inventory/delete")
 def delete_inventory_entries(
     request: Request,
@@ -1300,52 +1355,8 @@ def delete_inventory_entries(
     )
 
     try:
-        current_rows = [
-            row
-            for row in repository.load_inventory()
-            if isinstance(row, dict)
-        ]
-
-        rows_by_key = {
-            _inventory_row_key(row): row
-            for row in current_rows
-        }
-
-        selected: list[
-            dict[str, Any]
-        ] = []
-
-        missing: list[str] = []
-
-        for key in keys:
-            row = rows_by_key.get(
-                key
-            )
-
-            if row is None:
-                missing.append(
-                    key
-                )
-                continue
-
-            selected.append(
-                row
-            )
-
-        if missing:
-            raise ValueError(
-                "Mindestens ein ausgewählter "
-                "Inventareintrag existiert nicht mehr. "
-                "Bitte die Tabelle aktualisieren."
-            )
-
-        result = web_session.client.rpc("archive_inventory_items", {
-            "p_keys": list(dict.fromkeys(
-                f"stock:{row['product_model_id']}:{row['storage_location_id']}:{row['condition']}"
-                if row.get("_record_type") == "stock" else f"asset:{row['id']}"
-                for row in selected
-            )), "p_reason": payload.reason.model_dump(),
-        }).execute().data
+        selected = [_find_inventory_entry(repository, key) for key in keys]
+        result = repository.delete_inventory_entries(selected, payload.reason)
 
         INVENTORY_CHANGES.publish(
             _request_client_id(
@@ -1539,7 +1550,7 @@ def inventory_meta(
 
 app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
 app.include_router(create_preferences_router(get_web_session))
-app.include_router(create_archive_router(get_web_session, require_editor_session, require_admin_session))
+app.include_router(create_archive_router(get_web_session, require_editor_session, require_admin_session, INVENTORY_CHANGES.publish))
 app.include_router(
     create_settings_router(
         require_admin_session,

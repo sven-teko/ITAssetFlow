@@ -427,17 +427,18 @@ class InventoryViewController(QObject):
     # Einträge löschen
     # ------------------------------------------------------------------
 
-    @Slot(object)
+    @Slot(object, object)
     def delete_inventory_entries(
         self,
         entries: object,
+        reason: object,
     ) -> None:
         if self._is_writing:
             return
 
         if not isinstance(entries, list) or not entries:
             self.entries_delete_failed.emit(
-                "Keine Inventareinträge zum Löschen ausgewählt."
+                "Keine Inventareinträge zum Archivieren ausgewählt."
             )
             return
 
@@ -457,16 +458,16 @@ class InventoryViewController(QObject):
         count = len(selected)
         self.status_message.emit(
             (
-                "Inventareintrag wird gelöscht ..."
+                "Inventareintrag wird archiviert ..."
                 if count == 1
-                else f"{count} Inventareinträge werden gelöscht ..."
+                else f"{count} Inventareinträge werden archiviert ..."
             ),
             0,
         )
 
         worker = _RepositoryTaskWorker(
             lambda: self.repository.delete_inventory_entries(
-                selected
+                selected, reason
             )
         )
         worker.signals.succeeded.connect(

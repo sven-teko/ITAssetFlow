@@ -21,11 +21,20 @@ class Query:
 
     def select(self, *_args): return self
     def eq(self, key, value): self.filters.append(lambda r: str(r.get(key)) == str(value)); return self
+    def neq(self, key, value): self.filters.append(lambda r: str(r.get(key)) != str(value)); return self
     def is_(self, key, _value): self.filters.append(lambda r: r.get(key) is None); return self
     def in_(self, key, values): self.filters.append(lambda r: r.get(key) in values); return self
     def ilike(self, key, value):
         raw = value.replace(r"\%", "%").replace(r"\_", "_").replace(r"\*", "*").replace("\\\\", "\\")
         self.filters.append(lambda r: str(r.get(key) or "").casefold() == raw.casefold())
+        return self
+    def or_(self, filters):
+        entries = [item.split(".", 2) for item in filters.split(",")]
+        self.filters.append(lambda row: any(
+            str(row.get(field) or "").casefold() == value.casefold() if operator == "ilike"
+            else str(row.get(field) or "") == value.strip('"')
+            for field, operator, value in entries
+        ))
         return self
     def range(self, start, end): self.bounds = (start, end + 1); return self
     def order(self, key, desc=False): self.sort = (key, desc); return self
@@ -191,7 +200,7 @@ class QrTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError): normalize_qr_code(value)
 
     def test_unknown_qr_prefills_serialized_identifier_on_server(self):
-        repo = AssetRepository(Mock())
+        repo = AssetRepository(Mock(), atomic_writes=False)
         payload = {"qr_code": "NEW-QR", "model": {"mode": "existing", "id": 1}, "asset": {"asset_tag": "ignored", "purchase_date": "2026-10-22"}, "assignment": {"department_id": 2}}
         with patch.object(repo, "_resolve_or_create_product_model", return_value=(1, "serialized", None, None)), patch.object(repo, "_validate_location_department"), patch.object(repo, "_create_serialized_asset", return_value={"id": 1}) as create:
             repo.create_inventory_entry(payload)
@@ -199,7 +208,7 @@ class QrTests(unittest.TestCase):
 
     def test_new_stock_article_binds_code_before_initial_receipt(self):
         self.db.rows["product_models"][0]["sku"] = None
-        repo = AssetRepository(self.db)
+        repo = AssetRepository(self.db, atomic_writes=False)
         payload = {"qr_code": "NEW-STOCK", "model": {"mode": "existing", "id": 10}, "stock": {"quantity": 2, "purchase_date": "2026-10-22", "department_id": 2}}
         with patch.object(repo, "_resolve_or_create_product_model", return_value=(10, "quantity", None, None)), patch.object(repo, "_validate_location_department"), patch.object(repo, "_create_stock_receipt", return_value={"id": 1, "quantity": 2}) as create:
             repo.create_inventory_entry(payload)
@@ -207,7 +216,7 @@ class QrTests(unittest.TestCase):
         self.assertEqual(create.call_args.kwargs["stock_data"]["quantity"], 2)
 
     def test_new_quantity_model_receives_qr_as_sku(self):
-        repo = AssetRepository(self.db)
+        repo = AssetRepository(self.db, atomic_writes=False)
         payload = {"qr_code": "NEW-STOCK", "model": {"mode": "new", "tracking_mode": "quantity"}, "stock": {"quantity": 2, "purchase_date": "2026-10-22", "department_id": 2}}
         with patch.object(repo, "_resolve_or_create_product_model", return_value=(10, "quantity", None, None)) as resolve, patch.object(repo, "_validate_location_department"), patch.object(QrService, "bind_model_code"), patch.object(repo, "_create_stock_receipt", return_value={"id": 1, "quantity": 2}):
             repo.create_inventory_entry(payload)
