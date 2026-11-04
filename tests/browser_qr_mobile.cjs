@@ -20,6 +20,7 @@ const run = (async () => {
     page.on('request', request => { if (request.url().includes('.wasm')) wasmRequests.push(request.url()); });
     const bookingResults=new Map();
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
+    let knownRetail = 'ean';
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
       default_visible_columns: ['asset_tag', 'product_model_name', 'status', 'site_name'],
@@ -68,9 +69,16 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
-        if (code === '6938818307575' || code === '841885106377') return json({
-          code, matches: [], locations: [location], models: [{id:105,name:'Test DECT',tracking_mode:'serialized'}], direct_asset_keys:[],
-        });
+        if (code === '6938818307575' || code === '841885106377') {
+          const known = code === (knownRetail === 'ean' ? '6938818307575' : '841885106377');
+          return json({
+            code, matches: known ? [5, 6].map(id => ({
+              id, key: `asset:${id}`, record_type:'asset', product_model_id:105, product_model_name:'Test DECT',
+              asset_tag:`DECT-${id}`, ...location, storage_location_id:11, condition:'used', quantity:1,
+            })) : [], locations:[location], models:known ? [{id:105,name:'Test DECT',tracking_mode:'serialized'}] : [],
+            direct_asset_keys:[],
+          });
+        }
         const matches = (code === 'QR-CABLE' || code === '4006381333931' || code === '87954252804') ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
           : (code === 'PC-001' || code === '96385074') ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
         return json({ code, matches: code === '96385074' ? [...matches, {...matches[0], key:'asset:2', id:2, asset_tag:'PC-002'}] : matches, locations: [location] });
@@ -423,6 +431,18 @@ const run = (async () => {
     // EAN-13 mit führender Null hat das Strichmuster eines UPC-A.
     await openQr();
     await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/0012345678905.svg'));
+    await page.getByRole('alert').filter({hasText:'Diese UPC ist noch nicht hinterlegt.'}).waitFor();
+    await page.getByRole('button',{name:'Weiteren Code scannen',exact:true}).click();
+    await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/96385074.svg'));
+    await page.getByLabel('Zuordnung für 012345678905',{exact:true}).waitFor();
+    await page.getByLabel('Zuordnung für 96385074',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByLabel('Gefundenen Artikel auswählen').waitFor();
+    assert.equal(await page.getByLabel('Gefundenen Artikel auswählen').locator('option').count(),3);
+    await closeQr();
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen', {exact:true}).setInputFiles(path.join(__dirname,'fixtures/0012345678905.svg'));
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.equal(await page.getByLabel('UPC-A:',{exact:true}).inputValue(),'012345678905');
     assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'');
@@ -443,18 +463,18 @@ const run = (async () => {
     assert.equal(lastAsset.asset.asset_tag,'PC-NEW');
     console.log('PASS: EAN-13, EAN-8, Mehrfachtreffer, Prüfziffer und unabhängige optionale Kennungen');
 
-    // A matching device is selected by its SN, never by its shared EAN alone.
-    await openQr(); await lookup('SN: PC-001; EAN: 96385074');
-    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    // With no retail match, an exact device identity wins.
+    await openQr(); await lookup('SN: PC-001');
     await page.getByRole('button',{name:'Gerät bearbeiten',exact:true}).waitFor();
     assert.equal(await page.getByLabel('Gefundenen Artikel auswählen').count(),0);
     await closeQr();
-    await openQr(); await lookup('SN: PC-001; EAN: 4006381333931');
+    await openQr(); await lookup('SN: PC-001; EAN: 96385074');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
-    await page.getByRole('alert').filter({hasText:'passen nicht zum selben Gerät oder Modell'}).waitFor();
+    await page.getByLabel('Gefundenen Artikel auswählen').waitFor();
+    assert.equal(await page.getByLabel('Gefundenen Artikel auswählen').locator('option').count(),3);
     await closeQr();
 
-    // Retail identifiers point to the same model; a new SN and MAC prefill the new article.
+    // The original label's EAN finds the model even if UPC and serial number are unknown.
     data.product_models.push({id:105,name:'Test DECT',category_id:1,manufacturer_id:1,
       is_active:true,tracking_mode:'serialized',ean:'6938818307575',upc:'841885106377',specifications:{}});
     await openQr();
@@ -474,23 +494,37 @@ const run = (async () => {
         await page.getByRole('button',{name:'Hinzufügen',exact:true}).click();
       }
       await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
-      await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
-      assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),printedSerial);
-      await page.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173') + '/#/inventory');
-      await page.locator('.inventory-table tbody tr').first().waitFor();
+      await page.getByRole('heading',{name:'Test DECT',exact:true}).waitFor();
+      assert.deepEqual(await page.getByLabel('Gefundenen Artikel auswählen').locator('option:not([disabled])').evaluateAll(options=>options.map(option=>option.value)),['asset:5','asset:6']);
+      await closeQr();
       await openQr();
     }
+    knownRetail = 'upc';
     await lookup('SN: DECT-NEW; EAN: 6938818307575; UPC: 841885106377; MAC ID: AA-BB-CC-11-22-33');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByRole('heading',{name:'Test DECT',exact:true}).waitFor();
+    assert.equal(await page.getByLabel('Gefundenen Artikel auswählen').locator('option').count(),3);
+    await closeQr();
+    await openQr(); await lookup('EAN: 96385074; UPC: 841885106377');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'gehören zu unterschiedlichen Modellen'}).waitFor();
+    await closeQr();
+    await openQr();
+    await lookup('SN: DECT-NEW; EAN: 5901234123457; UPC: 012345678905; MAC ID: AA-BB-CC-11-22-33');
+    await page.getByLabel('Fehlende Kennung ergänzen',{exact:true}).fill('DEVICE-QR');
+    await page.getByRole('button',{name:'Hinzufügen',exact:true}).click();
+    await page.getByLabel('Zuordnung für DEVICE-QR',{exact:true}).selectOption('qr');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
-    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'105');
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'');
     assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'DECT-NEW');
     assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
-    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'6938818307575');
-    assert.equal(await page.getByLabel('UPC-A:',{exact:true}).inputValue(),'841885106377');
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'5901234123457');
+    assert.equal(await page.getByLabel('UPC-A:',{exact:true}).inputValue(),'012345678905');
+    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'DEVICE-QR');
     await page.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173') + '/#/inventory');
     await page.locator('.inventory-table tbody tr').first().waitFor();
-    console.log('PASS: Mehrfachscan findet vorhandene Geräte per SN, blockiert Modellkonflikte und füllt ein neues Gerät vor');
+    console.log('PASS: EAN- und UPC-Treffer zeigen alle Modellartikel; Einzelcode, Konflikt und vorausgefüllter Neuantrag');
 
     await page.locator('.inventory-table tbody tr').first().click({button:'right'});
     await page.getByRole('menu',{name:'Eintrag',exact:true}).waitFor();

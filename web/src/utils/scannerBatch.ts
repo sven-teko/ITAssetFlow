@@ -37,32 +37,49 @@ export function assignedCodes(codes: ScannedCode[], assignments: Assignment[]): 
   return draft;
 }
 
-const roles = ["serial", "mac", "qr", "ean", "upc"] as const;
 const intersect = <T,>(left: Set<T>, right: Set<T>) => new Set([...left].filter(value => right.has(value)));
 
 export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal): Promise<{
   lookup: QrLookup; draft: ScanDraft; role: ScanRole;
 }> {
-  const pairs = await Promise.all(roles.flatMap(role => draft[role]
+  const fetchRoles = (roles: ScanRole[]) => Promise.all(roles.flatMap(role => draft[role]
     ? [lookupQr(draft[role], signal, role).then(result => ({ role, result }))] : []));
-  const primary = pairs[0];
-  const retail = pairs.filter(({ role }) => role === "ean" || role === "upc");
-  const models = new Map(pairs.flatMap(({result}) => (result.models ?? []).map(model => [model.id, model] as const)));
+  const retail = await fetchRoles(["ean", "upc"]);
   let modelIds: Set<number> | undefined;
-  for (const { role, result } of pairs) {
-    if (role !== "ean" && role !== "upc" && role !== "qr") continue;
+  for (const { result } of retail) {
     const ids = new Set((result.models ?? []).map(model => model.id));
-    if (!ids.size && (role === "ean" || role === "upc")) {
+    if (!ids.size) {
       for (const row of result.matches) ids.add(row.product_model_id);
     }
     if (ids.size) modelIds = modelIds ? intersect(modelIds, ids) : ids;
   }
   if (modelIds?.size === 0) throw new Error("Die gescannten Produktcodes gehören zu unterschiedlichen Modellen.");
+  if (modelIds?.size) {
+    const matchedIds = modelIds;
+    const modelId = matchedIds.size === 1 ? matchedIds.values().next().value : undefined;
+    const usable = retail.find(({result}) => result.matches.some(row => matchedIds.has(row.product_model_id)))
+      ?? retail.find(({result}) => result.models?.some(model => matchedIds.has(model.id))) ?? retail[0];
+    const rows = new Map<string, QrMatch>();
+    for (const {result} of retail) {
+      for (const row of result.matches) if (matchedIds.has(row.product_model_id)) rows.set(row.key, row);
+    }
+    // A retail code identifies a model, so even an unregistered SN must not
+    // hide its other devices or open the create form instead.
+    const matches = [...rows.values()];
+    if (!matches.length && modelId === undefined) {
+      throw new Error("Mehrere Produktmodelle passen. Bitte die Produktcodes einzeln prüfen.");
+    }
+    return {
+      lookup: { ...usable.result, matches, preferred_key: matches.length === 1 ? matches[0].key : null },
+      draft: { ...draft, modelId }, role: usable.role,
+    };
+  }
 
+  const pairs = await fetchRoles(["serial", "mac", "qr"]);
+  const primary = pairs[0] ?? retail[0];
   let deviceKeys: Set<string> | undefined;
   const devices = new Map<string, QrMatch>();
   for (const { role, result } of pairs) {
-    if (role === "ean" || role === "upc") continue;
     const keys = new Set(result.direct_asset_keys ?? (role === "qr" ? [] :
       result.matches.filter(row => row.record_type === "asset").map(row => row.key)));
     if (keys.size) deviceKeys = deviceKeys ? intersect(deviceKeys, keys) : keys;
@@ -70,23 +87,18 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
   }
   if (deviceKeys) {
     const matches = [...deviceKeys].map(key => devices.get(key)).filter((row): row is QrMatch =>
-      !!row && (!modelIds || modelIds.has(row.product_model_id))
+      !!row
       && (!draft.serial || !row.serial_number || draft.serial.toUpperCase() === row.serial_number.toUpperCase())
       && (!draft.mac || !row.mac_address || draft.mac === normalizeMac(row.mac_address)));
     if (!matches.length) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät oder Modell.");
-    return { lookup: { ...primary.result, matches, preferred_key: null }, draft, role: primary.role };
+    const hit = pairs.find(({result}) => matches.some(row =>
+      result.direct_asset_keys?.includes(row.key) ?? result.matches.some(match => match.key === row.key),
+    )) ?? primary;
+    return { lookup: { ...hit.result, matches, preferred_key: null }, draft, role: hit.role };
   }
-  if (modelIds && modelIds.size > 1) throw new Error("Mehrere Produktmodelle passen. Bitte die Produktcodes einzeln prüfen.");
-  const modelId = modelIds?.values().next().value;
-  const qrModels = pairs.find(({role}) => role === "qr")?.result.models;
-  const hasDeviceCode = Boolean(draft.serial || draft.mac || (draft.qr && retail.length && !qrModels?.length));
-  if (hasDeviceCode && modelId !== undefined && models.get(modelId)?.tracking_mode === "quantity") {
-    throw new Error("Das erkannte Modell wird nur als Menge geführt. Für ein Einzelgerät muss das Modell Einzelartikel erlauben.");
+  const qr = pairs.find(({role}) => role === "qr");
+  if (qr?.result.matches.length && !draft.serial && !draft.mac) {
+    return { lookup: qr.result, draft, role: "qr" };
   }
-  // The model result can include other devices of the same model. A new
-  // serial number or MAC address must never select one of those devices.
-  const usable = retail.find(({result}) => result.matches.some(row => !modelIds || modelIds.has(row.product_model_id)))
-    ?? retail[0] ?? primary;
-  const matches = hasDeviceCode ? [] : usable.result.matches.filter(row => !modelIds || modelIds.has(row.product_model_id));
-  return { lookup: { ...usable.result, matches }, draft: { ...draft, modelId }, role: usable.role };
+  return { lookup: { ...primary.result, matches: [], preferred_key: null }, draft, role: primary.role };
 }

@@ -83,7 +83,7 @@ export default function QrScanner({ onCodes, disabled }: Props) {
       await videoRef.current.play();
       if (run !== generation.current) return;
       setActive(true); setStarting(false);
-      let candidate = "", confirmations = 0;
+      let candidate = "", confirmations = 0, stableSince = 0;
       const scan = async () => {
         if (run !== generation.current || !videoRef.current) return;
         try {
@@ -91,10 +91,13 @@ export default function QrScanner({ onCodes, disabled }: Props) {
           if (run !== generation.current) return;
           if (results.length) {
             const key = JSON.stringify(results.map(result => [result.type, result.text]).sort());
-            confirmations = key === candidate ? confirmations + 1 : 1;
+            if (key === candidate) confirmations += 1;
+            else { confirmations = 1; stableSince = performance.now(); }
             candidate = key;
-            // Require a stable target before taking it over.
-            if (confirmations >= (results.length > 1 ? 2 : 3)) {
+            const tradeCount = results.filter(code => code.type === "upc" || code.type === "ean").length;
+            // Allow the other product code to come into focus before finishing.
+            if (confirmations >= (results.length > 1 ? 2 : 3)
+              && (tradeCount !== 1 || performance.now() - stableSince >= 1_200)) {
               stop(); onCodes(results); return;
             }
           } else { candidate = ""; confirmations = 0; }

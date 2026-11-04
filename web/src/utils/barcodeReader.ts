@@ -89,6 +89,11 @@ export async function createBarcodeReader() {
           if (!codes.has(`${code.type}:${code.text}`)) codes.set(`${code.type}:${code.text}`, code);
         }
       }
+      if (enhance && video && index === 1 && [...codes.values()].filter(code => code.type === "ean" || code.type === "upc").length === 1) {
+        // A nearby, more readable UPC can dominate the first pass. Search both
+        // sides of the same viewfinder, including the quieter barcode.
+        crops.push([0, 0, .66, 1], [.34, 0, .66, 1], [0, .32, 1, .68]);
+      }
     }
     return [...codes.values()].slice(0, 8);
   };

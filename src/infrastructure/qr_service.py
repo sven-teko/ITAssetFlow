@@ -115,35 +115,49 @@ class QrService:
             normalize_ean(code)
         elif code_type == "upc":
             normalize_upc(code)
-        ean_only = code_type == "ean"
-        assets = self._assets_for_code("0" + code if code_type == "upc" else code, ean_only=code_type in {"ean", "upc"})
+        retail_code = code_type in {"ean", "upc"}
+        ean = "0" + code if code_type == "upc" else code
+        assets = self._assets_for_code(ean, ean_only=retail_code)
         direct_asset_ids = {row["id"] for row in assets}
-        matched_models = self._models_for_code(code, retail_type=code_type if code_type in {"ean", "upc"} else None)
-        # Eine EAN kann mehrere Einzelgeräte desselben Modells bezeichnen.
-        seen_assets = direct_asset_ids.copy()
+        matched = {row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)}
+        models = matched.copy()
+        other_ids = {row["product_model_id"] for row in assets}.difference(models)
+        if other_ids:
+            response = select_scanner_compatible(
+                lambda columns: self.client.table("product_models").select(columns).in_("id", list(other_ids)),
+                "product_models", "id,name,sku,tracking_mode,is_active,ean",
+            )
+            models.update((row["id"], row) for row in self._data(response))
+        if retail_code:
+            # A corrected model EAN takes precedence over copies left on older devices.
+            assets = [row for row in assets if row["product_model_id"] in matched
+                      or models.get(row["product_model_id"], {}).get("ean") in {None, "", ean}]
+            # An old EAN on one device still identifies the model when it
+            # has no newer EAN. Expand to its other visible, active devices.
+            for row in assets:
+                model = models.get(row["product_model_id"])
+                if model and model.get("is_active") is not False:
+                    matched.setdefault(model["id"], model)
+        matched_models = list(matched.values())
+        seen_assets = {row["id"] for row in assets}
         for model in matched_models:
-            if model.get("tracking_mode") in {"serialized", "hybrid"}:
+            if model.get("tracking_mode") not in {"serialized", "hybrid"}:
+                continue
+            offset = 0
+            while True:
                 response = select_scanner_compatible(
-                    lambda columns: self.client.table("assets").select(columns).eq("product_model_id", model["id"]).is_("archived_at", "null"),
-                    "assets", "id,asset_tag,serial_number,qr_code,ean,product_model_id,condition,status",
+                    lambda columns: self.client.table("assets").select(columns).eq("product_model_id", model["id"])
+                    .is_("archived_at", "null").order("id").range(offset, offset + 499),
+                    "assets", "id,asset_tag,serial_number,mac_address,qr_code,ean,product_model_id,condition,status",
                 )
-                for asset in self._data(response):
+                page = self._data(response)
+                for asset in page:
                     if asset["id"] not in seen_assets:
                         assets.append(asset)
                         seen_assets.add(asset["id"])
-        model_ids = set(row["product_model_id"] for row in assets) | set(row["id"] for row in matched_models)
-        models = {}
-        if model_ids:
-            response = select_scanner_compatible(
-                lambda columns: self.client.table("product_models").select(columns).in_("id", list(model_ids)),
-                "product_models", "id,name,sku,tracking_mode,is_active,ean",
-            )
-            models = {row["id"]: row for row in self._data(response)}
-        if ean_only or code_type == "upc":
-            # A corrected model EAN takes precedence over copies left on older devices.
-            assets = [row for row in assets if not models.get(row["product_model_id"], {}).get("ean")
-                      or models[row["product_model_id"]]["ean"] == ("0" + code if code_type == "upc" else code)
-                      or row["product_model_id"] in {model["id"] for model in matched_models}]
+                if len(page) < 500:
+                    break
+                offset += len(page)
         direct_asset_match = any(row["id"] in direct_asset_ids for row in assets)
 
         sites = {row["id"]: row for row in self._all("sites", "id,name")}

@@ -42,6 +42,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   const [error, setError] = useState("");
   const [review, setReview] = useState<{ codes: ScannedCode[]; assignments: Assignment[] } | null>(null);
   const [extraCode, setExtraCode] = useState("");
+  const [collectingMore, setCollectingMore] = useState(false);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -93,6 +94,19 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setError("");
     setExtraCode("");
     setReview({ codes, assignments: proposeAssignments(codes) });
+  }
+
+  function addScannedCodes(codes: ScannedCode[]) {
+    if (!review) return;
+    const next = [...review.codes];
+    for (const code of codes) {
+      if (!next.some(previous => previous.text === code.text && previous.type === code.type) && next.length < 10) next.push(code);
+    }
+    const suggestions = proposeAssignments(next);
+    const assignments = next.map((_, index) => review.assignments[index] ?? suggestions[index]);
+    setReview({ codes: next, assignments });
+    setCollectingMore(false);
+    setError("");
   }
 
   function addMissingCode(event: FormEvent) {
@@ -156,7 +170,16 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     try {
       const result = await lookupQr(normalized, controller.signal, type);
       if (controller.signal.aborted) return;
-      applyLookup(result, type, format, preserve);
+      if (!preserve && type === "upc" && !result.matches.length && !result.models?.length) {
+        setReview({ codes: [{ text: normalized, type, format: format || "UPC-A" }], assignments: ["upc"] });
+        setExtraCode("");
+        setError("Diese UPC ist noch nicht hinterlegt. Scanne oder ergänze die EAN, falls sie auf dem Etikett steht.");
+        return;
+      }
+      const directKeys = new Set(result.direct_asset_keys);
+      const exactDevice = type !== "ean" && type !== "upc" && directKeys.size > 0;
+      applyLookup(exactDevice ? { ...result, preferred_key: null, matches: result.matches.filter(row => directKeys.has(row.key)) }
+        : result, type, format, preserve);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Der Code konnte nicht geprüft werden.");
     } finally {
@@ -223,7 +246,10 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       </header>
 
       <div className="qr-dialog-body">
-        {review ? <section className="qr-code-review" aria-label="Erkannte Codes zuordnen">
+        {review && collectingMore ? <section className="qr-code-review" aria-label="Weiteren Code hinzufügen">
+          <QrScanner disabled={saving} onCodes={addScannedCodes} />
+          <button type="button" onClick={() => setCollectingMore(false)}>Zurück zur Zuordnung</button>
+        </section> : review ? <section className="qr-code-review" aria-label="Erkannte Codes zuordnen">
           <h3>Erkannte Codes zuordnen</h3>
           <p>Prüfe die Zuordnung. Für Codes wie IPUI oder IPEI wähle «Ignorieren».</p>
           {review.codes.map((item, index) => <label key={`${item.type}:${item.text}`}>
@@ -247,6 +273,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </form>}
           <div className="qr-camera-controls">
             <button type="button" className="primary-button" disabled={loading} onClick={() => void readBatch()}>{loading ? "Codes werden geprüft …" : "Zuordnung prüfen"}</button>
+            {review.codes.length < 10 && <button type="button" disabled={loading} onClick={() => { setCollectingMore(true); setError(""); }}>Weiteren Code scannen</button>}
             <button type="button" disabled={loading} onClick={() => { setReview(null); setError(""); }}>Neu scannen</button>
           </div>
         </section> : !lookup ? <>
@@ -271,6 +298,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
         {message && <div className="qr-success" role="status">{message}</div>}
 
         {lookup && <section className="qr-result" aria-label="Gefundener Artikel">
+          {!selected && (recognizedType === "ean" || recognizedType === "upc") && lookup.matches.length > 1
+            && lookup.matches.every(row => row.product_model_id === lookup.matches[0].product_model_id)
+            && <div><h3>{lookup.matches[0].product_model_name}</h3><p>{lookup.matches.length} Einträge zum Produktmodell</p></div>}
           {lookup.matches.length > 1 && <label>Artikel auswählen
             <select aria-label="Gefundenen Artikel auswählen" value={selected?.key ?? ""} disabled={saving || loading}
               onChange={event => { const row = lookup.matches.find(item => item.key === event.target.value); if (row) selectMatch(row); }}>

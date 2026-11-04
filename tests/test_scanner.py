@@ -53,6 +53,18 @@ class ScannerTests(unittest.TestCase):
         db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True, "ean": "96385074"})
         self.assertEqual(QrService(db).lookup("96385074", "ean")["matches"][0]["key"], "asset:1")
 
+    def test_legacy_device_ean_finds_other_devices_of_its_model(self):
+        db = Database()
+        db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True})
+        db.rows["assets"][0]["ean"] = "96385074"
+        db.rows["assets"].extend([
+            {**db.rows["assets"][0], "id": 2, "asset_tag": "PC-002", "ean": None},
+            {**db.rows["assets"][0], "id": 3, "asset_tag": "PC-003", "archived_at": "2026-11-04"},
+        ])
+        result = QrService(db).lookup("96385074", "ean")
+        self.assertEqual({row["key"] for row in result["matches"]}, {"asset:1", "asset:2"})
+        self.assertEqual(result["models"][0]["id"], 11)
+
     def test_model_ean_takes_precedence_over_legacy_device_copy(self):
         db = Database()
         db.rows["assets"][0]["ean"] = "96385074"
