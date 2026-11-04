@@ -60,7 +60,7 @@
 .compact-inventory .workspace[data-mobile-view="inventory"] .inventory-area {
   display: flex;
   gap: 8px;
-  padding: 10px var(--compact-inset);
+  padding: var(--inventory-inset) var(--compact-inset);
 }
 .compact-inventory .workspace[data-mobile-view="navigation"] .dock-navigation-shell,
 .compact-inventory .workspace[data-mobile-view="detail"] .dock-detail-shell { display: flex; }

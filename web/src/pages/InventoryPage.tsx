@@ -56,7 +56,6 @@ export default function InventoryPage({
   const compactLayout = useMediaQuery("(max-width: 980px), (max-width: 1100px) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [inventorySort, setInventorySort] = useState<InventorySort>({ column: null, direction: "asc" });
-  const inventoryAreaRef = useRef<HTMLElement>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("inventory");
   const [qrOpen, setQrOpen] = useState(false);
   const [operation, setOperation] = useState<{ kind: "move" | "stock"; row: InventoryRow } | null>(null);
@@ -335,9 +334,7 @@ export default function InventoryPage({
 
       <MainMenu
         onScan={() => setQrOpen(true)}
-        inventoryAreaRef={inventoryAreaRef}
         compactLayout={compactLayout}
-        toolbarLayoutKey={JSON.stringify([workspaceTab, docking.navigationVisible, docking.detailVisible, docking.navigationPosition, docking.detailPosition])}
         sort={inventorySort}
         onSort={setInventorySort}
         workspaceTabs={<div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
@@ -533,7 +530,7 @@ export default function InventoryPage({
             ),
           )}
 
-        <main ref={inventoryAreaRef} className="inventory-area" id={compactLayout ? "mobile-panel-inventory" : undefined} role={compactLayout ? "tabpanel" : undefined} aria-labelledby={compactLayout ? "mobile-tab-inventory" : undefined}>
+        <main className="inventory-area" id={compactLayout ? "mobile-panel-inventory" : undefined} role={compactLayout ? "tabpanel" : undefined} aria-labelledby={compactLayout ? "mobile-tab-inventory" : undefined}>
           {data.loadError && (
             <div className="inventory-load-error" role="alert">
               <span>{data.loadError}</span>

@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from dotenv import load_dotenv
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from config import get_app_config
@@ -61,7 +62,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.6",
+    version="1.6.5",
 )
 
 
@@ -969,6 +970,7 @@ def logout(
 # Inventar laden
 
 _inventory_snapshots = InventorySnapshots()
+_UNTRACKED_REVISION = -1
 
 
 def _load_inventory_rows(client: Client) -> list[dict[str, Any]]:
@@ -976,10 +978,18 @@ def _load_inventory_rows(client: Client) -> list[dict[str, Any]]:
 
 
 def _read_inventory_revision(client: Client) -> int:
-    result = client.table("inventory_change_state").select("revision").eq("id", 1).limit(1).execute()
+    try:
+        result = client.table("inventory_change_state").select("revision").eq("id", 1).limit(1).execute()
+    except APIError as error:
+        # This optional counter must not prevent a fresh RLS-scoped read.
+        if error.code in {"PGRST205", "42P01", "42501"}:
+            return _UNTRACKED_REVISION
+        raise
     data = result.data
-    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
-        raise RuntimeError("inventory_change_state ist leer oder nicht lesbar.")
+    if data == []:
+        return _UNTRACKED_REVISION
+    if not isinstance(data, list) or not isinstance(data[0], dict):
+        raise RuntimeError("Der Änderungsstand des Inventars konnte nicht gelesen werden.")
     return int(data[0]["revision"])
 
 
@@ -1002,17 +1012,25 @@ def inventory_page(payload: InventoryPageRequest, request: Request, response: Re
     # to employees, location grants and item locations also bump this revision.
     try:
         revision = _read_inventory_revision(web_session.client)
-        token = page_token(identity, revision, payload.query)
-        if payload.offset and payload.snapshot != token:
-            raise HTTPException(409, "Das Inventar wurde geändert. Die Liste wird neu geladen.")
-        rows = _inventory_snapshots.get(identity, revision) if cookie and not (payload.refresh and payload.offset == 0) else None
+        tracked = revision != _UNTRACKED_REVISION
+        token = page_token(identity, revision, payload.query) if tracked else None
+        rows = None
+        if tracked:
+            if payload.offset and payload.snapshot != token:
+                raise HTTPException(409, "Das Inventar wurde geändert. Die Liste wird neu geladen.")
+            if cookie and not (payload.refresh and payload.offset == 0):
+                rows = _inventory_snapshots.get(identity, revision)
         if rows is None:
             rows = _load_inventory_rows(web_session.client)
-            if _read_inventory_revision(web_session.client) != revision:
+            if tracked and _read_inventory_revision(web_session.client) != revision:
                 raise HTTPException(409, "Das Inventar wurde während des Abrufs geändert. Bitte erneut laden.")
-            if cookie:
+            if tracked and cookie:
                 _inventory_snapshots.put(identity, revision, rows)
         matches = filtered(rows, payload.query)
+        if not tracked:
+            token = page_token(identity, revision, payload.query, matches)
+            if payload.offset and payload.snapshot != token:
+                raise HTTPException(409, "Das Inventar wurde geändert. Die Liste wird neu geladen.")
     except HTTPException:
         raise
     except Exception as error:

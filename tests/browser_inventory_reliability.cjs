@@ -16,9 +16,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     const rows = Array.from({ length: 1205 }, (_, index) => ({
       id: index + 1, _record_type: 'asset', asset_tag: 'TEST-' + String(index + 1).padStart(4, '0'), new_price: index === 1204 ? 123 : 0,
     }));
-    const meta = { column_order: ['asset_tag'], default_visible_columns: ['asset_tag'],
+    const columns = ['asset_tag', 'product_model', 'manufacturer', 'stock_quantity', 'category', 'condition',
+      'site', 'department', 'storage_location', 'serial_number', 'created_at', 'updated_at'];
+    const meta = { column_order: columns, default_visible_columns: columns,
       headers: { asset_tag: 'Produkterkennung' }, status_labels: {}, condition_labels: {}, inventory_group_labels: {} };
     let revision = 1, loads = 0, failNext = false, failPage = false, blocked = false;
+    let searchGate = null;
     const offsets = [];
     const snapshot = () => String(revision).padStart(64, "0");
     const page = await browser.newPage({ viewport: { width: 1440, height: 850 } });
@@ -44,6 +47,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           if (failNext || (offset && failPage)) {
             failNext = false; failPage = false; return json({ detail: 'Kurzzeitig nicht verfügbar' }, 503);
           }
+          if (query.search && searchGate) await searchGate;
           const hits = rows.filter(row => row.asset_tag.toLowerCase().includes(query.search.toLowerCase())
             && (query.price_from == null || row.new_price >= query.price_from));
           if (query.column && query.sort === 'desc') hits.sort((a,b) => b.asset_tag.localeCompare(a.asset_tag));
@@ -75,8 +79,31 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.deepEqual(offsets.slice(0,3), [0,100,100]);
 
     const search = page.getByPlaceholder('Name, Kennung, Seriennummer, Code …');
+    let releaseSearch;
+    searchGate = new Promise(resolve => { releaseSearch = resolve; });
     await search.fill('TEST-1205');
+    const loading = page.locator('.inventory-table-status').getByText('Inventar wird geladen …', { exact: true });
+    await loading.waitFor();
+    const scroller = page.locator('.table-wrapper');
+    const checkLoadingPosition = async () => {
+      const width = await scroller.evaluate(el => el.scrollWidth - el.clientWidth);
+      assert.ok(width > 0, 'table has horizontal overflow');
+      for (const left of [0, width]) {
+        await scroller.evaluate((el, x) => { el.scrollLeft = x; }, left);
+        const [viewport, label] = await Promise.all([scroller.boundingBox(), loading.boundingBox()]);
+        assert.ok(Math.abs(viewport.x + viewport.width / 2 - label.x - label.width / 2) < 2,
+          'loading status stays centred in the visible table');
+      }
+    };
+    await checkLoadingPosition();
+    await page.setViewportSize({ width: 390, height: 740 });
+    await checkLoadingPosition();
+    await page.setViewportSize({ width: 1440, height: 850 });
+    await scroller.evaluate(el => { el.scrollLeft = 0; });
+    releaseSearch();
+    searchGate = null;
     await cell('TEST-1205').waitFor();
+    await loading.waitFor({ state: 'hidden' });
     await page.locator('.status-bar').getByText('1 von 1205 Datensätzen',{exact:true}).waitFor();
     await search.clear();
     const from = page.getByLabel('Neupreis von');
@@ -105,7 +132,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.locator('.table-wrapper').evaluate(el => { el.scrollTop = el.scrollHeight; });
     await stale;
     await cell('UPDATED-1205').waitFor();
-    assert.equal(await inventoryRows.count(), 100);
+    // If the user is still near the bottom after refreshing, a second page
+    // can already be appended. In either case, no rows may be duplicated.
+    const freshRows = await inventoryRows.allTextContents();
+    assert.ok(freshRows.length >= 100 && freshRows.length <= 200);
+    assert.equal(new Set(freshRows).size, freshRows.length);
+    assert.equal(freshRows[0], 'UPDATED-1205');
 
     blocked = true;
     await page.evaluate(() => window.dispatchEvent(new Event('online')));

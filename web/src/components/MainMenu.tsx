@@ -2,7 +2,6 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
-  type RefObject,
   useRef,
   useState,
   type ReactNode,
@@ -18,8 +17,6 @@ export type DockPosition =
 
 type MainMenuProps = {
   workspaceTabs: ReactNode;
-  inventoryAreaRef: RefObject<HTMLElement | null>;
-  toolbarLayoutKey: string;
   compactLayout: boolean;
   sort: InventorySort;
   onSort: (sort: InventorySort) => void;
@@ -157,8 +154,6 @@ function DockPanelMenu({
 
 export default function MainMenu({
   workspaceTabs,
-  inventoryAreaRef,
-  toolbarLayoutKey,
   compactLayout,
   sort,
   onSort,
@@ -206,35 +201,54 @@ export default function MainMenu({
 
   useLayoutEffect(() => {
     const root = rootRef.current;
-    const leading = root?.querySelector(".menu-leading-end");
-    const trailing = root?.querySelector(".menu-logout-button");
-    if (!root || !leading || !trailing) return;
+    if (!root) return;
     if (compactLayout) {
       delete root.dataset.toolbarRow;
       return;
     }
 
+    const leading = root.querySelector(".menu-leading-end");
+    const logout = root.querySelector(".menu-logout-button");
+    const tabs = root.querySelector(".workspace-tabs");
+    const scanner = root.querySelector(".menu-scanner-button");
+    if (!leading || !logout || !tabs || !scanner) return;
+
     const syncToolbar = () => {
-      const center = inventoryAreaRef.current?.getBoundingClientRect();
-      if (!center || center.width <= 0) return;
       const menu = root.getBoundingClientRect();
-      root.style.setProperty("--inventory-left", `${Math.max(0, center.left - menu.left)}px`);
-      root.style.setProperty("--inventory-right", `${Math.max(0, menu.right - center.right)}px`);
-      const requiredWidth = (root.querySelector(".workspace-tabs")?.scrollWidth ?? 0)
-        + (root.querySelector(".menu-scanner-button")?.scrollWidth ?? 0) + 12;
-      root.dataset.toolbarRow = center.width < requiredWidth || center.left < leading.getBoundingClientRect().right + 8
-        || center.right > trailing.getBoundingClientRect().left - 8 ? "separate" : "inline";
+      const styles = getComputedStyle(root);
+      const inset = parseFloat(styles.getPropertyValue("--inventory-inset"));
+      const navigationWidth = navigationVisible ? parseFloat(styles.getPropertyValue("--dock-navigation-width")) : 0;
+      const detailWidth = detailVisible ? parseFloat(styles.getPropertyValue("--dock-detail-width")) : 0;
+      const tableLeft = inset + (navigationPosition === "left" ? navigationWidth : 0)
+        + (detailPosition === "left" ? detailWidth : 0);
+      const tableRight = menu.width - inset - (navigationPosition === "right" ? navigationWidth : 0)
+        - (detailPosition === "right" ? detailWidth : 0);
+      const safeLeft = leading.getBoundingClientRect().right - menu.left + 8;
+      const safeRight = logout.getBoundingClientRect().left - menu.left - 8;
+      const required = tabs.getBoundingClientRect().width + scanner.getBoundingClientRect().width + 8;
+
+      // Follow the table where possible, without running into the menus or logout.
+      let left = Math.max(tableLeft, safeLeft);
+      let right = Math.min(tableRight, safeRight);
+      const fitsInline = safeRight - safeLeft >= required;
+      if (fitsInline && right - left < required) {
+        // Keep the alignment on the side where panels are docked.
+        left = Math.min(left, safeRight - required);
+        right = Math.max(right, left + required);
+      } else if (!fitsInline) {
+        left = tableRight - tableLeft >= required ? tableLeft : inset;
+        right = tableRight - tableLeft >= required ? tableRight : menu.width - inset;
+      }
+
+      root.style.setProperty("--inventory-left", `${left}px`);
+      root.style.setProperty("--inventory-right", `${menu.width - right}px`);
+      root.dataset.toolbarRow = fitsInline ? "inline" : "separate";
     };
     syncToolbar();
     const resize = new ResizeObserver(syncToolbar);
-    for (const element of [root, leading, trailing]) resize.observe(element);
-    const frame = requestAnimationFrame(() => {
-      // The inventory panel is a sibling and may mount after this layout effect.
-      if (inventoryAreaRef.current) resize.observe(inventoryAreaRef.current);
-      syncToolbar();
-    });
-    return () => { cancelAnimationFrame(frame); resize.disconnect(); };
-  }, [compactLayout, inventoryAreaRef, toolbarLayoutKey]);
+    for (const element of [root, leading, logout, tabs, scanner]) resize.observe(element);
+    return () => resize.disconnect();
+  }, [compactLayout, navigationVisible, detailVisible, navigationPosition, detailPosition]);
 
   useEffect(
     () => {

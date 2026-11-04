@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError
 
 from web_backend.app import REFRESH_COOKIE, app, get_web_session
 from web_backend.inventory_paging import InventoryQuery, InventorySnapshots, filtered
@@ -68,6 +69,31 @@ class InventoryPagingTests(unittest.TestCase):
         self.assertEqual(self.page(offset=100, snapshot=first["snapshot"]).status_code, 409)
         self.assertEqual(self.page().json()["total"], 1204)
         self.assertEqual(self.page(limit=1000).status_code, 422)
+
+    def test_empty_revision_never_blocks_inventory_or_reuses_old_cache(self):
+        old = self.page().json()
+        self.db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.side_effect = (
+            lambda: SimpleNamespace(data=[])
+        )
+        self.assertEqual(self.http.get("/api/inventory/revision").json(), {"revision": -1})
+        self.rows = self.rows[1:]
+        self.assertEqual(self.page(offset=100, snapshot=old["snapshot"]).status_code, 409)
+        first = self.page().json()
+        self.assertEqual(first["revision"], -1)
+        self.assertEqual(first["rows"][0]["id"], 2)
+        self.assertEqual(first["next_offset"], 100)
+        second = self.page(offset=100, snapshot=first["snapshot"]).json()
+        self.assertEqual(second["rows"][0]["id"], 102)
+        self.rows = self.rows[1:]
+        self.assertEqual(self.page(offset=100, snapshot=first["snapshot"]).status_code, 409)
+        self.assertEqual(self.fetcher.call_count, 5)
+
+    def test_missing_counter_permission_is_distinct_from_inventory_permission(self):
+        query = self.db.table.return_value.select.return_value.eq.return_value.limit.return_value.execute
+        query.side_effect = APIError({"message": "permission denied for inventory_change_state", "code": "42501"})
+        self.assertEqual(self.page().status_code, 200)
+        self.fetcher.side_effect = APIError({"message": "permission denied for assets", "code": "42501"})
+        self.assertEqual(self.page().status_code, 403)
 
     def test_mac_and_localized_condition_can_be_searched(self):
         rows = [{"mac_address": "AA:BB:CC:DD:EE:FF", "condition": "used"}]

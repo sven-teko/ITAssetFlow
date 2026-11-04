@@ -282,15 +282,16 @@ function MultiSelectDropdown({
 function NewPriceFilter({ value, onChange }: { value: PriceRange; onChange: (next: PriceRange) => void }) {
   const errorId = useId();
   const { error } = priceRange(value);
-  return <fieldset className="sidebar-price-filter">
-    <legend>Neupreis (CHF)</legend>
-    <div>
-      {(["from", "to"] as const).map(key => <input key={key} type="text" inputMode="decimal"
-        aria-label={key === "from" ? "Neupreis von" : "Neupreis bis"} placeholder={key === "from" ? "Von" : "Bis"}
-        value={value[key]} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
-        onChange={event => onChange({ ...value, [key]: event.target.value })} />)}
-    </div>
-    {error && <p id={errorId} role="status">{error}</p>}
+  return <fieldset className="sidebar-range-filter" aria-label="Neupreis (CHF)">
+    {(["from", "to"] as const).map(key => {
+      const label = key === "from" ? "Neupreis von" : "Neupreis bis";
+      return <div className="sidebar-range-field" key={key}>
+        <input type="text" inputMode="decimal" aria-label={label} placeholder={`${label} (CHF)`}
+          value={value[key]} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
+          onChange={event => onChange({ ...value, [key]: event.target.value })} />
+      </div>;
+    })}
+    {error && <p id={errorId} className="sidebar-range-error" role="status">{error}</p>}
   </fieldset>;
 }
 

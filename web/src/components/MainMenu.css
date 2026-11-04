@@ -82,7 +82,8 @@
 
 .menu-inventory-toolbar {
   position: absolute;
-  top: 4px;
+  top: 50%;
+  transform: translateY(-50%);
   left: var(--inventory-left, 290px);
   right: var(--inventory-right, 130px);
   display: flex;
@@ -92,6 +93,7 @@
   pointer-events: none;
 }
 .menu-inventory-toolbar > * { pointer-events: auto; }
+.menu-bar:not(.menu-bar-compact) .menu-inventory-toolbar > * { flex-shrink: 0; }
 
 .workspace-tabs { display: flex; gap: 4px; }
 .workspace-tabs button {
@@ -116,6 +118,7 @@
 .menu-bar[data-toolbar-row="separate"] .menu-inventory-toolbar,
 .menu-bar-compact .menu-inventory-toolbar {
   position: static;
+  transform: none;
   grid-area: 2 / 1 / 3 / -1;
   margin-inline: calc(var(--inventory-left, 0px) - var(--menu-inset))
     calc(var(--inventory-right, 0px) - var(--menu-inset));

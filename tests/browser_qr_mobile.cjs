@@ -126,21 +126,47 @@ const run = (async () => {
       await page.mouse.up();
     };
     const order = () => page.locator('.workspace > .dock-shell, .workspace > .inventory-area').evaluateAll(els => els.map(el => el.dataset.dockPanel || 'inventory'));
+    const checkDockLayout = () => page.waitForFunction(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      const root = document.querySelector('.menu-bar');
+      const table = rect('.table-wrapper');
+      const area = rect('.inventory-area');
+      const tabs = rect('.workspace-tabs');
+      const scanner = rect('.menu-scanner-button');
+      const menu = rect('.menu-leading-end');
+      const logout = rect('.menu-logout-button');
+      return root.dataset.toolbarRow === 'inline'
+        && tabs.left >= menu.right + 7
+        && scanner.right <= logout.left - 7
+        && scanner.left >= tabs.right + 3
+        && Math.abs(tabs.left - Math.max(table.left, menu.right + 8)) < 2
+        && Math.abs(scanner.right - Math.min(table.right, logout.left - 8)) < 2
+        && Math.abs((tabs.top + tabs.bottom) - (scanner.top + scanner.bottom)) < 2
+        && [table.left - area.left, table.top - area.top, area.right - table.right, area.bottom - table.bottom]
+          .every(inset => inset >= 0 && inset <= 5);
+    });
+    await checkDockLayout();
     await drag('detail', workspace.x + 10, '.dock-drop-zone-left.active');
     assert.deepEqual(await order(), ['detail', 'navigation', 'inventory']);
+    await checkDockLayout();
+    await screenshot('docked-both-left');
     await drag('navigation', workspace.x + workspace.width - 10, '.dock-drop-zone-right.active');
     assert.deepEqual(await order(), ['detail', 'inventory', 'navigation']);
+    await checkDockLayout();
     await drag('detail', workspace.x + workspace.width - 10, '.dock-drop-zone-right.active');
     assert.deepEqual(await order(), ['inventory', 'navigation', 'detail']);
+    await checkDockLayout();
+    await screenshot('docked-both-right');
     const navBox = await page.locator('[data-dock-panel="navigation"]').boundingBox();
     await drag('detail', navBox.x + navBox.width * 0.35, '.dock-navigation-shell.dock-shell-drop-before');
     assert.deepEqual(await order(), ['inventory', 'detail', 'navigation']);
+    await checkDockLayout();
     const beforeCancel = await order();
     const title = await page.locator('[data-dock-panel="detail"] .dock-title').boundingBox();
     await page.mouse.move(title.x + 30, title.y + 10); await page.mouse.down();
     await page.mouse.move(5, 5, { steps: 5 }); await page.mouse.up();
     assert.deepEqual(await order(), beforeCancel);
-    console.log('PASS: Randziele links/rechts, Reihenfolge, Nachbarziel und Abbruch ausserhalb');
+    console.log('PASS: Randziele und Nachbarziele, kompakte Kopfzeile und 4-px-Tabellenrand bei allen Dockpositionen');
 
     await page.evaluate(() => { location.hash = '/settings?tab=employees'; });
     await page.getByRole('table', { name: 'Mitarbeiter' }).waitFor();

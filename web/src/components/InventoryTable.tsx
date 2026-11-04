@@ -1,4 +1,3 @@
-import LoadingIndicator from "./LoadingIndicator";
 import {
   useEffect,
   useMemo,
@@ -784,10 +783,13 @@ export default function InventoryTable({
   }
 
 
+  const showTableStatus = displayedRows.length === 0;
+
   return (
+    <div className="inventory-table-viewport">
     <div className="table-wrapper" ref={scrollRoot}>
 
-      <table className="inventory-table">
+      <table className="inventory-table" aria-busy={loading}>
 
         <colgroup>
 
@@ -1047,32 +1049,6 @@ export default function InventoryTable({
             </td>
           </tr>}
 
-          {loading && !displayedRows.length && <tr><td colSpan={Math.max(columns.length, 1)}>
-            <LoadingIndicator label="Inventar wird geladen …" />
-          </td></tr>}
-
-          {
-            !loading
-            && displayedRows.length === 0
-            && (
-              <tr>
-
-                <td
-                  className="empty-table"
-                  colSpan={
-                    Math.max(
-                      columns.length,
-                      1,
-                    )
-                  }
-                >
-                  Keine Inventareinträge gefunden.
-                </td>
-
-              </tr>
-            )
-          }
-
         </tbody>
 
       </table>
@@ -1161,6 +1137,15 @@ export default function InventoryTable({
         )
       }
 
+    </div>
+      <div className="inventory-table-status" role="status">
+        {showTableStatus && (
+          <span className="inventory-table-status-label">
+            {loading && <span className="inventory-table-spinner" aria-hidden="true" />}
+            {loading ? "Inventar wird geladen …" : "Keine Inventareinträge gefunden."}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

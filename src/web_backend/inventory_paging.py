@@ -195,8 +195,16 @@ def filtered(rows: list[dict], query: InventoryQuery) -> list[dict]:
     return result
 
 
-def page_token(identity: str, revision: int, query: InventoryQuery) -> str:
-    return sha256(f"{identity}:{revision}:{query.model_dump_json()}".encode()).hexdigest()
+def page_token(identity: str, revision: int, query: InventoryQuery,
+               untracked_rows: list[dict] | None = None) -> str:
+    digest = sha256(f"{identity}:{revision}:{query.model_dump_json()}".encode())
+    if untracked_rows is not None:
+        # Without a database revision, only append a page if the freshly
+        # authorized result is still identical, including its order.
+        for row in untracked_rows:
+            digest.update(b"\n")
+            digest.update(json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode())
+    return digest.hexdigest()
 
 
 class InventorySnapshots:

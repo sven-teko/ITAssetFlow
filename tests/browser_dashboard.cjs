@@ -71,10 +71,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.ok(await scanner.isVisible());
     assert.ok(Math.abs((await scanner.boundingBox()).y - (await inventory.boundingBox()).y) < 6);
     const checkAlignment = () => page.waitForFunction(() => {
-      const area = document.querySelector('.inventory-area').getBoundingClientRect();
+      const area = document.querySelector('.table-wrapper').getBoundingClientRect();
       const tabs = document.querySelector('.workspace-tabs').getBoundingClientRect();
       const scan = document.querySelector('.menu-scanner-button').getBoundingClientRect();
-      return Math.abs(tabs.left-area.left) < 2 && Math.abs(scan.right-area.right) < 2;
+      const menu = document.querySelector('.menu-leading-end').getBoundingClientRect();
+      const logout = document.querySelector('.menu-logout-button').getBoundingClientRect();
+      return document.querySelector('.menu-bar').dataset.toolbarRow === 'inline'
+        && Math.abs(tabs.left - Math.max(area.left, menu.right + 8)) < 2
+        && Math.abs(scan.right - Math.min(area.right, logout.left - 8)) < 2;
     });
     await checkAlignment();
     await page.setViewportSize({ width: 1190, height: 850 });
