@@ -80,7 +80,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.setViewportSize({ width: 1190, height: 850 });
     await checkAlignment();
     await page.setViewportSize({ width: 740, height: 850 });
-    await checkAlignment();
+    await page.waitForFunction(() => {
+      const area = document.querySelector('.table-wrapper').getBoundingClientRect();
+      const tabs = document.querySelector('.workspace-tabs').getBoundingClientRect();
+      const scan = document.querySelector('.menu-scanner-button').getBoundingClientRect();
+      return Math.abs(tabs.left-area.left) < 2 && Math.abs(scan.right-area.right) < 2;
+    });
     await page.setViewportSize({ width: 1440, height: 850 });
     await page.getByRole('button', { name: 'Optionen', exact: true }).click();
     await page.getByText('Sortieren nach', { exact: true }).click();
@@ -137,6 +142,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.ok(await mobile.locator('.dashboard-panel').evaluate(el => el.scrollWidth <= el.clientWidth));
     await mobile.getByRole('tab', { name: 'IT-Inventar', exact: true }).click();
     assert.equal(await mobile.getByRole('tab', { name: 'Filter', exact: true }).getAttribute('aria-selected'), 'true');
+    await mobile.getByRole('button', { name: 'Optionen', exact: true }).tap();
+    await mobile.getByRole('button', { name: 'Spalten' }).tap();
+    const mobileColumns = mobile.locator('.column-submenu');
+    await mobileColumns.getByRole('checkbox', { name: 'Produkterkennung' }).waitFor();
+    const columnBounds = await mobileColumns.boundingBox();
+    assert.ok(columnBounds.x >= 0 && columnBounds.x + columnBounds.width <= 320);
     console.log('PASS: Dashboard tabs, sorting, error retry, auto-refresh, and mobile layout.');
   } finally {
     await browser.close();

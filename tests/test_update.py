@@ -20,11 +20,16 @@ class FakeQuery:
     def __init__(self, client, table):
         self.client, self.table = client, table
         self.filters, self.operation, self.payload = [], "select", None
+        self.bounds = None
 
     def select(self, *_args, **_kwargs):
         return self
 
     def order(self, *_args, **_kwargs):
+        return self
+
+    def range(self, start, end):
+        self.bounds = (start, end + 1)
         return self
 
     def limit(self, *_args):
@@ -60,6 +65,8 @@ class FakeQuery:
             self.client.rows[self.table] = [row for row in rows if row not in matching]
         if self.operation != "select":
             self.client.writes.append((self.table, self.operation, deepcopy(self.payload)))
+        if self.bounds is not None:
+            matching = matching[self.bounds[0]:self.bounds[1]]
         return SimpleNamespace(data=deepcopy(matching))
 
 

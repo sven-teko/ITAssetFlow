@@ -50,6 +50,7 @@ const run = (async () => {
       if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
       if (endpoint === '/api/auth/session') return json({ authenticated: true, email: 'admin@example.test', role });
       if (endpoint === '/api/inventory/meta') return json(meta);
+      if (endpoint === '/api/preferences/inventory-columns') return json({ preferences: null });
       if (endpoint === '/api/inventory/revision') return json({ revision: 1 });
       if (endpoint === '/api/inventory/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': test\n\n' });
       if (endpoint === '/api/inventory/form-data') return json(data);
@@ -385,18 +386,30 @@ const run = (async () => {
     await page.waitForFunction(()=>!document.querySelector('.entry-context-menu'));
     assert.ok(deletedKeys.length === 1 && deletedKeys[0].startsWith('stock:'));
 
-    // Ein schmales PC-Fenster mit Maus bleibt im normalen Layout.
-    const pc = await browser.newPage({viewport:{width:390,height:844},hasTouch:false});
+    // Das schmale Fenster aus dem Fehlerbericht bekommt eine Tabelle über die ganze Breite.
+    const pc = await browser.newPage({viewport:{width:853,height:910},hasTouch:false});
     await pc.route(url=>url.pathname.startsWith('/api/'),handleApi);
     await pc.goto((process.env.UI_BASE_URL || 'http://127.0.0.1:5173')+'/#/inventory');
     await pc.locator('.inventory-table tbody tr').first().waitFor();
-    assert.equal(await pc.getByRole('tablist',{name:'Inventarbereiche'}).count(),0);
-    assert.equal(await pc.locator('.dock-navigation-shell').isVisible(),true);
+    assert.equal(await pc.getByRole('tab', { name: 'Tabelle', exact: true }).getAttribute('aria-selected'), 'true');
+    assert.equal(await pc.locator('.dock-navigation-shell').isVisible(),false);
+    const compactTable = await pc.locator('.table-wrapper').boundingBox();
+    assert.ok(compactTable.x < 20 && compactTable.width > 820);
+    if (process.env.SCREENSHOT_DIR) await pc.screenshot({ path: path.join(process.env.SCREENSHOT_DIR, 'desktop-853.png') });
+    assert.equal(await pc.getByText(/Inventareinträge geladen\./).count(), 0);
+    assert.equal(await pc.locator('.status-bar').getByText(/Datensätze/).count(), 1);
+    await pc.getByRole('searchbox', { name: 'Inventar durchsuchen' }).fill('kein passender Eintrag');
+    await pc.getByText('Keine Inventareinträge gefunden.').waitFor();
+    await pc.getByRole('searchbox', { name: 'Inventar durchsuchen' }).clear();
+    await pc.getByRole('tab', { name: 'Filter', exact: true }).click();
+    await pc.locator('.dock-navigation-shell').waitFor();
+    await pc.getByRole('tab', { name: 'Details', exact: true }).click();
+    await pc.locator('.dock-detail-shell').waitFor();
     // Unter Chromium --single-process bleiben beide Testkontexte bis zum Testende offen.
-    console.log('PASS: Kontextmenü, Löschen nur des angeklickten Artikels und PC-Layout mit Maus');
+    console.log('PASS: Kontextmenü, Löschen nur des angeklickten Artikels und kompaktes PC-Layout mit Maus');
 
-    for (const width of [390, 360]) {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+    for (const width of [390, 360, 844]) {
+      await page.setViewportSize({ width, height: width === 844 ? 390 : 800 });
       await page.locator('.inventory-table tbody tr').first().waitFor();
 
       const cdp = await page.context().newCDPSession(page);
@@ -405,9 +418,9 @@ const run = (async () => {
         for(let i=1;i<=5;i++) await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x1+(x2-x1)*i/5,y:y1+(y2-y1)*i/5}]});
         await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
       };
-      // Wischen auf der Tabellenüberschrift wechselt zum nächsten Bereich.
-      let heading=await page.locator('.inventory-status').boundingBox();
-      await swipe(width-20,heading.y+8,20,heading.y+8);
+      // Wischen neben der Tabelle wechselt zum nächsten Bereich.
+      const table = await page.locator('.table-wrapper').boundingBox();
+      await swipe(width-3,table.y+12,20,table.y+12);
       await page.waitForFunction(()=>document.querySelector('#mobile-tab-detail')?.getAttribute('aria-selected') === 'true');
       const detail=await page.locator('.details-content').boundingBox();
       await swipe(20,detail.y+70,width-20,detail.y+70);
@@ -429,7 +442,7 @@ const run = (async () => {
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-inventory`);
       assert.equal(await page.getByRole('tab', { name: 'Tabelle', exact: true }).getAttribute('aria-selected'), 'true');
       await page.getByRole('tab', { name: 'Filter', exact: true }).click();
-      await page.getByLabel('Inventar durchsuchen', { exact: true }).waitFor();
+      await page.getByRole('searchbox', { name: 'Inventar durchsuchen', exact: true }).waitFor();
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-filter`);
       await page.getByRole('button', { name: 'Status', exact: true }).click();
       await page.locator('.filter-dropdown-menu').filter({ visible: true }).waitFor();
@@ -465,7 +478,12 @@ const run = (async () => {
       await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-qr`);
       const dialog = await page.locator('.qr-dialog').boundingBox();
-      assert.equal(dialog.x, 0); assert.equal(dialog.width, width);
+      if (width <= 600) {
+        assert.equal(dialog.x, 0); assert.equal(dialog.width, width);
+      } else {
+        assert.ok(dialog.x >= 0 && dialog.x + dialog.width <= width);
+        assert.ok(dialog.y >= 0 && dialog.y + dialog.height <= 390);
+      }
       await closeQr();
       await page.getByRole('tab', { name: 'Tabelle', exact: true }).click();
       await page.getByRole('button', { name: '+ Neuer Artikel', exact: true }).click();
@@ -477,7 +495,7 @@ const run = (async () => {
       await noHorizontalOverflow(); await screenshot(`mobile-${width}-employees`);
       await page.getByRole('button', { name: /Zurück zum Inventar/ }).click();
     }
-    console.log('PASS: Hochformat 390/360 px: Tabelle, Wischen, langes Drücken, Filter, Details, Scanner, Artikel und Mitarbeiter');
+    console.log('PASS: Hochformat 390/360 px und Querformat 844 px: Tabelle, Wischen, langes Drücken, Filter, Details, Scanner, Artikel und Mitarbeiter');
 
     role = 'viewer'; await page.reload();
     await page.locator('.inventory-table tbody tr').first().waitFor();

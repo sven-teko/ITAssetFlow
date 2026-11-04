@@ -20,6 +20,7 @@ type MainMenuProps = {
   workspaceTabs: ReactNode;
   inventoryAreaRef: RefObject<HTMLElement | null>;
   toolbarLayoutKey: string;
+  compactLayout: boolean;
   sort: InventorySort;
   onSort: (sort: InventorySort) => void;
   onScan: () => void;
@@ -156,6 +157,7 @@ export default function MainMenu({
   workspaceTabs,
   inventoryAreaRef,
   toolbarLayoutKey,
+  compactLayout,
   sort,
   onSort,
   onScan,
@@ -203,6 +205,10 @@ export default function MainMenu({
     const leading = root?.querySelector(".menu-leading-end");
     const trailing = root?.querySelector(".menu-logout-button");
     if (!root || !leading || !trailing) return;
+    if (compactLayout) {
+      delete root.dataset.toolbarRow;
+      return;
+    }
 
     const syncToolbar = () => {
       const center = inventoryAreaRef.current?.getBoundingClientRect();
@@ -210,7 +216,9 @@ export default function MainMenu({
       const menu = root.getBoundingClientRect();
       root.style.setProperty("--inventory-left", `${Math.max(0, center.left - menu.left)}px`);
       root.style.setProperty("--inventory-right", `${Math.max(0, menu.right - center.right)}px`);
-      root.dataset.toolbarRow = center.left < leading.getBoundingClientRect().right + 8
+      const requiredWidth = (root.querySelector(".workspace-tabs")?.scrollWidth ?? 0)
+        + (root.querySelector(".menu-scanner-button")?.scrollWidth ?? 0) + 12;
+      root.dataset.toolbarRow = center.width < requiredWidth || center.left < leading.getBoundingClientRect().right + 8
         || center.right > trailing.getBoundingClientRect().left - 8 ? "separate" : "inline";
     };
     syncToolbar();
@@ -222,7 +230,7 @@ export default function MainMenu({
       syncToolbar();
     });
     return () => { cancelAnimationFrame(frame); resize.disconnect(); };
-  }, [inventoryAreaRef, toolbarLayoutKey]);
+  }, [compactLayout, inventoryAreaRef, toolbarLayoutKey]);
 
   useEffect(
     () => {
@@ -304,7 +312,7 @@ export default function MainMenu({
 
   return (
     <div
-      className="menu-bar"
+      className={`menu-bar${compactLayout ? " menu-bar-compact" : ""}`}
       ref={rootRef}
     >
 
@@ -545,22 +553,24 @@ export default function MainMenu({
                   </select>
                 </div>
               </details>
-              <div className="menu-separator" />
+              {!compactLayout && <>
+                <div className="menu-separator" />
 
-              <DockPanelMenu
-                title="Navigation"
-                visible={navigationVisible}
-                position={navigationPosition}
-                onVisibleChange={onNavigationVisible}
-                onPositionChange={onNavigationPosition}
-              />
-              <DockPanelMenu
-                title="Detailansicht"
-                visible={detailVisible}
-                position={detailPosition}
-                onVisibleChange={onDetailVisible}
-                onPositionChange={onDetailPosition}
-              />
+                <DockPanelMenu
+                  title="Navigation"
+                  visible={navigationVisible}
+                  position={navigationPosition}
+                  onVisibleChange={onNavigationVisible}
+                  onPositionChange={onNavigationPosition}
+                />
+                <DockPanelMenu
+                  title="Detailansicht"
+                  visible={detailVisible}
+                  position={detailPosition}
+                  onVisibleChange={onDetailVisible}
+                  onPositionChange={onDetailPosition}
+                />
+              </>}
 
 
               <div className="menu-separator" />
@@ -701,7 +711,6 @@ export default function MainMenu({
           Scanner
         </button>
       </div>
-      <div className="menu-bar-spacer" />
 
 
       <button

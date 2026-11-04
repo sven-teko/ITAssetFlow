@@ -43,10 +43,20 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
     for (const f of ["20261029093456_site_permissions","20261102145032_inventory_archive_images","20261102153129_stock_outcomes","20261102154643_stock_metadata_notes","20261103075158_archive_permanent_delete","20261103083104_archive_restore","20261103102308_inventory_write_integrity"])
       await seed(`supabase/migrations/${f}.sql`);
     await seed("supabase/migrations/20261103122054_inventory_connections.sql");
+    await seed("supabase/migrations/20261103123433_atomic_csv_and_archive_connections.sql");
     await as("admin", async () => {
       await q("SELECT public.set_employee_site_access(2,ARRAY[1,2]::bigint[])");
       await q("SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])");
       await q("SELECT public.archive_inventory_items(ARRAY['asset:30'], '{\"reason\":\"lost\"}')");
+      const movement = (await q("SELECT id,quantity FROM public.stock_movements WHERE product_model_id=101 LIMIT 1"))[0];
+      const importSnapshot = async tables => (await q("SELECT public.import_inventory_snapshot($1) AS count", [tables]))[0].count;
+      await fails(() => importSnapshot({product_models:[{id:100,name:"Must roll back"}],
+        stock_movements:[{id:movement.id,quantity:99}]}),"P0001");
+      assert.equal((await q("SELECT name FROM public.product_models WHERE id=100"))[0].name,"Notebook");
+      assert.equal(await importSnapshot({product_models:[{id:100,name:"Notebook updated"}],
+        stock_movements:[movement]}),2);
+      assert.equal((await q("SELECT name FROM public.product_models WHERE id=100"))[0].name,"Notebook updated");
+      assert.equal(await level(11),10);
     });
     const asset = {
       edit:{record_type:"asset",id:10}, model:{mode:"existing",id:100}, entry_type:"asset", condition:"used", storage_location_id:12,
@@ -94,6 +104,12 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       assert.deepEqual(await children(), [mouse]);
       assert.equal((await connect(connected,false)).id,pc);
       assert.deepEqual(await children(), [mouse]); // Retry cannot resurrect a removed link.
+      await q("SELECT public.archive_inventory_items($1, '{\"reason\":\"lost\"}')", [[`asset:${pc}`]]);
+      assert.deepEqual(await children(), []);
+      assert.equal((await q("SELECT count(*)::int AS n FROM public.asset_component_assignments WHERE parent_asset_id=$1 AND removed_at IS NOT NULL",[pc]))[0].n,2);
+      await connect({...connected, request_id:randomUUID(), edit:{record_type:"asset",id:created.id},
+        asset:{...connected.asset,asset_tag:"NEU-10"},connection_changes:{add:[mouse],remove:[]}},true);
+      assert.equal((await q("SELECT parent_asset_id FROM public.asset_component_assignments WHERE child_asset_id=$1 AND removed_at IS NULL",[mouse]))[0].parent_asset_id,created.id);
       const snapshot=(await q("SELECT updated_at::text FROM public.assets WHERE id=10"))[0].updated_at;
       await save({...asset,edit:{...asset.edit,updated_at:snapshot},assignment:{department_id:10,employee_id:2}},true);
       await fails(() => save({...asset,edit:{...asset.edit,updated_at:snapshot},assignment:{department_id:10,employee_id:2}},true),"40001");
@@ -122,9 +138,10 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       assert.equal((await q("SELECT public.search_inventory_archive(0,'','Allschwil','customer',NULL,NULL) result"))[0].result.total,0);
     });
     await as("viewer", async () => {
+      await fails(() => q("SELECT public.import_inventory_snapshot('{}')"),"42501");
       await fails(() => save(stock,true),"42501");
       await fails(() => move("stock:101:11:used",12,1,9),"42501");
-      assert.equal((await q("SELECT public.search_inventory_archive(0,'','','',NULL,NULL) result"))[0].result.total,0);
+      assert.equal((await q("SELECT public.search_inventory_archive(0,'','','',NULL,NULL) result"))[0].result.total,1);
     });
     console.log("PASS: Archivzwang, Rollback von Artikel/Stammdaten/Zuweisungen, veraltete Buchungen, Teilumlagerung, Wiederholung und standortgeschützte Suche.");
   } finally { await db.close(); }

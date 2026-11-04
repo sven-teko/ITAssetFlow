@@ -77,6 +77,8 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class InventoryAccessDeniedError extends Error {}
+
 export class InventoryMetaError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -120,11 +122,15 @@ function ensureAuthorized(response: Response): void {
 
 export async function loadInventoryRows(): Promise<InventoryRow[]> {
   const response = await fetch(`${API_BASE}/api/inventory`, {
-    credentials: "include",
+    credentials: "include", cache: "no-store",
   });
 
   ensureAuthorized(response);
   const data = await readJson(response);
+
+  if (response.status === 403) {
+    throw new InventoryAccessDeniedError(errorDetail(data, "Der Zugriff auf das Inventar wurde verweigert."));
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -186,6 +192,10 @@ export async function loadInventoryDashboard(signal: AbortSignal): Promise<Dashb
   });
   ensureAuthorized(response);
   const data = await readJson(response);
+  if (response.status === 403) {
+    throw new InventoryAccessDeniedError(errorDetail(data, "Der Zugriff auf das Inventar wurde verweigert."));
+  }
+
   if (!response.ok || !isRecord(data) || !Array.isArray(data.sites) ||
       !Array.isArray(data.review_items) || typeof data.review_after_days !== "number") {
     throw new Error(errorDetail(data, "Das Dashboard konnte nicht geladen werden."));
@@ -208,6 +218,10 @@ export async function loadInventoryRevision(): Promise<number> {
     await readJson(
       response,
     );
+
+  if (response.status === 403) {
+    throw new InventoryAccessDeniedError(errorDetail(data, "Der Zugriff auf das Inventar wurde verweigert."));
+  }
 
   if (!response.ok) {
     throw new Error(

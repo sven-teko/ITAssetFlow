@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from infrastructure.data_transfer_service import DataTransferService
+from infrastructure.asset_repository import AssetRepository
 
 
 class ExportQuery:
@@ -52,6 +53,38 @@ class ExportClient:
 
 
 class ExportTests(unittest.TestCase):
+    def test_inventory_reads_through_server_cap(self):
+        class InventoryQuery(ExportQuery):
+            def select(self, columns):
+                assert columns == "*"
+                return self
+
+            def is_(self, key, value):
+                assert (key, value) == ("archived_at", "null")
+                return self
+
+        client = ExportClient({"assets": [{"id": i} for i in range(1205, 0, -1)]}, cap=137)
+        client.table = lambda name: InventoryQuery(client, name)
+        rows = AssetRepository(client)._load_rows("assets", order_column="id", required=True)
+        self.assertEqual([row["id"] for row in rows], list(range(1, 1206)))
+
+    def test_csv_import_submits_one_atomic_request(self):
+        client = ExportClient({"assets": [{"id": 1, "asset_tag": "PC-001"}],
+                               "stock_movements": [{"id": 2, "quantity": 3}]})
+        calls = []
+
+        def rpc(name, payload):
+            calls.append((name, payload))
+            return SimpleNamespace(execute=lambda: SimpleNamespace(data=2))
+
+        client.rpc = rpc
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "stock.csv"
+            service = DataTransferService(client)
+            service.export_csv(filename)
+            self.assertEqual(service.import_csv(filename)["imported_rows"], 2)
+        self.assertEqual(calls, [("import_inventory_snapshot", {"p_tables": client.rows})])
+
     def test_pagination_handles_more_than_1000_rows_and_lower_server_limit(self):
         client = ExportClient({"assets": [{"id": i} for i in range(1205, 0, -1)]}, cap=137)
         snapshot = DataTransferService(client)._load_snapshot()

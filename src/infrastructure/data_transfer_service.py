@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
-from typing import Any, Iterable
+from typing import Any
 
 from supabase import Client
 
@@ -497,93 +497,17 @@ class DataTransferService:
                 "Die Importdatei enthält keine ITAssetFlow-Datensätze."
             )
 
-        imported = 0
-
-        for table_name in TABLE_ORDER:
-            rows = [
-                dict(row)
-                for row in snapshot.get(
-                    table_name,
-                    [],
-                )
-                if isinstance(row, dict)
-            ]
-            if not rows:
-                continue
-
-            if table_name == "storage_locations":
-                imported += self._upsert_storage_locations(
-                    rows
-                )
-                continue
-
-            imported += self._upsert_rows(
-                table_name,
-                rows,
-            )
-
+        imported = self.client.rpc("import_inventory_snapshot", {
+            "p_tables": {table: rows for table, rows in snapshot.items() if rows},
+        }).execute().data
+        if type(imported) is not int or imported != total_rows:
+            raise RuntimeError("Der Server hat den vollständigen Import nicht bestätigt.")
         return {
             "format": format_label,
             "path": str(path),
             "imported_rows": imported,
-            "table_count": sum(
-                1
-                for table in TABLE_ORDER
-                if snapshot.get(table)
-            ),
+            "table_count": sum(bool(snapshot.get(table)) for table in TABLE_ORDER),
         }
-
-    def _upsert_storage_locations(
-        self,
-        rows: list[dict[str, Any]],
-    ) -> int:
-        # parent_location_id ist ein Self-FK. Beim ersten Durchlauf werden
-        # alle Datensätze ohne Parent-Beziehung angelegt/aktualisiert.
-        # Im zweiten Durchlauf werden die echten Parent-IDs wieder gesetzt.
-        first_pass = []
-        for row in rows:
-            current = dict(row)
-            current["parent_location_id"] = None
-            first_pass.append(current)
-
-        self._upsert_rows(
-            "storage_locations",
-            first_pass,
-        )
-        self._upsert_rows(
-            "storage_locations",
-            rows,
-        )
-        return len(rows)
-
-    def _upsert_rows(
-        self,
-        table_name: str,
-        rows: list[dict[str, Any]],
-    ) -> int:
-        if table_name not in PRIMARY_KEYS:
-            raise ValueError(
-                f"Für Tabelle {table_name} ist kein Primärschlüssel definiert."
-            )
-
-        conflict_columns = ",".join(
-            PRIMARY_KEYS[table_name]
-        )
-
-        for batch in self._batches(
-            rows,
-            100,
-        ):
-            (
-                self.client.table(table_name)
-                .upsert(
-                    batch,
-                    on_conflict=conflict_columns,
-                )
-                .execute()
-            )
-
-        return len(rows)
 
     # ------------------------------------------------------------------
     # Format / SQL
@@ -882,20 +806,6 @@ class DataTransferService:
                 if snapshot.get(table)
             ),
         }
-
-    @staticmethod
-    def _batches(
-        rows: list[dict[str, Any]],
-        size: int,
-    ) -> Iterable[list[dict[str, Any]]]:
-        for index in range(
-            0,
-            len(rows),
-            size,
-        ):
-            yield rows[
-                index : index + size
-            ]
 
     @staticmethod
     def _json_default(

@@ -67,6 +67,8 @@ type InventoryTableProps = {
 };
 
 
+const ROW_BATCH_SIZE = 100;
+
 const MIN_COLUMN_WIDTH = 80;
 const MAX_COLUMN_WIDTH = 700;
 
@@ -209,6 +211,10 @@ export default function InventoryTable({
     );
 
 
+  const [visibleRowCount, setVisibleRowCount] = useState(ROW_BATCH_SIZE);
+  const scrollRoot = useRef<HTMLDivElement>(null);
+  const loadMoreRow = useRef<HTMLTableRowElement>(null);
+
   const displayedRows =
     useMemo(
       () => {
@@ -244,6 +250,21 @@ export default function InventoryTable({
       ],
     );
 
+
+  const hasMoreRows = visibleRowCount < displayedRows.length;
+
+  useEffect(() => {
+    const root = scrollRoot.current;
+    const sentinel = loadMoreRow.current;
+    if (!hasMoreRows || !root || !sentinel) return;
+    const observer = new IntersectionObserver(entries => {
+      if (!entries.some(entry => entry.isIntersecting)) return;
+      observer.disconnect();
+      setVisibleRowCount(count => count + ROW_BATCH_SIZE);
+    }, { root, rootMargin: "0px 0px 200px 0px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreRows, visibleRowCount]);
 
   useEffect(
     () => {
@@ -750,7 +771,7 @@ export default function InventoryTable({
 
 
   return (
-    <div className="table-wrapper">
+    <div className="table-wrapper" ref={scrollRoot}>
 
       <table className="inventory-table">
 
@@ -922,7 +943,7 @@ export default function InventoryTable({
         >
 
           {
-            displayedRows.map(
+            displayedRows.slice(0, visibleRowCount).map(
               (
                 row,
                 rowIndex,
@@ -1002,6 +1023,10 @@ export default function InventoryTable({
             )
           }
 
+
+          {hasMoreRows && <tr ref={loadMoreRow} className="inventory-load-more" aria-hidden="true">
+            <td colSpan={Math.max(columns.length, 1)}>Weitere Inventareinträge werden beim Scrollen angezeigt.</td>
+          </tr>}
 
           {
             !loading

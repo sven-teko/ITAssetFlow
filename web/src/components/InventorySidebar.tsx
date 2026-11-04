@@ -286,7 +286,6 @@ type InventorySidebarProps = {
   canManageProductModels: boolean;
 
   selectedIdentifiers: string[];
-  countText: string;
 
   onSearchChange: (
     value: string,
@@ -310,7 +309,6 @@ export default function InventorySidebar({
   loading,
   canManageProductModels,
   selectedIdentifiers,
-  countText,
   onSearchChange,
   onFiltersChange,
   onCreate,
@@ -473,10 +471,6 @@ export default function InventorySidebar({
           {selectionText}
         </div>
 
-
-        <div className="sidebar-count">
-          {countText}
-        </div>
 
       </div>
 

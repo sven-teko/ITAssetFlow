@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { loadInventoryDashboard, UnauthorizedError, type DashboardData, type DashboardLocationSummary } from "../api/inventoryApi";
+import { loadInventoryDashboard, UnauthorizedError, InventoryAccessDeniedError, type DashboardData, type DashboardLocationSummary } from "../api/inventoryApi";
 import type { InventoryRow } from "../types/inventory";
 import { formatDateTime } from "../utils/dateTime";
 import LoadingIndicator from "./LoadingIndicator";
@@ -36,7 +36,7 @@ export default function InventoryDashboard({ inventory, onUnauthorized }: Props)
       if (!controller.signal.aborted) setResult(dashboard);
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
-      if (error instanceof UnauthorizedError) onUnauthorized();
+      if (error instanceof UnauthorizedError || error instanceof InventoryAccessDeniedError) onUnauthorized();
       else setResult({ error: error instanceof Error ? error.message : "Das Dashboard konnte nicht geladen werden." });
     });
     return () => controller.abort();

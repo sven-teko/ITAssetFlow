@@ -968,10 +968,12 @@ def logout(
 
 @app.get("/api/inventory")
 def inventory(
+    response: Response,
     web_session: WebSession = Depends(
         get_web_session
     ),
 ) -> list[dict[str, Any]]:
+    response.headers["Cache-Control"] = "no-store"
     repository = AssetRepository(
         web_session.client,
     )
@@ -1086,6 +1088,7 @@ async def inventory_events(
 
 @app.get("/api/inventory/revision")
 def inventory_revision(
+    response: Response,
     web_session: WebSession = Depends(
         get_web_session
     ),
@@ -1099,8 +1102,9 @@ def inventory_revision(
     Änderung neu laden.
     """
 
+    response.headers["Cache-Control"] = "no-store"
     try:
-        response = (
+        result = (
             web_session.client
             .table(
                 "inventory_change_state"
@@ -1119,7 +1123,7 @@ def inventory_revision(
         )
 
         data = getattr(
-            response,
+            result,
             "data",
             None,
         )

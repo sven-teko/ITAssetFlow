@@ -54,7 +54,7 @@ export default function InventoryPage({
   const navigate = useNavigate();
   const location=useLocation();
   const [imageWarning,setImageWarning]=useState(typeof location.state?.imageWarning === "string" ? location.state.imageWarning : "");
-  const isMobile = useMediaQuery("(max-width: 720px) and (orientation: portrait) and (pointer: coarse)");
+  const compactLayout = useMediaQuery("(max-width: 980px), (max-width: 1100px) and (pointer: coarse)");
   const [mobileView, setMobileView] = useState<"inventory" | "navigation" | "detail">("inventory");
   const [inventorySort, setInventorySort] = useState<InventorySort>({ column: null, direction: "asc" });
   const inventoryAreaRef = useRef<HTMLElement>(null);
@@ -67,7 +67,7 @@ export default function InventoryPage({
   function switchTab(tab: typeof mobileView) { setMobileView(tab); }
   function swipeEnd(x: number, y: number) {
     const start = swipeStart.current; swipeStart.current = null;
-    if (!isMobile || !start) return;
+    if (!compactLayout || !start) return;
     const dx = x - start.x, dy = y - start.y;
     if (Math.abs(dx) < 65 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
     if ((dx > 0 && start.left) || (dx < 0 && start.right)) return;
@@ -78,9 +78,7 @@ export default function InventoryPage({
   const [
     status,
     setStatus,
-  ] = useState(
-    "Inventardaten werden geladen ...",
-  );
+  ] = useState("");
 
   const [
     aboutOpen,
@@ -212,7 +210,7 @@ export default function InventoryPage({
   }
 
   const navigationPanel =
-    (isMobile || docking.navigationVisible) ? (
+    (compactLayout || docking.navigationVisible) ? (
       <InventorySidebar
         search={view.search}
         filters={view.filters}
@@ -224,7 +222,6 @@ export default function InventoryPage({
         selectedIdentifiers={
           view.selectedIdentifiers
         }
-        countText={view.countText}
         onSearchChange={
           view.setSearch
         }
@@ -246,7 +243,7 @@ export default function InventoryPage({
     ) : null;
 
   const detailPanel =
-    (isMobile || docking.detailVisible) ? (
+    (compactLayout || docking.detailVisible) ? (
       <AssetDetailPanel
         rows={view.selectedRows}
         getIdentifier={
@@ -289,9 +286,9 @@ export default function InventoryPage({
             docking.panelRef(panel)
           }
           data-dock-panel={panel}
-          id={isMobile ? `mobile-panel-${panel}` : undefined}
-          role={isMobile ? "tabpanel" : undefined}
-          aria-labelledby={isMobile ? `mobile-tab-${panel}` : undefined}
+          id={compactLayout ? `mobile-panel-${panel}` : undefined}
+          role={compactLayout ? "tabpanel" : undefined}
+          aria-labelledby={compactLayout ? `mobile-tab-${panel}` : undefined}
           className={
             docking.panelClassName(
               panel,
@@ -300,7 +297,7 @@ export default function InventoryPage({
           onPointerDown={(
             event,
           ) =>
-            !isMobile && docking.beginDockPointer(
+            !compactLayout && docking.beginDockPointer(
               panel,
               event,
             )
@@ -313,7 +310,7 @@ export default function InventoryPage({
   }
 
   return (
-    <div className={`main-window${isMobile ? " mobile-portrait" : ""}`}>
+    <div className={`main-window${compactLayout ? " compact-inventory" : ""}`}>
       <input
         ref={
           csvFileInputRef
@@ -336,7 +333,8 @@ export default function InventoryPage({
       <MainMenu
         onScan={() => setQrOpen(true)}
         inventoryAreaRef={inventoryAreaRef}
-        toolbarLayoutKey={JSON.stringify([workspaceTab, isMobile, mobileView, docking.navigationVisible, docking.detailVisible, docking.navigationPosition, docking.detailPosition])}
+        compactLayout={compactLayout}
+        toolbarLayoutKey={JSON.stringify([workspaceTab, docking.navigationVisible, docking.detailVisible, docking.navigationPosition, docking.detailPosition])}
         sort={inventorySort}
         onSort={setInventorySort}
         workspaceTabs={<div className="workspace-tabs" role="tablist" aria-label="Hauptansicht">
@@ -447,7 +445,7 @@ export default function InventoryPage({
 
       <section className="inventory-workspace-panel" id="workspace-panel-inventory" role="tabpanel"
         aria-labelledby="workspace-tab-inventory" hidden={workspaceTab !== "inventory"}>
-      {isMobile && <nav className="mobile-inventory-toolbar" aria-label="Mobile Inventaransicht">
+      {compactLayout && <nav className="mobile-inventory-toolbar" aria-label="Inventaransicht">
         <div role="tablist" aria-label="Inventarbereiche" onPointerDown={event => { if (event.pointerType !== "mouse") swipeStart.current = { x: event.clientX, y: event.clientY }; }}
           onPointerUp={event => swipeEnd(event.clientX, event.clientY)} onPointerCancel={() => { swipeStart.current = null; }}>
           {tabs.map(tab => <button key={tab} id={`mobile-tab-${tab}`} role="tab" type="button" aria-selected={mobileView === tab}
@@ -457,7 +455,10 @@ export default function InventoryPage({
               switchTab(next); document.getElementById(`mobile-tab-${next}`)?.focus();
             } }}>{tab === "navigation" ? "Filter" : tab === "inventory" ? "Tabelle" : "Details"}</button>)}
         </div>
-        {canEdit && <button type="button" onClick={createEntry}>+ Neuer Artikel</button>}
+        {mobileView === "inventory" && <input className="compact-inventory-search" type="search"
+          aria-label="Inventar durchsuchen" placeholder="Inventar durchsuchen …" value={view.search}
+          onChange={event => view.setSearch(event.target.value)} />}
+        {canEdit && <button className="compact-create-button" type="button" onClick={createEntry} aria-label="+ Neuer Artikel" title="Neuer Artikel">+ Neu</button>}
       </nav>}
 
       {imageWarning && <div className="inventory-image-warning" role="alert">{imageWarning}<button onClick={()=>{setImageWarning("");navigate("/inventory",{replace:true,state:null});}}>Schliessen</button></div>}
@@ -467,7 +468,7 @@ export default function InventoryPage({
         data-mobile-view={mobileView}
         onTouchStart={event => {
           swipeStart.current = null;
-          if (!isMobile || event.touches.length !== 1 || (event.target as Element).closest("input,select,textarea,button")) return;
+          if (!compactLayout || event.touches.length !== 1 || (event.target as Element).closest("input,select,textarea,button")) return;
           const touch = event.touches[0];
           const table = (event.target as Element).closest(".table-wrapper");
           swipeStart.current = { x: touch.clientX, y: touch.clientY,
@@ -527,7 +528,7 @@ export default function InventoryPage({
             ),
           )}
 
-        <main ref={inventoryAreaRef} className="inventory-area" id={isMobile ? "mobile-panel-inventory" : undefined} role={isMobile ? "tabpanel" : undefined} aria-labelledby={isMobile ? "mobile-tab-inventory" : undefined}>
+        <main ref={inventoryAreaRef} className="inventory-area" id={compactLayout ? "mobile-panel-inventory" : undefined} role={compactLayout ? "tabpanel" : undefined} aria-labelledby={compactLayout ? "mobile-tab-inventory" : undefined}>
           {data.loadError && (
             <div className="inventory-load-error" role="alert">
               <span>{data.loadError}</span>
@@ -579,7 +580,6 @@ export default function InventoryPage({
               columns.resetColumns
             }
           />}
-          <div className="inventory-status" role="status">{status}</div>
         </main>
 
         {docking.dockOrder
@@ -596,6 +596,7 @@ export default function InventoryPage({
             ),
           )}
       </div>
+      <div className="inventory-status" role="status">{status}</div>
       </section>
       <section className="dashboard-panel" id="workspace-panel-dashboard" role="tabpanel"
         aria-labelledby="workspace-tab-dashboard" hidden={workspaceTab !== "dashboard"}>

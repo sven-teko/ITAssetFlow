@@ -1600,25 +1600,37 @@ class AssetRepository:
         required: bool,
         select_expression: str = "*",
     ) -> list[dict[str, Any]]:
+        page_size = 500
+        rows: list[dict[str, Any]] = []
         try:
-            def query(columns: str):
-                result = self.client.table(table_name).select(columns)
-                if table_name == self.asset_table_name:
-                    result = result.is_("archived_at", "null")
-                return result.order(order_column) if order_column else result
-            response = select_scanner_compatible(query, table_name, select_expression)
+            while True:
+                offset = len(rows)
+
+                def query(columns: str):
+                    result = self.client.table(table_name).select(columns)
+                    if table_name == self.asset_table_name:
+                        result = result.is_("archived_at", "null")
+                    if table_name == "stock_levels":
+                        for key in ("product_model_id", "storage_location_id", "condition"):
+                            result = result.order(key)
+                    elif order_column:
+                        result = result.order(order_column)
+                        if order_column != "id":
+                            result = result.order("id")
+                    return result.range(offset, offset + page_size - 1)
+
+                page = select_scanner_compatible(query, table_name, select_expression).data
+                if not page:
+                    return rows
+                if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+                    raise RuntimeError("Die Datenbank lieferte keine gültigen Datensätze.")
+                rows.extend(page)
         except Exception as error:
             message = f"Tabelle/View {table_name!r} konnte nicht gelesen werden: {error}"
             if required:
                 raise RuntimeError(message) from error
             self._warn(message, exc_info=True)
             return []
-
-        return [
-            row
-            for row in (response.data or [])
-            if isinstance(row, dict)
-        ]
 
     @staticmethod
     def _merge_catalog_data(
