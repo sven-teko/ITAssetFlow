@@ -73,7 +73,15 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-.compact-inventory .sidebar-filter-list > fieldset { grid-column: 1 / -1; }
+.compact-inventory .sidebar-range-filter { grid-column: 1 / -1; }
+
+@media (pointer: coarse) {
+  .navigation-content > input,
+  .sidebar-range-filter > input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
 .compact-inventory .filter-dropdown-menu { min-width: min(240px, calc(100vw - 24px)); max-width: calc(100vw - 24px); }
 .compact-inventory .filter-dropdown:nth-child(even) .filter-dropdown-menu { left: auto; right: 0; }
 .compact-inventory .sidebar-actions {

@@ -14,16 +14,20 @@ export function formatCHF(value: number): string {
   return cents === 0 ? `CHF ${whole}.-` : `CHF ${whole}.${String(cents).padStart(2, "0")}`;
 }
 
-export type PriceRange = { from: string; to: string };
-
-export function priceRange(range: PriceRange) {
-  let from: number | null = null;
-  let to: number | null = null;
+export function priceRange(input: string) {
+  const value = input.trim();
+  if (!value) return { from: null, to: null, error: "" };
   try {
-    if (range.from.trim()) from = parseCHF(range.from);
-    if (range.to.trim()) to = parseCHF(range.to);
+    // Ein Schweizer Preis wie «10.-» enthält keinen Bereichstrenner.
+    const [start, end, ...extra] = value.split(/(?<![.,])[-–—]/).map(part => part.trim());
+    if (extra.length || (!start && !end)) throw new Error();
+    const from = start ? parseCHF(start) : null;
+    const to = end === undefined ? from : end ? parseCHF(end) : null;
+    if (from !== null && to !== null && from > to) {
+      return { from: null, to: null, error: "Der erste Preis darf nicht höher sein als der zweite." };
+    }
+    return { from, to, error: "" };
   } catch {
-    return { from, to, error: "Bitte gültige CHF-Beträge eingeben." };
+    return { from: null, to: null, error: "Bitte einen Preis wie 10 oder einen Bereich wie 10–100 eingeben." };
   }
-  return { from, to, error: from !== null && to !== null && from > to ? "«Von» darf nicht grösser sein als «Bis»." : "" };
 }

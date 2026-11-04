@@ -1,5 +1,5 @@
 import { priceRange } from "../utils/price";
-import { matchesPurchaseDate } from "../utils/purchaseDateFilter";
+import { matchesPurchaseDate, purchaseDateRange } from "../utils/purchaseDateFilter";
 import { useMemo, useState } from "react";
 
 import type {
@@ -16,8 +16,8 @@ import { getIdentifier, getRowKey, normalizeText } from "../utils/inventory";
 
 function emptyFilters(): InventoryFilters {
   return {
-    purchaseDate: { from: "", to: "" },
-    newPrice: { from: "", to: "" },
+    purchaseDate: "",
+    newPrice: "",
     groups: new Set(),
     categories: new Set(),
     conditions: new Set(),
@@ -61,17 +61,20 @@ function mapOptions(values: Map<string, string>): FilterOption[] {
 export function useInventoryCriteria(sort: InventorySort) {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<InventoryFilters>(emptyFilters);
+  const date = useMemo(() => purchaseDateRange(filters.purchaseDate), [filters.purchaseDate]);
+  const price = useMemo(() => priceRange(filters.newPrice), [filters.newPrice]);
   const query = useMemo(() => {
-    const { purchaseDate, newPrice, ...facets } = filters;
-    const range = priceRange(newPrice);
+    const facets = Object.entries(filters).flatMap(([key, values]) =>
+      values instanceof Set ? [[key, [...values].sort()]] : [],
+    );
     return JSON.stringify({
       search: search.trim().slice(0, 400), column: sort.column, sort: sort.direction,
-      filters: Object.fromEntries(Object.entries(facets).map(([key, values]) => [key, [...values].sort()])),
-      date_from: purchaseDate.from || null, date_to: purchaseDate.to || null,
-      price_from: range.error ? null : range.from, price_to: range.error ? null : range.to,
+      filters: Object.fromEntries(facets),
+      date_from: date.from || null, date_to: date.to || null,
+      price_from: price.from, price_to: price.to,
     });
-  }, [filters, search, sort.column, sort.direction]);
-  return { search, setSearch, filters, setFilters, query };
+  }, [filters, search, sort.column, sort.direction, date, price]);
+  return { search, setSearch, filters, setFilters, date, price, query };
 }
 
 type UseInventoryViewOptions = {
@@ -91,7 +94,7 @@ export default function useInventoryView({
   meta,
   formatValue,
 }: UseInventoryViewOptions) {
-  const { search, setSearch, filters, setFilters } = criteria;
+  const { search, setSearch, filters, setFilters, date, price } = criteria;
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   const legacy = page?.legacy;
@@ -145,11 +148,11 @@ export default function useInventoryView({
       "product_model_qr_code", "product_model_ean", "product_model_sku", "product_model_part_number",
     ]);
 
-    const { from, to, error } = priceRange(filters.newPrice);
+    const { from, to } = price;
     return inventory.filter((row) => {
-      if (!error && (from !== null || to !== null)) {
-        const price = row.new_price == null || row.new_price === "" ? NaN : Number(row.new_price);
-        if (!Number.isFinite(price) || (from !== null && price < from) || (to !== null && price > to)) return false;
+      if (from !== null || to !== null) {
+        const amount = row.new_price == null || row.new_price === "" ? NaN : Number(row.new_price);
+        if (!Number.isFinite(amount) || (from !== null && amount < from) || (to !== null && amount > to)) return false;
       }
       if (filters.statuses.size > 0 && !filters.statuses.has(normalizeText(row.status))) {
         return false;
@@ -193,7 +196,7 @@ export default function useInventoryView({
         return false;
       }
 
-      if (!matchesPurchaseDate(row.purchase_date, filters.purchaseDate)) {
+      if (!matchesPurchaseDate(row.purchase_date, date)) {
         return false;
       }
 
@@ -207,7 +210,7 @@ export default function useInventoryView({
       }
       return false;
     });
-  }, [filters, formatValue, inventory, legacy, meta, search]);
+  }, [filters, formatValue, inventory, legacy, meta, search, date, price]);
 
   // Verdeckte Zeilen dürfen auch im Render unmittelbar nach einem Filterwechsel
   // nicht bearbeitet oder gelöscht werden.

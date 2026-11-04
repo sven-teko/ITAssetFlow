@@ -102,6 +102,7 @@ export default function InventoryPage({
   const criteria = useInventoryCriteria(inventorySort);
   const data = useInventoryData({
     query: criteria.query,
+    sortKey: JSON.stringify([inventorySort.column, inventorySort.direction]),
     onStatus: setStatus,
     onUnauthorized: handleUnauthorized,
   });
@@ -216,6 +217,7 @@ export default function InventoryPage({
       <InventorySidebar
         search={view.search}
         filters={view.filters}
+        rangeErrors={{ newPrice: criteria.price.error, purchaseDate: criteria.date.error }}
         options={
           view.filterOptions
         }
@@ -458,7 +460,7 @@ export default function InventoryPage({
             } }}>{tab === "navigation" ? "Filter" : tab === "inventory" ? "Tabelle" : "Details"}</button>)}
         </div>
         {mobileView === "inventory" && <input className="compact-inventory-search" type="search"
-          aria-label="Inventar durchsuchen" placeholder="Inventar durchsuchen …" value={view.search}
+          aria-label="Inventar durchsuchen" placeholder="Inventar durchsuchen" value={view.search}
           onChange={event => view.setSearch(event.target.value)} />}
         {canEdit && <button className="compact-create-button" type="button" onClick={createEntry} aria-label="+ Neuer Artikel" title="Neuer Artikel">+ Neu</button>}
       </nav>}
@@ -543,6 +545,7 @@ export default function InventoryPage({
             <LoadingIndicator />
           ) : <InventoryTable
             sort={inventorySort}
+            sorting={data.sorting}
             onSort={setInventorySort}
             rows={view.filteredRows}
             serverPaged={data.page?.legacy === false}

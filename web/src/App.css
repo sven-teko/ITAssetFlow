@@ -446,8 +446,18 @@ input:focus {
   padding: 16px;
 }
 
-.navigation-content > input {
+.navigation-content > input,
+.sidebar-range-filter > input {
   width: 100%;
+  min-width: 0;
+  min-height: 35px;
+  font: inherit;
+}
+
+.sidebar-range-error {
+  margin: 4px 0 0;
+  color: #b42318;
+  font-size: 12px;
 }
 
 .sidebar-title {

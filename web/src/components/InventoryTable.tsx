@@ -1,3 +1,4 @@
+import LoadingIndicator from "./LoadingIndicator";
 import {
   useEffect,
   useMemo,
@@ -27,6 +28,7 @@ type InventoryTableProps = {
   onLoadMore: () => Promise<void>;
   queryKey: string;
   sort: InventorySort;
+  sorting: boolean;
   onSort: (sort: InventorySort) => void;
   rowBindings?: (row: InventoryRow) => React.HTMLAttributes<HTMLTableRowElement>;
 
@@ -141,6 +143,7 @@ export default function InventoryTable({
   rows,
   serverPaged, hasNextPage, loadingMore, loadMoreError, onLoadMore, queryKey,
   sort: { column: sortColumn, direction: sortDirection },
+  sorting,
   onSort,
   rowBindings,
   columns,
@@ -1138,8 +1141,8 @@ export default function InventoryTable({
       }
 
     </div>
-      <div className="inventory-table-status" role="status">
-        {showTableStatus && (
+      <div className="inventory-table-status" role={sorting ? undefined : "status"}>
+        {sorting ? <LoadingIndicator compact label="Inventar wird sortiert …" /> : showTableStatus && (
           <span className="inventory-table-status-label">
             {loading && <span className="inventory-table-spinner" aria-hidden="true" />}
             {loading ? "Inventar wird geladen …" : "Keine Inventareinträge gefunden."}

@@ -7,14 +7,14 @@ import {
 import type { InventoryMeta, InventoryRow } from "../types/inventory";
 import { DEFAULT_INVENTORY_META } from "../utils/defaultInventoryMeta";
 
-type Options = { query: string; onStatus: (text: string) => void; onUnauthorized: () => void };
-type Page = InventoryPageResult & { query: string };
+type Options = { query: string; sortKey: string; onStatus: (text: string) => void; onUnauthorized: () => void };
+type Page = InventoryPageResult & { query: string; sortKey: string };
 type Request = { controller: AbortController; query: string; first: boolean; done?: Promise<void> };
 const emptyRows: InventoryRow[] = [];
 const denied = (error: unknown) => error instanceof UnauthorizedError || error instanceof InventoryAccessDeniedError;
 const message = (error: unknown) => error instanceof Error ? error.message : "Inventardaten konnten nicht geladen werden.";
 
-export default function useInventoryData({ query, onStatus, onUnauthorized }: Options) {
+export default function useInventoryData({ query, sortKey, onStatus, onUnauthorized }: Options) {
   const [page, setPage] = useState<Page | null>(null);
   const [meta, setMeta] = useState<InventoryMeta | null>(null);
   const [busyQuery, setBusyQuery] = useState<string | null>(null);
@@ -81,7 +81,7 @@ export default function useInventoryData({ query, onStatus, onUnauthorized }: Op
           setMeta(previous => previous ?? DEFAULT_INVENTORY_META);
           if (interactive) onStatus("Tabellenansicht mit Standardspalten.");
         } else if (metadata.value) setMeta(metadata.value);
-        commit({ ...result.value, query });
+        commit({ ...result.value, query, sortKey });
         setRefreshVersion(version => version + 1);
         setLoadError(null);
       } catch (error) {
@@ -98,7 +98,7 @@ export default function useInventoryData({ query, onStatus, onUnauthorized }: Op
     })();
     request.current = { controller, query, first: true, done };
     return done;
-  }, [commit, denyAccess, onStatus, query]);
+  }, [commit, denyAccess, onStatus, query, sortKey]);
 
   const loadData = useCallback(() => reload(true, true), [reload]);
   const loadMore = useCallback(async () => {
@@ -191,6 +191,8 @@ export default function useInventoryData({ query, onStatus, onUnauthorized }: Op
   }, [denyAccess, loadData, reload]);
 
   const visible = page?.legacy || page?.query === query ? page : null;
+  const loading = busyQuery === query || (!visible && !loadError);
   return { inventory: visible?.rows ?? emptyRows, meta, page: visible, options: page?.options ?? null, refreshVersion,
-    loading: busyQuery === query || (!visible && !loadError), loadError, loadData, loadMore, loadingMore, moreError };
+    loading, sorting: loading && !!page && !page.legacy && page.sortKey !== sortKey,
+    loadError, loadData, loadMore, loadingMore, moreError };
 }

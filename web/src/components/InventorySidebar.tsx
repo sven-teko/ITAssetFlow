@@ -1,9 +1,6 @@
-import { priceRange, type PriceRange } from "../utils/price";
-import PurchaseDateFilter from "./PurchaseDateFilter";
-import type { PurchaseDateCriteria } from "../utils/purchaseDateFilter";
+import InventoryRangeFilter from "./InventoryRangeFilter";
 import {
   useEffect,
-  useId,
   useRef,
   useState,
 } from "react";
@@ -27,8 +24,8 @@ export type InventoryFilterOptions = {
 
 
 export type InventoryFilters = {
-  purchaseDate: PurchaseDateCriteria;
-  newPrice: PriceRange;
+  purchaseDate: string;
+  newPrice: string;
   groups: Set<string>;
   categories: Set<string>;
   conditions: Set<string>;
@@ -279,26 +276,11 @@ function MultiSelectDropdown({
 }
 
 
-function NewPriceFilter({ value, onChange }: { value: PriceRange; onChange: (next: PriceRange) => void }) {
-  const errorId = useId();
-  const { error } = priceRange(value);
-  return <fieldset className="sidebar-range-filter" aria-label="Neupreis (CHF)">
-    {(["from", "to"] as const).map(key => {
-      const label = key === "from" ? "Neupreis von" : "Neupreis bis";
-      return <div className="sidebar-range-field" key={key}>
-        <input type="text" inputMode="decimal" aria-label={label} placeholder={`${label} (CHF)`}
-          value={value[key]} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
-          onChange={event => onChange({ ...value, [key]: event.target.value })} />
-      </div>;
-    })}
-    {error && <p id={errorId} className="sidebar-range-error" role="status">{error}</p>}
-  </fieldset>;
-}
-
 type InventorySidebarProps = {
   search: string;
 
   filters: InventoryFilters;
+  rangeErrors: Record<"purchaseDate" | "newPrice", string>;
   options: InventoryFilterOptions;
 
   loading: boolean;
@@ -324,6 +306,7 @@ type InventorySidebarProps = {
 export default function InventorySidebar({
   search,
   filters,
+  rangeErrors,
   options,
   loading,
   canManageProductModels,
@@ -378,20 +361,12 @@ export default function InventorySidebar({
 
       <div className="navigation-content">
 
-        <label
-          className="sidebar-title"
-          htmlFor="inventory-search"
-        >
-          Inventar durchsuchen
-        </label>
-
-
         <input
           id="inventory-search"
           type="search"
-          placeholder="Name, Kennung, Seriennummer, Code …"
+          aria-label="Inventar durchsuchen"
+          placeholder="Inventar durchsuchen"
           value={search}
-          disabled={loading}
           onChange={(event) =>
             onSearchChange(
               event.target.value,
@@ -412,11 +387,16 @@ export default function InventorySidebar({
             />
           ))}
 
-          <NewPriceFilter value={filters.newPrice} onChange={newPrice => onFiltersChange({ ...filters, newPrice })} />
-
-          <PurchaseDateFilter
+          <InventoryRangeFilter
+            label="Neupreis (CHF)"
+            value={filters.newPrice}
+            error={rangeErrors.newPrice}
+            onChange={newPrice => onFiltersChange({ ...filters, newPrice })}
+          />
+          <InventoryRangeFilter
+            label="Kaufdatum"
             value={filters.purchaseDate}
-            disabled={loading}
+            error={rangeErrors.purchaseDate}
             onChange={(purchaseDate) => onFiltersChange({ ...filters, purchaseDate })}
           />
         </div>
