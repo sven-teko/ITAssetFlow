@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from infrastructure.archive_reason import ArchiveReason
@@ -1582,11 +1583,13 @@ class AssetRepository:
     def _load_stock_levels(self) -> list[dict[str, Any]]:
         """Lädt den berechneten Mengenbestand nach Lagerort und Zustand."""
 
-        return self._load_rows(
-            "stock_levels",
-            order_column=None,
-            required=False,
-        )
+        try:
+            return self._load_rows("inventory_stock_levels", order_column=None, required=True)
+        except RuntimeError as error:
+            cause = error.__cause__
+            if not isinstance(cause, APIError) or cause.code not in {"PGRST205", "42P01"}:
+                raise
+            return self._load_rows("stock_levels", order_column=None, required=False)
 
     # ------------------------------------------------------------------
     # Laden / Zusammenführen
@@ -1610,7 +1613,7 @@ class AssetRepository:
                     result = self.client.table(table_name).select(columns)
                     if table_name == self.asset_table_name:
                         result = result.is_("archived_at", "null")
-                    if table_name == "stock_levels":
+                    if table_name in {"stock_levels", "inventory_stock_levels"}:
                         for key in ("product_model_id", "storage_location_id", "condition"):
                             result = result.order(key)
                     elif order_column:
@@ -1762,6 +1765,7 @@ class AssetRepository:
                 "condition": condition,
                 "stock_quantity": quantity,
                 "updated_at": level.get("updated_at"),
+                "new_price": level.get("new_price"),
                 "current_usage_state": "stored",
                 "inventory_usage": USAGE_STATE_LABELS["stored"],
                 "site_name": "",

@@ -11,15 +11,17 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 (async () => {
   const db = await PGlite.create();
-  const get = async sub => {
+  const asUser = async (sub, sql) => {
     await db.query("SELECT set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub, role: 'authenticated' })]);
     await db.exec('SET ROLE authenticated');
-    try { return (await db.query('SELECT public.inventory_dashboard() AS result')).rows[0].result; }
+    try { return (await db.query(sql)).rows; }
     finally {
       await db.exec('RESET ROLE');
       await db.query("SELECT set_config('request.jwt.claims','',false)");
     }
   };
+  const get = async sub => (await asUser(sub, "SELECT public.inventory_dashboard() AS result"))[0].result;
+  const prices = sub => asUser(sub, "SELECT storage_location_id::int, new_price::float FROM public.inventory_stock_levels ORDER BY storage_location_id");
   try {
     await db.exec(read('tests/fixtures/site_scope_base.sql'));
     await db.exec(read('database/scanner_codes.sql'));
@@ -59,6 +61,9 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     `);
     const { sites: all } = await get(admin);
     const { sites: limited, review_items: review, review_after_days: days } = await get(editor);
+    assert.deepEqual(await prices(editor), [{ storage_location_id: 1, new_price: 11 }]);
+    assert.deepEqual(await prices(admin), [{ storage_location_id: 1, new_price: 11 }, { storage_location_id: 2, new_price: 11 }]);
+    assert.deepEqual(await prices(viewer), []);
     assert.equal(limited.length, 1);
     const basel = limited[0];
     assert.deepEqual(basel.departments.map(d => [d.name, d.assets, d.stock_positions, d.known_value]), [['IT', 2, 1, 364]]);
@@ -106,6 +111,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
     ]);
     await db.exec('SET ROLE anon');
     await assert.rejects(db.query('SELECT public.inventory_dashboard()'), error => error.code === '42501');
+    await assert.rejects(db.query('SELECT new_price FROM public.inventory_stock_levels'), error => error.code === '42501');
     console.log('PASS: Dashboard prices, empty and depleted sites, transfers, archived activity, thresholds and site permissions.');
   } finally { await db.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

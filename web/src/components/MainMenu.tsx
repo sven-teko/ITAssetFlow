@@ -45,6 +45,8 @@ type MainMenuProps = {
 
   onImportCsv: () => void;
   onExportCsv: () => void;
+  onExportCsvTables: () => void;
+  onExportExcel: () => void;
   onExportPostgresql: () => void;
 
   onSettings: () => void;
@@ -173,6 +175,8 @@ export default function MainMenu({
   onRefresh,
   onImportCsv,
   onExportCsv,
+  onExportCsvTables,
+  onExportExcel,
   onExportPostgresql,
   onSettings,
   onArchive,
@@ -441,6 +445,7 @@ export default function MainMenu({
 
                   <button
                     type="button"
+                    title="ITAssetFlow-CSV für den Rückimport in ITAssetFlow"
                     disabled={transferBusy}
                     onClick={() =>
                       action(
@@ -449,6 +454,14 @@ export default function MainMenu({
                     }
                   >
                     CSV
+                  </button>
+
+                  <button type="button" disabled={transferBusy} onClick={() => action(onExportCsvTables)}>
+                    CSV-Tabellen (ZIP)
+                  </button>
+
+                  <button type="button" disabled={transferBusy} onClick={() => action(onExportExcel)}>
+                    Excel
                   </button>
 
                   <button

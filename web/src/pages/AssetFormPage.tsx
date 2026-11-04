@@ -2,7 +2,8 @@ import { newBookingId } from "../api/stockBooking";
 import { API_BASE } from "../api/config";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import "./AssetFormPage.css";
+import AssetFormLayout from "../components/AssetFormLayout";
+import { formatCHF, parseCHF } from "../utils/price";
 import { inventoryDateErrors, isValidISODate } from "../utils/dateValidation";
 
 
@@ -169,43 +170,6 @@ function displaySpecValue(value: unknown): string {
   return String(value);
 }
 
-function parseCHF(value: string): number {
-  let normalized = value
-    .trim()
-    .toLocaleLowerCase()
-    .replace("chf", "")
-    .trim()
-    .replaceAll("’", "'")
-    .replaceAll("'", "")
-    .replaceAll(" ", "");
-
-  if (normalized.endsWith(".-") || normalized.endsWith(",-")) {
-    normalized = normalized.slice(0, -2);
-  }
-
-  normalized = normalized.replace(/-+$/, "").replaceAll(",", ".");
-  const number = Number(normalized);
-
-  if (!Number.isFinite(number)) {
-    throw new Error("Neupreis enthält keinen gültigen CHF-Betrag (z. B. CHF 100.-).");
-  }
-
-  if (number < 0) {
-    throw new Error("Neupreis darf nicht negativ sein.");
-  }
-
-  return number;
-}
-
-function formatCHF(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
-  const whole = Math.trunc(rounded);
-  const cents = Math.round((rounded - whole) * 100);
-  const wholeText = whole.toLocaleString("en-US").replaceAll(",", "'");
-
-  return cents === 0 ? `CHF ${wholeText}.-` : `CHF ${wholeText}.` + String(cents).padStart(2, "0");
-}
-
 function todayISO(): string {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
@@ -257,10 +221,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   }>();
   const isEditMode = Boolean(entryKey);
   const [searchParams] = useSearchParams();
-  const scannedCode = isEditMode ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
-  const scannedEan = searchParams.get("code_type") === "ean";
+  const duplicateKey = !isEditMode ? searchParams.get("duplicate") : null;
+  const sourceKey = entryKey ?? duplicateKey;
+  const scannedCode = sourceKey ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
+  const scannedEan = !sourceKey && searchParams.get("code_type") === "ean";
   const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
-  const rawType=searchParams.get("code_type");
+  const rawType = sourceKey ? null : searchParams.get("code_type");
   const scannedType: CodeType = rawType && ["qr","ean","mac","serial"].includes(rawType)
     ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);
   const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial">(scannedType === "mac" ? "mac" : "serial");
@@ -336,9 +302,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       try {
         const [formResponse, metaResponse] = await Promise.all([
           fetch(
-            isEditMode
+            sourceKey
               ? `${API_BASE}/api/inventory/edit-form-data` +
-                  `?entry_key=${encodeURIComponent(entryKey ?? "")}`
+                  `?entry_key=${encodeURIComponent(sourceKey)}`
               : `${API_BASE}/api/inventory/form-data`,
             {
               credentials: "include",
@@ -386,18 +352,19 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           !Array.isArray(data.edit_entry)
             ? data.edit_entry
             : null;
-        setEditEntry(currentEdit);
+        setEditEntry(isEditMode ? currentEdit : null);
 
-        if (isEditMode && !currentEdit) {
+        if (sourceKey && !currentEdit) {
           throw new Error("Der ausgewählte Inventareintrag konnte nicht geladen werden.");
         }
-        setFormData(data);
+        const currentModel = currentEdit ? rowById(data.product_models, idText(currentEdit.product_model_id)) : null;
+        if (duplicateKey && (!currentModel || currentModel.is_active === false)) {
+          throw new Error("Das Produktmodell der Vorlage ist nicht mehr verfügbar.");
+        }
+        setFormData(duplicateKey ? { ...data, edit_entry: undefined } : data);
         setMeta(metaPayload as InventoryMeta);
 
         if (currentEdit) {
-          const currentModel =
-            data.product_models.find((model) => sameId(model.id, currentEdit.product_model_id)) ??
-            null;
           setModelMode("existing");
           setSelectedModelId(idText(currentEdit.product_model_id));
           setCategoryId(currentModel ? idText(currentModel.category_id) : "");
@@ -406,7 +373,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             .trim()
             .toLocaleLowerCase();
           setHybridEntryType(recordType === "stock" ? "stock" : "asset");
-          setStatus(
+          if (isEditMode) setStatus(
             String(currentEdit.status ?? "available")
               .trim()
               .toLocaleLowerCase(),
@@ -416,25 +383,28 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               .trim()
               .toLocaleLowerCase(),
           );
-          setPurchaseDate(dateInputValue(currentEdit.purchase_date) || todayISO());
+          if (isEditMode) setPurchaseDate(dateInputValue(currentEdit.purchase_date) || todayISO());
 
           const price = Number(currentEdit.new_price ?? 0);
           setNewPrice(Number.isFinite(price) ? formatCHF(price) : "");
 
           const nextLocationId = idText(currentEdit.storage_location_id);
-          const nextDepartmentId = idText(
-            recordType === "asset"
-              ? (currentEdit.assigned_department_id ?? currentEdit.department_id)
-              : currentEdit.department_id,
-          );
           const currentLocation = rowById(data.storage_locations, nextLocationId);
+          const nextDepartmentId = idText(
+            (duplicateKey ? currentLocation?.department_id : null) ??
+            (recordType === "asset"
+              ? currentEdit.assigned_department_id ?? currentEdit.department_id
+              : currentEdit.department_id),
+          );
           const currentDepartment = rowById(data.departments, nextDepartmentId);
           const nextSiteId = idText(
             currentEdit.site_id ?? currentLocation?.site_id ?? currentDepartment?.site_id,
           );
           setSiteId(nextSiteId);
           setDepartmentId(nextDepartmentId);
-          setLocationId(nextLocationId);
+          setLocationId(duplicateKey && (!currentLocation || currentLocation.is_active === false) ? "" : nextLocationId);
+
+          if (!isEditMode) return;
 
           const codeSource = recordType === "asset" ? currentEdit
             : data.product_models.find(model => String(model.id) === String(currentEdit.product_model_id));
@@ -474,7 +444,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
     void loadForm();
     return () => controller.abort();
-  }, [entryKey, isEditMode, navigate, onSessionExpired]);
+  }, [duplicateKey, sourceKey, isEditMode, navigate, onSessionExpired]);
   const categories = useMemo(
     () =>
       [...(formData?.product_categories ?? [])].sort((left, right) =>
@@ -1123,27 +1093,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       : {};
 
   return (
-    <div className="asset-form-page asset-form-page--editor">
-      <form className="asset-form-shell" onSubmit={(event) => void submit(event)}>
-        <div className="asset-form-scroll">
-        <header className="asset-form-header">
-          <div>
-            <h1>{isEditMode ? "Inventareintrag bearbeiten" : "Neuer Inventareintrag"}</h1>
-            <p>
-              {isEditMode
-                ? "Bestehenden Einzelartikel oder " + "Mengenbestand bearbeiten."
-                : "Einzelartikel oder Mengenbestand " + "im IT-Inventar erfassen."}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="asset-form-back-button"
-            disabled={saving}
-            onClick={() => navigate("/inventory")}
-          >
-            ← Zurück zum Inventar
-          </button>
-        </header>
+    <>
+      <AssetFormLayout
+        title={isEditMode ? "Inventareintrag bearbeiten" : "Neuer Inventareintrag"}
+        description={isEditMode ? "Bestehenden Einzelartikel oder Mengenbestand bearbeiten."
+          : duplicateKey ? "Produktmodell und Standort wurden aus der Vorlage übernommen."
+            : "Einzelartikel oder Mengenbestand im IT-Inventar erfassen."}
+        saving={saving} saveDisabled={imagePreparing}
+        submitLabel={isEditMode ? "Änderungen speichern" : "Eintrag speichern"}
+        onCancel={() => navigate("/inventory")} onSubmit={event => void submit(event)}>
         {scannedCode && scannedType !== "qr" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
           <label>Barcode enthält <select value={barcodeAssignment} onChange={event=>{
             const value=event.target.value as "mac" | "serial";setBarcodeAssignment(value);
@@ -1704,24 +1662,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               onChange={setImageChange} onBusy={setImagePreparing}/>
           </div>
         </div>
-        </div>
-        <footer className="asset-form-actions">
-          <button type="button" disabled={saving} onClick={() => navigate("/inventory")}>
-            Abbrechen
-          </button>
-          <button type="submit" className="primary-button" disabled={saving || imagePreparing}>
-            {saving
-              ? "Wird gespeichert ..."
-              : isEditMode
-                ? "Änderungen speichern"
-                : "Eintrag speichern"}
-          </button>
-        </footer>
-      </form>
+      </AssetFormLayout>
       {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount destinationData={formData} source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
         condition:String(editEntry.condition),quantity:pendingWithdrawal.available,product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
         amount={pendingWithdrawal.amount} onCancel={()=>setPendingWithdrawal(null)}
         onConfirm={submission=>persist({...pendingWithdrawal.payload,withdrawal:{...submission.withdrawal,request_id:submission.request_id}})}/>}
-    </div>
+    </>
   );
 }

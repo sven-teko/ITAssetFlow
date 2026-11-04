@@ -1,7 +1,9 @@
+import { priceRange, type PriceRange } from "../utils/price";
 import PurchaseDateFilter from "./PurchaseDateFilter";
 import type { PurchaseDateCriteria } from "../utils/purchaseDateFilter";
 import {
   useEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -26,6 +28,7 @@ export type InventoryFilterOptions = {
 
 export type InventoryFilters = {
   purchaseDate: PurchaseDateCriteria;
+  newPrice: PriceRange;
   groups: Set<string>;
   categories: Set<string>;
   conditions: Set<string>;
@@ -276,6 +279,21 @@ function MultiSelectDropdown({
 }
 
 
+function NewPriceFilter({ value, onChange }: { value: PriceRange; onChange: (next: PriceRange) => void }) {
+  const errorId = useId();
+  const { error } = priceRange(value);
+  return <fieldset className="sidebar-price-filter">
+    <legend>Neupreis (CHF)</legend>
+    <div>
+      {(["from", "to"] as const).map(key => <input key={key} type="text" inputMode="decimal"
+        aria-label={key === "from" ? "Neupreis von" : "Neupreis bis"} placeholder={key === "from" ? "Von" : "Bis"}
+        value={value[key]} aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined}
+        onChange={event => onChange({ ...value, [key]: event.target.value })} />)}
+    </div>
+    {error && <p id={errorId} role="status">{error}</p>}
+  </fieldset>;
+}
+
 type InventorySidebarProps = {
   search: string;
 
@@ -392,6 +410,8 @@ export default function InventorySidebar({
               onChange={(value) => updateFilter(key, value)}
             />
           ))}
+
+          <NewPriceFilter value={filters.newPrice} onChange={newPrice => onFiltersChange({ ...filters, newPrice })} />
 
           <PurchaseDateFilter
             value={filters.purchaseDate}

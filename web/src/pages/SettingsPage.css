@@ -659,3 +659,11 @@ select.settings-cell-editor {
 .settings-backup-card p { margin: 0 0 12px; color: #526171; }
 .settings-backup-card label { display: block; margin-bottom: 10px; }
 .settings-backup-card input[type="file"] { display: block; max-width: 100%; margin-top: 5px; }
+
+.backup-schedule-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.backup-schedule-controls label { margin: 0; }
+.backup-schedule-controls select { display: block; min-height: 35px; padding: 4px 28px 4px 8px; margin-top: 4px; }
+.backup-saved h3 { margin: 16px 0 8px; font-size: 1rem; }
+.backup-saved ul { margin: 0; padding: 0; list-style: none; }
+.backup-saved li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 7px 0; border-top: 1px solid #e2e7ec; }
+.backup-saved time { flex: 1 1 150px; }

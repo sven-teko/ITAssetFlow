@@ -1,3 +1,4 @@
+import { priceRange } from "../utils/price";
 import { matchesPurchaseDate } from "../utils/purchaseDateFilter";
 import { useMemo, useState } from "react";
 
@@ -7,6 +8,8 @@ import type {
   InventoryFilters,
 } from "../components/InventorySidebar";
 import type { InventoryMeta, InventoryRow } from "../types/inventory";
+import type { InventorySort } from "../components/InventoryTable";
+import type { InventoryPageResult } from "../api/inventoryApi";
 import { DEFAULT_INVENTORY_META } from "../utils/defaultInventoryMeta";
 import { normalizeMac } from "../utils/scannerCodes";
 import { getIdentifier, getRowKey, normalizeText } from "../utils/inventory";
@@ -14,6 +17,7 @@ import { getIdentifier, getRowKey, normalizeText } from "../utils/inventory";
 function emptyFilters(): InventoryFilters {
   return {
     purchaseDate: { from: "", to: "" },
+    newPrice: { from: "", to: "" },
     groups: new Set(),
     categories: new Set(),
     conditions: new Set(),
@@ -54,22 +58,45 @@ function mapOptions(values: Map<string, string>): FilterOption[] {
     );
 }
 
+export function useInventoryCriteria(sort: InventorySort) {
+  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<InventoryFilters>(emptyFilters);
+  const query = useMemo(() => {
+    const { purchaseDate, newPrice, ...facets } = filters;
+    const range = priceRange(newPrice);
+    return JSON.stringify({
+      search: search.trim().slice(0, 400), column: sort.column, sort: sort.direction,
+      filters: Object.fromEntries(Object.entries(facets).map(([key, values]) => [key, [...values].sort()])),
+      date_from: purchaseDate.from || null, date_to: purchaseDate.to || null,
+      price_from: range.error ? null : range.from, price_to: range.error ? null : range.to,
+    });
+  }, [filters, search, sort.column, sort.direction]);
+  return { search, setSearch, filters, setFilters, query };
+}
+
 type UseInventoryViewOptions = {
   inventory: InventoryRow[];
+  page: InventoryPageResult | null;
+  serverOptions: InventoryFilterOptions | null;
+  criteria: ReturnType<typeof useInventoryCriteria>;
   meta: InventoryMeta | null;
   formatValue: (column: string, value: unknown) => string;
 };
 
 export default function useInventoryView({
   inventory,
+  page,
+  serverOptions,
+  criteria,
   meta,
   formatValue,
 }: UseInventoryViewOptions) {
-  const [search, setSearch] = useState("");
-  const [filters, setFilters] = useState<InventoryFilters>(emptyFilters);
+  const { search, setSearch, filters, setFilters } = criteria;
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
+  const legacy = page?.legacy;
   const filterOptions = useMemo<InventoryFilterOptions>(() => {
+    if (serverOptions) return serverOptions;
     const groups = new Map<string, string>();
     const categories = new Map<string, string>();
     const conditions = new Map<string, string>();
@@ -106,9 +133,10 @@ export default function useInventoryView({
       departments: uniqueTextOptions(inventory, "department_name"),
       storageLocations: uniqueTextOptions(inventory, "storage_location"),
     };
-  }, [inventory, meta]);
+  }, [inventory, meta, serverOptions]);
 
   const filteredRows = useMemo(() => {
+    if (!legacy) return inventory;
     const searchValue = search.trim().toLocaleLowerCase();
     const macQuery = normalizeMac(searchValue);
     const searchColumns = new Set([
@@ -117,7 +145,12 @@ export default function useInventoryView({
       "product_model_qr_code", "product_model_ean", "product_model_sku", "product_model_part_number",
     ]);
 
+    const { from, to, error } = priceRange(filters.newPrice);
     return inventory.filter((row) => {
+      if (!error && (from !== null || to !== null)) {
+        const price = row.new_price == null || row.new_price === "" ? NaN : Number(row.new_price);
+        if (!Number.isFinite(price) || (from !== null && price < from) || (to !== null && price > to)) return false;
+      }
       if (filters.statuses.size > 0 && !filters.statuses.has(normalizeText(row.status))) {
         return false;
       }
@@ -174,7 +207,7 @@ export default function useInventoryView({
       }
       return false;
     });
-  }, [filters, formatValue, inventory, meta, search]);
+  }, [filters, formatValue, inventory, legacy, meta, search]);
 
   // Verdeckte Zeilen dürfen auch im Render unmittelbar nach einem Filterwechsel
   // nicht bearbeitet oder gelöscht werden.
@@ -193,10 +226,9 @@ export default function useInventoryView({
     [selectedRows],
   );
 
-  const countText =
-    filteredRows.length === inventory.length
-      ? `${inventory.length} Datensätze`
-      : `${filteredRows.length} von ${inventory.length} Datensätzen`;
+  const total = page?.total ?? 0;
+  const matched = legacy ? filteredRows.length : page?.matched ?? 0;
+  const countText = !page ? "" : matched === total ? `${total} Datensätze` : `${matched} von ${total} Datensätzen`;
 
   return {
     search,

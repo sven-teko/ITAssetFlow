@@ -1,6 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
 import { loadInventoryDashboard, UnauthorizedError, InventoryAccessDeniedError, type DashboardData, type DashboardLocationSummary } from "../api/inventoryApi";
-import type { InventoryRow } from "../types/inventory";
 import { formatDateTime } from "../utils/dateTime";
 import LoadingIndicator from "./LoadingIndicator";
 import "./InventoryDashboard.css";
@@ -13,8 +12,7 @@ type Result = DashboardData | { error: string };
 const REVIEW_PAGE_SIZE = 20;
 
 type Props = {
-  // The existing inventory sync updates this reference after each refresh.
-  inventory: InventoryRow[];
+  refreshVersion: number;
   onUnauthorized: () => void;
 };
 
@@ -24,7 +22,7 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
   </div>;
 }
 
-export default function InventoryDashboard({ inventory, onUnauthorized }: Props) {
+export default function InventoryDashboard({ refreshVersion, onUnauthorized }: Props) {
   const [result, setResult] = useState<Result | null>(null);
   const [retry, setRetry] = useState(0);
   const [expandedSites, setExpandedSites] = useState<Set<string>>(() => new Set());
@@ -40,7 +38,7 @@ export default function InventoryDashboard({ inventory, onUnauthorized }: Props)
       else setResult({ error: error instanceof Error ? error.message : "Das Dashboard konnte nicht geladen werden." });
     });
     return () => controller.abort();
-  }, [inventory, onUnauthorized, retry]);
+  }, [refreshVersion, onUnauthorized, retry]);
 
   if (result === null) return <LoadingIndicator label="Dashboard wird geladen …" />;
   if ("error" in result) return <div className="inventory-load-error" role="alert">

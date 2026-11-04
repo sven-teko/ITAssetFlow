@@ -10,7 +10,7 @@ export default function useRowContextMenu(onSelect: (row: InventoryRow) => void)
   useEffect(() => clear, []);
   function open(row: InventoryRow, x: number, y: number) {
     onSelect(row);
-    setMenu({ row, x: Math.max(8, Math.min(x, innerWidth - 232)), y: Math.max(8, Math.min(y, innerHeight - 185)) });
+    setMenu({ row, x, y });
   }
   const close = useCallback(() => setMenu(null), []);
   return {

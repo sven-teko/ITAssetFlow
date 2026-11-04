@@ -1,3 +1,4 @@
+import LoadingIndicator from "./LoadingIndicator";
 import {
   useEffect,
   useMemo,
@@ -20,6 +21,12 @@ type HeaderContextMenuState = {
 
 type InventoryTableProps = {
   rows: InventoryRow[];
+  serverPaged: boolean;
+  hasNextPage: boolean;
+  loadingMore: boolean;
+  loadMoreError: string | null;
+  onLoadMore: () => Promise<void>;
+  queryKey: string;
   sort: InventorySort;
   onSort: (sort: InventorySort) => void;
   rowBindings?: (row: InventoryRow) => React.HTMLAttributes<HTMLTableRowElement>;
@@ -133,6 +140,7 @@ function clampColumnWidth(
 
 export default function InventoryTable({
   rows,
+  serverPaged, hasNextPage, loadingMore, loadMoreError, onLoadMore, queryKey,
   sort: { column: sortColumn, direction: sortDirection },
   onSort,
   rowBindings,
@@ -218,7 +226,7 @@ export default function InventoryTable({
   const displayedRows =
     useMemo(
       () => {
-        if (!sortColumn) {
+        if (!sortColumn || serverPaged) {
           return rows;
         }
 
@@ -247,24 +255,30 @@ export default function InventoryTable({
         rows,
         sortColumn,
         sortDirection,
+        serverPaged,
       ],
     );
 
 
-  const hasMoreRows = visibleRowCount < displayedRows.length;
+  const hasMoreRows = serverPaged ? hasNextPage : visibleRowCount < displayedRows.length;
 
   useEffect(() => {
     const root = scrollRoot.current;
     const sentinel = loadMoreRow.current;
-    if (!hasMoreRows || !root || !sentinel) return;
+    if (!hasMoreRows || loading || loadingMore || loadMoreError || !root || !sentinel) return;
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return;
       observer.disconnect();
-      setVisibleRowCount(count => count + ROW_BATCH_SIZE);
+      if (serverPaged) void onLoadMore();
+      else setVisibleRowCount(count => count + ROW_BATCH_SIZE);
     }, { root, rootMargin: "0px 0px 200px 0px" });
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMoreRows, visibleRowCount]);
+  }, [displayedRows, hasMoreRows, loading, loadingMore, loadMoreError, onLoadMore, serverPaged, visibleRowCount]);
+
+  useEffect(() => {
+    if (scrollRoot.current) scrollRoot.current.scrollTop = 0;
+  }, [queryKey]);
 
   useEffect(
     () => {
@@ -943,7 +957,7 @@ export default function InventoryTable({
         >
 
           {
-            displayedRows.slice(0, visibleRowCount).map(
+            (serverPaged ? displayedRows : displayedRows.slice(0, visibleRowCount)).map(
               (
                 row,
                 rowIndex,
@@ -1024,9 +1038,18 @@ export default function InventoryTable({
           }
 
 
-          {hasMoreRows && <tr ref={loadMoreRow} className="inventory-load-more" aria-hidden="true">
-            <td colSpan={Math.max(columns.length, 1)}>Weitere Inventareinträge werden beim Scrollen angezeigt.</td>
+          {hasMoreRows && <tr ref={loadMoreRow} className="inventory-load-more">
+            <td colSpan={Math.max(columns.length, 1)}>
+              <div className="inventory-page-status">
+                {loadMoreError ? <span role="alert">{loadMoreError} <button type="button" onClick={() => void onLoadMore()}>Erneut laden</button></span>
+                  : loadingMore ? <span role="status">Weitere Einträge werden geladen …</span> : "Weitere Einträge beim Scrollen"}
+              </div>
+            </td>
           </tr>}
+
+          {loading && !displayedRows.length && <tr><td colSpan={Math.max(columns.length, 1)}>
+            <LoadingIndicator label="Inventar wird geladen …" />
+          </td></tr>}
 
           {
             !loading

@@ -79,8 +79,13 @@ const run = (async () => {
       if(path.startsWith('/api/transfer/export/')){
         await pause(1200);
         if(failExport)return json({detail:'Test: Export vorübergehend nicht erreichbar.'},503);
-        const sql=path.endsWith('/postgresql'),suffix=sql?'sql':'csv';
-        return route.fulfill({headers:{...headers,'Access-Control-Expose-Headers':'Content-Disposition','Content-Disposition':`attachment; filename="ITAssetFlow_Test.${suffix}"`},contentType:sql?'application/sql':'text/csv',body:sql?'-- ITAssetFlow PostgreSQL Export\nBEGIN;\nCOMMIT;\n':'\uFEFFitassetflow_format,version,table,row_json\r\n'});
+        const [suffix, type, body] = ({
+          csv:['csv','text/csv','\uFEFFitassetflow_format,version,table,row_json\r\n'],
+          postgresql:['sql','application/sql','BEGIN;\nCOMMIT;\n'],
+          'csv-tables':['zip','application/zip','fixture-csv-tables'],
+          excel:['xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','fixture-excel'],
+        })[path.split('/').pop()];
+        return route.fulfill({headers:{...headers,'Access-Control-Expose-Headers':'Content-Disposition','Content-Disposition':`attachment; filename="ITAssetFlow_Test.${suffix}"`},contentType:type,body});
       }
       if(path==='/api/inventory/meta')return metaFailure==='invalid'?json({}):metaFailure?json({detail:'Keine Berechtigung für Tabelleninformationen.'},metaFailure):json(meta);
       if(path==='/api/inventory/revision')return json({revision:1});
@@ -165,32 +170,37 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.6.4 · 04.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.6.6 · 04.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.6.4');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.6.6');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
       await page.getByRole('button',{name:'Datei',exact:true}).click();
       await exportMenu().getByRole('button',{name:'Export',exact:false}).hover();
     }
-    for(const label of ['CSV','PostgreSQL']){
+    for(const [label, button, suffix, expected] of [
+      ['CSV','CSV','csv','itassetflow_format'],
+      ['PostgreSQL','PostgreSQL','sql','BEGIN;'],
+      ['Excel','Excel','xlsx','fixture-excel'],
+      ['CSV-Tabellen','CSV-Tabellen (ZIP)','zip','fixture-csv-tables'],
+    ]){
       await openExportMenu();
       if(process.env.SCREENSHOT_DIR && label==='CSV')await page.screenshot({path:process.env.SCREENSHOT_DIR+'/export-menu.png'});
       const downloadEvent=page.waitForEvent('download');
-      await exportMenu().getByRole('button',{name:label,exact:true}).click();
+      await exportMenu().getByRole('button',{name:button,exact:true}).click();
       await page.getByText(`${label}-Export wird erstellt ...`,{exact:true}).waitFor();
       await openExportMenu();
       assert.equal(await exportMenu().getByRole('button',{name:'CSV',exact:true}).isDisabled(),true);
       assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isDisabled(),true);
       const download=await downloadEvent;
-      assert.equal(download.suggestedFilename(),`ITAssetFlow_Test.${label==='CSV'?'csv':'sql'}`);
+      assert.equal(download.suggestedFilename(),`ITAssetFlow_Test.${suffix}`);
       const content=fs.readFileSync(await download.path(),'utf8');
-      assert.ok(content.includes(label==='CSV'?'itassetflow_format':'BEGIN;'));
+      assert.ok(content.includes(expected));
       await page.getByText(`${label}-Export wurde erstellt.`,{exact:true}).waitFor();
       await page.locator('.status-bar').click();
     }
@@ -202,7 +212,7 @@ const run = (async () => {
     await openExportMenu();
     assert.equal(await exportMenu().getByRole('button',{name:'PostgreSQL',exact:true}).isEnabled(),true);
     await page.locator('.status-bar').click();
-    console.log('PASS: CSV- und PostgreSQL-Download, Dateinamen, Ladezustand, gesperrte Aktionen und sichtbare Exportfehler');
+    console.log('PASS: CSV-, Excel-, CSV-Tabellen- und PostgreSQL-Download, Dateinamen, Ladezustand, gesperrte Aktionen und sichtbare Exportfehler');
 
     const headerLabels=()=>page.locator('.inventory-table .table-header-label').allTextContents();
     await page.getByRole('columnheader',{name:'Standort',exact:true}).dragTo(page.getByRole('columnheader',{name:'Produkterkennung',exact:true}));

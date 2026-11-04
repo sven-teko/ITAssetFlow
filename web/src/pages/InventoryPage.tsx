@@ -17,7 +17,6 @@ import InventoryDashboard from "../components/InventoryDashboard";
 import MainMenu from "../components/MainMenu";
 import QrWorkflowDialog from "../components/QrWorkflowDialog";
 import InventoryOperationDialog from "../components/InventoryOperationDialog";
-import BulkInventoryEditDialog from "../components/BulkInventoryEditDialog";
 import EntryContextMenu from "../components/EntryContextMenu";
 import useRowContextMenu from "../hooks/useRowContextMenu";
 import useMediaQuery from "../hooks/useMediaQuery";
@@ -25,7 +24,7 @@ import useDocking from "../hooks/useDocking";
 import useInventoryActions from "../hooks/useInventoryActions";
 import useInventoryColumns from "../hooks/useInventoryColumns";
 import useInventoryData from "../hooks/useInventoryData";
-import useInventoryView from "../hooks/useInventoryView";
+import useInventoryView, { useInventoryCriteria } from "../hooks/useInventoryView";
 import type { DockPanelKind, InventoryRow } from "../types/inventory";
 import {
   getIdentifier,
@@ -60,7 +59,6 @@ export default function InventoryPage({
   const inventoryAreaRef = useRef<HTMLElement>(null);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("inventory");
   const [qrOpen, setQrOpen] = useState(false);
-  const [bulkRows, setBulkRows] = useState<InventoryRow[] | null>(null);
   const [operation, setOperation] = useState<{ kind: "move" | "stock"; row: InventoryRow } | null>(null);
   const swipeStart = useRef<{ x: number; y: number; left?: boolean; right?: boolean } | null>(null);
   const tabs = ["navigation", "inventory", "detail"] as const;
@@ -102,7 +100,9 @@ export default function InventoryPage({
       ],
     );
 
+  const criteria = useInventoryCriteria(inventorySort);
   const data = useInventoryData({
+    query: criteria.query,
     onStatus: setStatus,
     onUnauthorized: handleUnauthorized,
   });
@@ -114,6 +114,9 @@ export default function InventoryPage({
   });
 
   const view = useInventoryView({
+    criteria,
+    page: data.page,
+    serverOptions: data.options,
     inventory: data.inventory,
     meta: data.meta,
     formatValue:
@@ -196,7 +199,7 @@ export default function InventoryPage({
     } else if (rows.length > 200) {
       setStatus("Bitte höchstens 200 Einträge gleichzeitig bearbeiten.");
     } else if (rows.length > 1) {
-      setBulkRows(rows);
+      navigate("/inventory/bulk-edit", { state: { rows, meta: data.meta } });
     }
   }
 
@@ -390,6 +393,8 @@ export default function InventoryPage({
         onExportCsv={() =>
           void actions.exportCsv()
         }
+        onExportCsvTables={() => void actions.exportCsvTables()}
+        onExportExcel={() => void actions.exportExcel()}
         onExportPostgresql={() =>
           void actions.exportPostgresql()
         }
@@ -543,6 +548,12 @@ export default function InventoryPage({
             sort={inventorySort}
             onSort={setInventorySort}
             rows={view.filteredRows}
+            serverPaged={data.page?.legacy === false}
+            hasNextPage={data.page != null && data.page.next_offset !== null}
+            loadingMore={data.loadingMore}
+            loadMoreError={data.moreError}
+            onLoadMore={data.loadMore}
+            queryKey={criteria.query}
             rowBindings={rowContext.bind}
             columns={
               columns.displayedColumns
@@ -596,11 +607,11 @@ export default function InventoryPage({
             ),
           )}
       </div>
-      <div className="inventory-status" role="status">{status}</div>
+      <div className="inventory-status" role="status">{status || (typeof location.state?.inventoryNotice === "string" ? location.state.inventoryNotice : "")}</div>
       </section>
       <section className="dashboard-panel" id="workspace-panel-dashboard" role="tabpanel"
         aria-labelledby="workspace-tab-dashboard" hidden={workspaceTab !== "dashboard"}>
-        {workspaceTab === "dashboard" && <InventoryDashboard inventory={data.inventory} onUnauthorized={handleUnauthorized} />}
+        {workspaceTab === "dashboard" && <InventoryDashboard refreshVersion={data.refreshVersion} onUnauthorized={handleUnauthorized} />}
       </section>
 
       <AboutDialog
@@ -610,25 +621,20 @@ export default function InventoryPage({
         }
       />
 
-      {actions.archiveRows && <ArchiveReasonDialog count={actions.archiveRows.length} busy={actions.deleteBusy}
+      {actions.archiveKeys && <ArchiveReasonDialog count={actions.archiveKeys.length} busy={actions.deleteBusy}
         error={actions.archiveError} onCancel={actions.cancelArchive} onConfirm={reason => void actions.confirmArchive(reason)} />}
       {qrOpen && <QrWorkflowDialog canEdit={canEdit} onClose={() => setQrOpen(false)}
-        onArchive={key => { const row=data.inventory.find(row => getRowKey(row)===key); if (row) { setQrOpen(false); void actions.deleteEntries([row]); } }}
+        onArchive={key => { setQrOpen(false); actions.archiveEntries([key]); }}
         onCreate={(code, type, format) => { setQrOpen(false); navigate(`/inventory/new?code=${encodeURIComponent(code)}&code_type=${type}&code_format=${encodeURIComponent(format)}`); }}
         onEdit={(key) => { setQrOpen(false); navigate(`/inventory/${encodeURIComponent(key)}/edit`); }}
         onChanged={data.loadData} />}
 
       {rowContext.menu && contextRow && <EntryContextMenu x={rowContext.menu.x} y={rowContext.menu.y} disabled={!canEdit || loading}
         multiple={contextRows.length > 1} onClose={closeContext} onEdit={() => editEntry(contextRows)}
+        onDuplicate={contextRows.length === 1 ? () => navigate(`/inventory/new?duplicate=${encodeURIComponent(getRowKey(contextRow))}`) : undefined}
         onMove={contextRows.length === 1 ? () => setOperation({ kind: "move", row: contextRow }) : undefined}
         onChangeStock={contextRows.length === 1 && contextRow._record_type === "stock" ? () => setOperation({ kind: "stock", row: contextRow }) : undefined}
         onDelete={() => void actions.deleteEntries(contextRows)} />}
-      {bulkRows && <BulkInventoryEditDialog rows={bulkRows} meta={data.meta} onCancel={() => setBulkRows(null)}
-        onUnauthorized={handleUnauthorized} onSaved={count => {
-          setBulkRows(null);
-          view.clearSelection();
-          void data.loadData().then(() => setStatus(`${count} Einträge aktualisiert.`));
-        }} />}
       {operation && <InventoryOperationDialog kind={operation.kind} row={operation.row}
         onCancel={() => setOperation(null)} onUnauthorized={handleUnauthorized}
         onSuccess={async message => {

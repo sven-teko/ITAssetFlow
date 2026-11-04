@@ -1340,4 +1340,20 @@ input:focus {
 .asset-form-barcode-assignment label { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .asset-form-barcode-assignment select { font: inherit; padding: 8px; border: 1px solid #bfc9d2; border-radius: 4px; background: white; }
 
-.inventory-load-more td { color: #526171; text-align: center; }
+.inventory-load-more td { color: #526171; }
+.inventory-page-status { position: sticky; left: 8px; width: fit-content; white-space: normal; }
+
+.sidebar-price-filter { min-width: 0; margin: 0; padding: 6px 8px 8px; border: 1px solid #c9d1d9; border-radius: 6px; }
+.sidebar-price-filter legend { padding-inline: 4px; font-weight: 600; }
+.sidebar-price-filter > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.sidebar-price-filter input { width: 100%; min-width: 0; padding-inline: 6px; }
+.sidebar-price-filter p { margin: 6px 0 0; color: #8b2525; font-size: 12px; }
+.sidebar-actions .sidebar-product-models-button:not(:disabled) {
+  color: #572706;
+  border-color: #e8a360;
+  background: #ffdfbc;
+}
+.sidebar-actions .sidebar-product-models-button:hover:not(:disabled) { background: #ffc88e; }
+@media (pointer: coarse) {
+  .sidebar-price-filter input { min-height: 44px; font-size: 16px; }
+}

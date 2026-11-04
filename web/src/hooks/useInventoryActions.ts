@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import {
   deleteInventoryEntries,
   exportInventoryFile,
+  exportLabels,
   importInventoryCsv,
   logoutWebSession,
   UnauthorizedError,
@@ -32,27 +33,31 @@ export default function useInventoryActions({
   clearSelection,
 }: UseInventoryActionsOptions) {
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [archiveRows, setArchiveRows] = useState<InventoryRow[] | null>(null);
+  const [archiveKeys, setArchiveKeys] = useState<string[] | null>(null);
   const [archiveError, setArchiveError] = useState("");
   const [transferBusy, setTransferBusy] = useState(false);
   const transferInProgress = useRef(false);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  async function deleteEntries(rows: InventoryRow[] = selectedRows): Promise<void> {
-    if (rows.length === 0 || dataLoading || deleteBusy) return;
+  function archiveEntries(keys: string[]) {
+    if (keys.length === 0 || deleteBusy) return;
     setArchiveError("");
-    setArchiveRows(rows);
+    setArchiveKeys(keys);
+  }
+
+  function deleteEntries(rows: InventoryRow[] = selectedRows): void {
+    if (!dataLoading) archiveEntries(rows.map(getRowKey));
   }
 
   async function confirmArchive(reason: ArchiveReason): Promise<void> {
-    if (!archiveRows || deleteBusy) return;
+    if (!archiveKeys || deleteBusy) return;
     setDeleteBusy(true);
     setArchiveError("");
     onStatus("Artikel werden archiviert …");
     try {
-      const result = await deleteInventoryEntries(archiveRows.map(getRowKey), reason);
-      const count = Number(result.deleted_count ?? archiveRows.length);
-      setArchiveRows(null);
+      const result = await deleteInventoryEntries(archiveKeys, reason);
+      const count = Number(result.deleted_count ?? archiveKeys.length);
+      setArchiveKeys(null);
       clearSelection();
       await reload();
       onStatus(`${count} ${count === 1 ? "Eintrag wurde" : "Einträge wurden"} archiviert.`);
@@ -113,13 +118,13 @@ export default function useInventoryActions({
   }
 
   async function exportFile(format: ExportFormat): Promise<void> {
-    if (transferInProgress.current || dataLoading) {
+    if (transferInProgress.current) {
       return;
     }
 
     transferInProgress.current = true;
     setTransferBusy(true);
-    const label = format === "csv" ? "CSV" : "PostgreSQL";
+    const label = exportLabels[format];
     onStatus(`${label}-Export wird erstellt ...`);
 
     try {
@@ -161,14 +166,17 @@ export default function useInventoryActions({
   return {
     csvFileInputRef,
     deleteBusy,
-    archiveRows,
+    archiveKeys,
+    archiveEntries,
     archiveError,
     confirmArchive,
-    cancelArchive: () => { if (!deleteBusy) setArchiveRows(null); },
+    cancelArchive: () => { if (!deleteBusy) setArchiveKeys(null); },
     transferBusy,
     chooseCsvImport,
     importCsvFile,
     exportCsv: () => exportFile("csv"),
+    exportCsvTables: () => exportFile("csv-tables"),
+    exportExcel: () => exportFile("excel"),
     exportPostgresql: () => exportFile("postgresql"),
     deleteEntries,
     logout,

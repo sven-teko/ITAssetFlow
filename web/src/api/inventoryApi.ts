@@ -120,9 +120,9 @@ function ensureAuthorized(response: Response): void {
   }
 }
 
-export async function loadInventoryRows(): Promise<InventoryRow[]> {
+async function loadInventoryRows(signal: AbortSignal): Promise<InventoryRow[]> {
   const response = await fetch(`${API_BASE}/api/inventory`, {
-    credentials: "include", cache: "no-store",
+    credentials: "include", cache: "no-store", signal,
   });
 
   ensureAuthorized(response);
@@ -147,6 +147,48 @@ export async function loadInventoryRows(): Promise<InventoryRow[]> {
   return data.filter(
     (row): row is InventoryRow => isRecord(row),
   ).map(row => row._record_type === "stock" ? row : { ...row, stock_quantity: 1 });
+}
+
+export class InventorySnapshotChanged extends Error {}
+
+export type InventoryPageResult = {
+  rows: InventoryRow[];
+  next_offset: number | null;
+  total: number;
+  matched: number;
+  revision: number | null;
+  snapshot: string | null;
+  options: import("../components/InventorySidebar").InventoryFilterOptions | null;
+  legacy: boolean;
+};
+
+export async function loadInventoryPage(queryJson: string, signal: AbortSignal, offset = 0, snapshot: string | null = null, refresh = false): Promise<InventoryPageResult> {
+  const response = await fetch(`${API_BASE}/api/inventory/page`, {
+    method: "POST", credentials: "include", cache: "no-store", signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: JSON.parse(queryJson), offset, snapshot, refresh }),
+  });
+  ensureAuthorized(response);
+  if (!offset && (response.status === 404 || response.status === 405)) {
+    // Older API builds can still run behind IIS while the backend is updated.
+    let revision: number | null = null;
+    try { revision = await loadInventoryRevision(signal); }
+    catch (error) {
+      if (signal.aborted || error instanceof UnauthorizedError || error instanceof InventoryAccessDeniedError) throw error;
+    }
+    const rows = await loadInventoryRows(signal);
+    return { rows, next_offset: null, total: rows.length, matched: rows.length, revision, snapshot: null, options: null, legacy: true };
+  }
+  const data = await readJson(response);
+  if (response.status === 409) throw new InventorySnapshotChanged(errorDetail(data, "Das Inventar wurde geändert. Bitte erneut laden."));
+  if (response.status === 403) throw new InventoryAccessDeniedError(errorDetail(data, "Der Zugriff auf das Inventar wurde verweigert."));
+  if (!response.ok || !isRecord(data) || !Array.isArray(data.rows) || !data.rows.every(isRecord)
+    || !Number.isSafeInteger(data.total) || !Number.isSafeInteger(data.matched) || !Number.isSafeInteger(data.revision)
+    || typeof data.snapshot !== "string" || !/^[a-f0-9]{64}$/.test(data.snapshot)
+    || (data.next_offset !== null && (!Number.isSafeInteger(data.next_offset) || Number(data.next_offset) <= offset))) {
+    throw new Error(errorDetail(data, "Inventardaten konnten nicht geladen werden."));
+  }
+  return { ...data, legacy: false } as InventoryPageResult;
 }
 
 export type DashboardLocationSummary = {
@@ -203,11 +245,11 @@ export async function loadInventoryDashboard(signal: AbortSignal): Promise<Dashb
   return { sites: data.sites, review_items: data.review_items, review_after_days: data.review_after_days };
 }
 
-export async function loadInventoryRevision(): Promise<number> {
+export async function loadInventoryRevision(signal?: AbortSignal): Promise<number> {
   const response = await fetch(
     `${API_BASE}/api/inventory/revision`,
     {
-      credentials: "include",
+      credentials: "include", signal,
       cache: "no-store",
     },
   );
@@ -261,10 +303,10 @@ export async function loadInventoryRevision(): Promise<number> {
 }
 
 
-export async function loadInventoryMeta(): Promise<InventoryMeta> {
+export async function loadInventoryMeta(signal?: AbortSignal): Promise<InventoryMeta> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api/inventory/meta`, { credentials: "include" });
+    response = await fetch(`${API_BASE}/api/inventory/meta`, { credentials: "include", cache: "no-store", signal });
   } catch {
     throw new InventoryMetaError("Die Tabellenansicht konnte nicht abgerufen werden.", 0);
   }
@@ -332,7 +374,14 @@ export async function importInventoryCsv(file: File): Promise<CsvImportResult> {
   return isRecord(data) ? data : {};
 }
 
-export type ExportFormat = "csv" | "postgresql";
+export type ExportFormat = "csv" | "postgresql" | "csv-tables" | "excel";
+
+export const exportLabels: Record<ExportFormat, string> = {
+  csv: "CSV", postgresql: "PostgreSQL", "csv-tables": "CSV-Tabellen", excel: "Excel",
+};
+const exportSuffixes: Record<ExportFormat, string> = {
+  csv: "csv", postgresql: "sql", "csv-tables": "zip", excel: "xlsx",
+};
 
 export async function exportInventoryFile(format: ExportFormat): Promise<{
   blob: Blob;
@@ -347,7 +396,7 @@ export async function exportInventoryFile(format: ExportFormat): Promise<{
 
   if (!response.ok) {
     const data = await readJson(response);
-    const label = format === "csv" ? "CSV" : "PostgreSQL";
+    const label = exportLabels[format];
     throw new Error(errorDetail(data, `${label}-Export ist fehlgeschlagen.`));
   }
 
@@ -356,7 +405,7 @@ export async function exportInventoryFile(format: ExportFormat): Promise<{
 
   return {
     blob: await response.blob(),
-    filename: filenameMatch?.[1]?.trim() || `ITAssetFlow.${format === "csv" ? "csv" : "sql"}`,
+    filename: filenameMatch?.[1]?.trim() || `ITAssetFlow.${exportSuffixes[format]}`,
   };
 }
 

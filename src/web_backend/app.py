@@ -9,6 +9,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -42,6 +43,7 @@ from web_backend.recovery_routes import create_recovery_router
 from web_backend.preferences_routes import create_preferences_router
 from web_backend.archive_routes import ArchiveReason, create_archive_router
 from web_backend.backup_routes import create_backup_router
+from web_backend.inventory_paging import InventoryPageRequest, InventorySnapshots, filtered, options_for, page_token
 
 from inventory import (
     CONDITION_LABELS,
@@ -59,7 +61,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.2.12",
+    version="1.6.6",
 )
 
 
@@ -966,31 +968,61 @@ def logout(
 
 # Inventar laden
 
+_inventory_snapshots = InventorySnapshots()
+
+
+def _load_inventory_rows(client: Client) -> list[dict[str, Any]]:
+    return [_enrich_inventory_row(row) for row in AssetRepository(client).load_inventory() if isinstance(row, dict)]
+
+
+def _read_inventory_revision(client: Client) -> int:
+    result = client.table("inventory_change_state").select("revision").eq("id", 1).limit(1).execute()
+    data = result.data
+    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+        raise RuntimeError("inventory_change_state ist leer oder nicht lesbar.")
+    return int(data[0]["revision"])
+
+
 @app.get("/api/inventory")
-def inventory(
-    response: Response,
-    web_session: WebSession = Depends(
-        get_web_session
-    ),
-) -> list[dict[str, Any]]:
+def inventory(response: Response, web_session: WebSession = Depends(get_web_session)) -> list[dict[str, Any]]:
     response.headers["Cache-Control"] = "no-store"
-    repository = AssetRepository(
-        web_session.client,
-    )
-
     try:
-        rows = repository.load_inventory()
-
+        return _load_inventory_rows(web_session.client)
     except Exception as error:
-        raise _repository_http_exception(
-            error
-        ) from error
+        raise _repository_http_exception(error) from error
 
-    return [
-        _enrich_inventory_row(row)
-        for row in rows
-        if isinstance(row, dict)
-    ]
+
+@app.post("/api/inventory/page")
+def inventory_page(payload: InventoryPageRequest, request: Request, response: Response,
+                   web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    cookie = request.cookies.get(REFRESH_COOKIE, "")
+    identity = sha256(f"{cookie}:{web_session.email}:{web_session.role}".encode()).hexdigest()
+    # Check the live DB revision on every page, including cache hits. Changes
+    # to employees, location grants and item locations also bump this revision.
+    try:
+        revision = _read_inventory_revision(web_session.client)
+        token = page_token(identity, revision, payload.query)
+        if payload.offset and payload.snapshot != token:
+            raise HTTPException(409, "Das Inventar wurde geändert. Die Liste wird neu geladen.")
+        rows = _inventory_snapshots.get(identity, revision) if cookie and not (payload.refresh and payload.offset == 0) else None
+        if rows is None:
+            rows = _load_inventory_rows(web_session.client)
+            if _read_inventory_revision(web_session.client) != revision:
+                raise HTTPException(409, "Das Inventar wurde während des Abrufs geändert. Bitte erneut laden.")
+            if cookie:
+                _inventory_snapshots.put(identity, revision, rows)
+        matches = filtered(rows, payload.query)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _repository_http_exception(error) from error
+    end = payload.offset + payload.limit
+    return {
+        "rows": matches[payload.offset:end], "next_offset": end if end < len(matches) else None,
+        "total": len(rows), "matched": len(matches), "revision": revision, "snapshot": token,
+        "options": options_for(rows) if payload.offset == 0 else None,
+    }
 
 
 @app.get("/api/inventory/dashboard")
@@ -1104,61 +1136,9 @@ def inventory_revision(
 
     response.headers["Cache-Control"] = "no-store"
     try:
-        result = (
-            web_session.client
-            .table(
-                "inventory_change_state"
-            )
-            .select(
-                "revision"
-            )
-            .eq(
-                "id",
-                1,
-            )
-            .limit(
-                1
-            )
-            .execute()
-        )
-
-        data = getattr(
-            result,
-            "data",
-            None,
-        )
-
-        rows = [
-            row
-            for row in data
-            if isinstance(
-                row,
-                dict,
-            )
-        ] if isinstance(
-            data,
-            list,
-        ) else []
-
-        if not rows:
-            raise RuntimeError(
-                "inventory_change_state ist leer oder nicht lesbar."
-            )
-
-        return {
-            "revision":
-                int(
-                    rows[0].get(
-                        "revision"
-                    )
-                    or 0
-                ),
-        }
-
+        return {"revision": _read_inventory_revision(web_session.client)}
     except Exception as error:
-        raise _repository_http_exception(
-            error
-        ) from error
+        raise _repository_http_exception(error) from error
 
 
 # Formular-Stammdaten
@@ -1436,7 +1416,7 @@ def bulk_edit_inventory(request: Request, payload: BulkEditPayload,
 
 @app.get("/api/transfer/export/{export_format}")
 def export_data(
-    export_format: Literal["csv", "postgresql"],
+    export_format: Literal["csv", "postgresql", "csv-tables", "excel"],
     web_session: WebSession = Depends(
         get_web_session
     ),
@@ -1449,7 +1429,12 @@ def export_data(
         "%Y-%m-%d_%H-%M-%S"
     )
 
-    suffix = ".csv" if export_format == "csv" else ".sql"
+    suffix, content_type, export = {
+        "csv": (".csv", "text/csv; charset=utf-8", service.export_csv),
+        "postgresql": (".sql", "application/sql; charset=utf-8", service.export_postgresql),
+        "csv-tables": (".zip", "application/zip", service.export_csv_tables),
+        "excel": (".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", service.export_excel),
+    }[export_format]
     filename = f"ITAssetFlow_{timestamp}{suffix}"
 
     temporary_path: Path | None = None
@@ -1464,10 +1449,7 @@ def export_data(
                 handle.name
             )
 
-        if export_format == "csv":
-            service.export_csv(temporary_path)
-        else:
-            service.export_postgresql(temporary_path)
+        export(temporary_path)
 
         content = temporary_path.read_bytes()
 
@@ -1488,10 +1470,7 @@ def export_data(
 
     return Response(
         content=content,
-        media_type=(
-            "text/csv; charset=utf-8" if export_format == "csv"
-            else "application/sql; charset=utf-8"
-        ),
+        media_type=content_type,
         headers={
             "Content-Disposition": (
                 f'attachment; filename="{filename}"'

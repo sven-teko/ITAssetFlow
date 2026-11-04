@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from typing import Literal
 import gzip
 from io import BytesIO
 import json
 import zlib
 
+import httpx
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
+
+from web_backend.automatic_backup import AutomaticBackup
 
 MAX_COMPRESSED_BYTES = 30 * 1024 * 1024
 MAX_DECODED_BYTES = 100 * 1024 * 1024
@@ -54,6 +59,10 @@ def _prepare_recovery(compressed: bytes | bytearray, keep_auth_links: bool) -> b
     ).encode("utf-8")
 
 
+class BackupSchedule(BaseModel):
+    frequency: Literal["daily", "weekly", "monthly"]
+
+
 def create_backup_router(require_admin_session):
     router = APIRouter(prefix="/api/backup", tags=["backup"])
 
@@ -61,6 +70,34 @@ def create_backup_router(require_admin_session):
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%SZ")
         return Response(payload, media_type=media_type, headers={
             "Content-Disposition": f'attachment; filename="ITAssetFlow_{stamp}.{suffix}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        })
+
+    @router.get("/automatic")
+    def automatic_settings(response: Response, _session=Depends(require_admin_session)):
+        response.headers["Cache-Control"] = "no-store"
+        try:
+            return AutomaticBackup().settings()
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(502, "Sicherungsplan und Dateien konnten nicht von GitHub geladen werden.") from error
+
+    @router.put("/automatic")
+    def save_schedule(payload: BackupSchedule, _session=Depends(require_admin_session)):
+        try:
+            AutomaticBackup().save_frequency(payload.frequency)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(502, "Das Intervall konnte nicht gespeichert werden. Prüfe den GitHub-Zugriff.") from error
+        return {"frequency": payload.frequency}
+
+    @router.get("/automatic/{asset_id}")
+    def download_automatic(asset_id: int, _session=Depends(require_admin_session)):
+        try:
+            filename, content = AutomaticBackup().download(asset_id)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+            raise HTTPException(502, "Die Sicherungsdatei konnte nicht von GitHub geladen werden.") from error
+        return Response(content, media_type="application/pkcs7-mime", headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
         })

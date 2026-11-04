@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 
@@ -160,6 +161,43 @@ class DataTransferService:
             snapshot,
             "CSV",
         )
+
+    def export_csv_tables(self, file_path: str | Path) -> dict[str, Any]:
+        from infrastructure.tabular_export import write_csv_tables
+
+        path = self._prepare_export_path(file_path, ".zip")
+        snapshot = self._load_snapshot()
+        write_csv_tables(path, snapshot, PRIMARY_KEYS)
+        return self._export_result(path, snapshot, "CSV-Tabellen")
+
+    def export_excel(self, file_path: str | Path) -> dict[str, Any]:
+        from infrastructure.tabular_export import write_excel
+
+        path = self._prepare_export_path(file_path, ".xlsx")
+        snapshot = self._load_snapshot()
+        stock_keys = ("product_model_id", "storage_location_id", "condition")
+        try:
+            stock = self._load_export_table("inventory_stock_levels", stock_keys)
+        except APIError as error:
+            if error.code not in {"PGRST205", "42P01"}:
+                raise
+            stock = self._load_export_table("stock_levels", stock_keys)
+
+        models = {row["id"]: row.get("name") for row in snapshot["product_models"]}
+        locations = {row["id"]: row for row in snapshot["storage_locations"]}
+        sites = {row["id"]: row.get("name") for row in snapshot["sites"]}
+
+        def with_names(row, location_id):
+            location = locations.get(location_id, {})
+            return {**row, "product_model_name": models.get(row.get("product_model_id")),
+                    "storage_location_name": location.get("name"), "site_name": sites.get(location.get("site_id"))}
+
+        workbook_tables = {**snapshot,
+            "assets": [with_names(row, row.get("last_storage_location_id")) for row in snapshot["assets"]],
+            "inventory_stock_levels": [with_names(row, row["storage_location_id"]) for row in stock if (row.get("quantity") or 0) > 0],
+        }
+        write_excel(path, workbook_tables, {**PRIMARY_KEYS, "inventory_stock_levels": stock_keys})
+        return self._export_result(path, snapshot, "Excel")
 
     def export_postgresql(
         self,
@@ -452,35 +490,29 @@ class DataTransferService:
     def _load_snapshot(
         self,
     ) -> dict[str, list[dict[str, Any]]]:
-        result: dict[
-            str,
-            list[dict[str, Any]],
-        ] = {}
+        return {table: self._load_export_table(table, PRIMARY_KEYS[table]) for table in TABLE_ORDER}
 
-        for table_name in TABLE_ORDER:
-            rows: list[dict[str, Any]] = []
-            offset = 0
-            while True:
-                # Der angemeldete Client und seine RLS-Policies bestimmen die
-                # sichtbaren Datensätze, auch auf jeder weiteren Seite.
-                query = self.client.table(table_name).select("*", count="exact")
-                for column in PRIMARY_KEYS[table_name]:
-                    query = query.order(column)
-                response = query.range(offset, offset + EXPORT_PAGE_SIZE - 1).execute()
-                data = response.data
-                if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
-                    raise RuntimeError(f"Ungültige Exportdaten für Tabelle {table_name}.")
-                if not data:
-                    break
-                excluded = GENERATED_COLUMNS.get(table_name, set())
-                rows.extend({key: value for key, value in row.items() if key not in excluded} for row in data)
-                offset += len(data)
-                count = getattr(response, "count", None)
-                if isinstance(count, int) and offset >= count:
-                    break
-            result[table_name] = rows
-
-        return result
+    def _load_export_table(self, table: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        excluded = GENERATED_COLUMNS.get(table, set())
+        while True:
+            # Use the authenticated client on every page so RLS also applies to exports.
+            query = self.client.table(table).select("*", count="exact")
+            for column in keys:
+                query = query.order(column)
+            response = query.range(offset, offset + EXPORT_PAGE_SIZE - 1).execute()
+            data = response.data
+            if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+                raise RuntimeError(f"Ungültige Exportdaten für Tabelle {table}.")
+            if not data:
+                break
+            rows.extend({key: value for key, value in row.items() if key not in excluded} for row in data)
+            offset += len(data)
+            count = getattr(response, "count", None)
+            if isinstance(count, int) and offset >= count:
+                break
+        return rows
 
     def _import_snapshot(
         self,

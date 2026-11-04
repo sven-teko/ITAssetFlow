@@ -73,7 +73,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-.compact-inventory .sidebar-filter-list > :last-child { grid-column: 1 / -1; }
+.compact-inventory .sidebar-filter-list > fieldset { grid-column: 1 / -1; }
 .compact-inventory .filter-dropdown-menu { min-width: min(240px, calc(100vw - 24px)); max-width: calc(100vw - 24px); }
 .compact-inventory .filter-dropdown:nth-child(even) .filter-dropdown-menu { left: auto; right: 0; }
 .compact-inventory .sidebar-actions {
@@ -138,7 +138,7 @@
   .settings-message { max-height: 120px; overflow: auto; }
 }
 
-.entry-context-menu { position: fixed; z-index: 1000; width: 224px; padding: 5px; border: 1px solid #cbd3dd; border-radius: 7px; background: white; box-shadow: 0 7px 24px #18283b30; }
+.entry-context-menu { position: fixed; z-index: 1000; width: min(264px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 5px; border: 1px solid #cbd3dd; border-radius: 7px; background: white; box-shadow: 0 7px 24px #18283b30; }
 .entry-context-menu button { display: block; width: 100%; min-height: 44px; padding: 9px 12px; text-align: left; border: 0; border-radius: 4px; background: transparent; }
 .entry-context-menu button:hover, .entry-context-menu button:focus { background: #edf4fb; outline: 2px solid #c6d9ef; }
 .entry-context-menu button:last-child { color: #9b3333; }

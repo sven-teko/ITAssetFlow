@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 
 import AssetFormPage from "./pages/AssetFormPage";
+import BulkInventoryEditPage from "./pages/BulkInventoryEditPage";
 import LoadingIndicator from "./components/LoadingIndicator";
 import InventoryPage from "./pages/InventoryPage";
 import ArchivePage from "./pages/ArchivePage";
@@ -223,6 +224,11 @@ export default function App() {
         }
       />
 
+      <Route path="/inventory/bulk-edit" element={
+        <ProtectedPage email={email} role={role} allowedRoles={["admin", "user"]}>
+          <BulkInventoryEditPage onSessionExpired={clearSession} />
+        </ProtectedPage>
+      } />
       <Route
         path="/inventory/:entryKey/edit"
         element={

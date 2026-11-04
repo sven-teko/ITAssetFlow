@@ -2,7 +2,11 @@ name: ITAssetFlow Backup
 
 on:
   schedule:
-    - cron: '17 3 * * 0'
+    - cron: '0 2 * * 0'
+      timezone: 'Europe/Zurich'
+    - cron: '0 2 * * *'
+      timezone: 'Europe/Zurich'
+    - cron: '0 2 1 * *'
       timezone: 'Europe/Zurich'
   workflow_dispatch:
 
@@ -14,7 +18,14 @@ concurrency:
 
 jobs:
   backup:
-    if: ${{ github.event.repository.private && github.ref_name == github.event.repository.default_branch }}
+    if: >-
+      github.event.repository.private && github.ref_name == github.event.repository.default_branch &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.schedule == '0 2 * * 0' && (vars.ITASSETFLOW_BACKUP_FREQUENCY || 'weekly') == 'weekly') ||
+       (github.event.schedule == '0 2 * * *' && vars.ITASSETFLOW_BACKUP_FREQUENCY == 'daily') ||
+       (github.event.schedule == '0 2 1 * *' && vars.ITASSETFLOW_BACKUP_FREQUENCY == 'monthly'))
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -33,7 +44,7 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/itassetflow-backup"
-          target="$RUNNER_TEMP/itassetflow-backup/ITAssetFlow_$(date -u +%Y-%m-%d_%H%M%SZ).json.gz.p7m"
+          target="$RUNNER_TEMP/itassetflow-backup/ITAssetFlow_$(date -u +%Y-%m-%d_%H%M%SZ)_${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json.gz.p7m"
           printf '%s\n' "$BACKUP_RECIPIENT_CERT" > "$RUNNER_TEMP/itassetflow-recipient.pem"
           psql --dbname="$SUPABASE_DB_URL" --no-psqlrc --tuples-only --no-align --quiet -v ON_ERROR_STOP=1 \
             -c 'SELECT private.inventory_backup_data();' \
@@ -41,15 +52,30 @@ jobs:
             | gzip -6 \
             | openssl cms -encrypt -binary -aes-256-gcm -outform DER -out "$target" "$RUNNER_TEMP/itassetflow-recipient.pem"
           if (( $(wc -c < "$target") > 30 * 1024 * 1024 )); then
-            echo 'Backup überschreitet das Limit von 30 MiB pro Artefakt.' >&2
+            echo 'Backup überschreitet das Limit von 30 MiB pro Datei.' >&2
             exit 1
           fi
 
-      - name: Verschlüsseltes Backup aufbewahren
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ITAssetFlow-Backup-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/itassetflow-backup/*.p7m
-          if-no-files-found: error
-          retention-days: 28
-          compression-level: 0
+      - name: Neueste fünf Sicherungen behalten
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=itassetflow-backups
+          if ! gh release view "$tag" --json id >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title 'ITAssetFlow – automatische Sicherungen' --notes 'Verschlüsselte Inventarsicherungen'
+          fi
+          gh release upload "$tag" "$RUNNER_TEMP/itassetflow-backup/"*.p7m
+          release_id="$(gh api "repos/$GH_REPO/releases/tags/$tag" --jq '.id')"
+          gh api --paginate "repos/$GH_REPO/releases/$release_id/assets?per_page=100" \
+            --jq '.[] | select(.state == "uploaded") | [.created_at, .id, .name] | @tsv' \
+            > "$RUNNER_TEMP/itassetflow-assets.tsv"
+          LC_ALL=C sort -t $'\t' -k1,1r -k2,2nr "$RUNNER_TEMP/itassetflow-assets.tsv" \
+            | awk -F '\t' '$3 ~ /^ITAssetFlow_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6}Z_[0-9]+-[0-9]+[.]json[.]gz[.]p7m$/ && ++n > 5 {print $2}' \
+            > "$RUNNER_TEMP/itassetflow-old-assets.txt"
+          while IFS= read -r asset_id; do
+            gh api --method DELETE "repos/$GH_REPO/releases/assets/$asset_id"
+          done < "$RUNNER_TEMP/itassetflow-old-assets.txt"

@@ -2,6 +2,10 @@
 import csv
 from copy import deepcopy
 import json
+import io
+import sqlite3
+from xml.etree import ElementTree as ET
+from zipfile import ZipFile
 from pathlib import Path
 import sys
 import tempfile
@@ -112,6 +116,64 @@ class ExportTests(unittest.TestCase):
                         for line in sql_path.read_text().splitlines() if line.startswith("-- ITASSETFLOW-DATA ")]
             self.assertEqual(next(item["row"] for item in payloads if item["table"] == "assets"), row)
 
+    def test_portable_csv_and_excel_preserve_data_and_exclude_hidden_rows(self):
+        long_text = "{=" + ("ä📦" * 18000) + "}"
+        row = {"id": 1, "asset_tag": "000123", "ean": "0012345678905", "note": 'Ä; "A", B\nC',
+               "serial_number": "", "qr_code": None, "new_price": 12.5, "purchase_date": "2026-11-04",
+               "product_model_id": 10, "last_storage_location_id": 20, "specifications": {"ram": 32, "detail": long_text}}
+        rows = {"assets": [row, {"id": 2, "asset_tag": "VERBORGEN", "_visible": False}],
+                "product_models": [{"id": 10, "name": "Laptop"}],
+                "storage_locations": [{"id": 20, "name": "Lager", "site_id": 30}],
+                "sites": [{"id": 30, "name": "Basel"}],
+                "inventory_stock_levels": [{"product_model_id": 10, "storage_location_id": 20,
+                    "condition": "new", "quantity": 4, "new_price": 12.5}],
+                "employees": [{"id": 1, "first_name": "=5+5"}]}
+        client = ExportClient(rows)
+        namespace = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        with tempfile.TemporaryDirectory() as directory:
+            service = DataTransferService(client)
+            csv_path = Path(directory) / "tables.zip"
+            excel_path = Path(directory) / "data.xlsx"
+            service.export_csv_tables(csv_path)
+            with ZipFile(csv_path) as archive:
+                self.assertIn("assets.csv", archive.namelist())
+                self.assertTrue(all(name.endswith(".csv") for name in archive.namelist()))
+                raw = archive.read("assets.csv")
+                self.assertNotIn(b"VERBORGEN", raw)
+                self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
+                self.assertIn(b',"",,"12.5"', raw)
+                with io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", newline="") as handle:
+                    parsed = list(csv.DictReader(handle))
+                self.assertEqual(len(parsed), 1)
+                self.assertEqual(json.loads(parsed[0]["specifications"]), row["specifications"])
+                with sqlite3.connect(":memory:") as other:
+                    other.execute("CREATE TABLE inventory (tag TEXT, ean TEXT, price REAL, note TEXT)")
+                    other.execute("INSERT INTO inventory VALUES (:asset_tag, :ean, :new_price, :note)", parsed[0])
+                    self.assertEqual(other.execute("SELECT * FROM inventory").fetchone(),
+                                     (row["asset_tag"], row["ean"], row["new_price"], row["note"]))
+
+            service.export_excel(excel_path)
+            with ZipFile(excel_path) as workbook:
+                self.assertIsNone(workbook.testzip())
+                structure = ET.fromstring(workbook.read("xl/workbook.xml"))
+                names = [sheet.attrib["name"] for sheet in structure.findall("m:sheets/m:sheet", namespace)]
+                self.assertEqual(names[:3], ["Übersicht", "Einzelartikel", "Lagerbestand"])
+                self.assertIn("Lange Werte", names)
+                assets = ET.fromstring(workbook.read("xl/worksheets/sheet2.xml"))
+                self.assertEqual(assets.find(".//m:pane", namespace).attrib["state"], "frozen")
+                self.assertIsNotNone(assets.find(".//m:tableParts", namespace))
+                self.assertEqual(assets.find('.//m:c[@r="A5"]', namespace).attrib["t"], "s")
+                self.assertIn(b"12.5", workbook.read("xl/worksheets/sheet3.xml"))
+                strings = ET.fromstring(workbook.read("xl/sharedStrings.xml"))
+                text = [node.text or "" for node in strings.findall(".//m:si/m:t", namespace)]
+                self.assertNotIn("VERBORGEN", text)
+                self.assertIn(row["ean"], text)
+                self.assertIn("=5+5", text)
+                self.assertIn("Basel", text)
+                for name in workbook.namelist():
+                    if name.startswith("xl/worksheets/sheet") and name.endswith(".xml"):
+                        self.assertIsNone(ET.fromstring(workbook.read(name)).find(".//m:f", namespace))
+
     def test_generated_columns_are_computed_by_postgresql(self):
         client = ExportClient({"stock_counts": [{"id": 1, "expected_quantity": 2,
                                 "counted_quantity": 1, "difference_quantity": -1}]})
@@ -160,10 +222,22 @@ class ExportApiTests(unittest.TestCase):
         self.assertEqual(len(created), 6)
         self.assertTrue(all(not path.exists() for path in created))
 
+    def test_excel_and_portable_csv_download_mime_and_filenames(self):
+        for kind, suffix, mime in (("excel", ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+                                   ("csv-tables", ".zip", "application/zip")):
+            with self.subTest(kind=kind):
+                response = self.http.get(f"/api/transfer/export/{kind}")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers["content-type"], mime)
+                self.assertTrue(response.headers["content-disposition"].endswith(suffix + '"'))
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                with ZipFile(io.BytesIO(response.content)) as archive:
+                    self.assertIsNone(archive.testzip())
+
     def test_export_failure_returns_error_and_removes_partial_file(self):
         self.db.failure = RuntimeError("permission denied for table assets")
         with tempfile.TemporaryDirectory() as directory, patch("web_backend.app.tempfile.tempdir", directory):
-            for format in ("csv", "postgresql"):
+            for format in ("csv", "postgresql", "csv-tables", "excel"):
                 response = self.http.get(f"/api/transfer/export/{format}")
                 self.assertEqual(response.status_code, 403)
                 self.assertNotIn("content-disposition", response.headers)
@@ -174,7 +248,7 @@ class ExportApiTests(unittest.TestCase):
         self.assertEqual(self.http.get("/api/transfer/export/zip").status_code, 422)
         self.assertEqual(self.db.calls, [])
         self.app.dependency_overrides.clear()
-        for format in ("csv", "postgresql"):
+        for format in ("csv", "postgresql", "csv-tables", "excel"):
             self.assertEqual(self.http.get(f"/api/transfer/export/{format}").status_code, 401)
         self.assertEqual(self.db.calls, [])
 
