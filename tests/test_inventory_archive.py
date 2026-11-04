@@ -163,7 +163,7 @@ class ScannerIdentifierTests(unittest.TestCase):
         db = Database()
         db.rows["assets"][0]["asset_tag"] = "aAbB.Cc11.2233"
         result = QrService(db).lookup("AA-BB-CC-11-22-33")
-        self.assertEqual(result["code_type"], "mac")
+        self.assertEqual(result["code_type"], "asset_tag")
         self.assertEqual(result["matches"][0]["key"], "asset:1")
 
     def test_arbitrary_serial_and_archived_asset_exclusion(self):

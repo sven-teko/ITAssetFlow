@@ -1,9 +1,9 @@
-export type CodeType = "auto" | "qr" | "ean" | "upc" | "mac" | "serial";
+export type CodeType = "auto" | "qr" | "ean" | "upc" | "mac" | "serial" | "asset_tag";
 export type ScanRole = Exclude<CodeType, "auto">;
 export type ScanDraft = Partial<Record<ScanRole, string>> & { modelId?: number };
 
 export function normalizeMac(value: string): string | null {
-  const text = value.trim().replace(/^MAC(?:[- ]?(?:Adresse|Address|ID))?\s*[:=]\s*/i, "");
+  const text = value.trim().replace(/^MAC(?:[- ]?(?:Adresse|Address))?\s*[:=]\s*/i, "");
   if (!/^(?:[a-f\d]{12}|(?:[a-f\d]{2}:){5}[a-f\d]{2}|(?:[a-f\d]{2}-){5}[a-f\d]{2}|(?:[a-f\d]{4}\.){2}[a-f\d]{4})$/i.test(text)) return null;
   return text.replace(/[:.-]/g, "").toUpperCase().match(/.{2}/g)!.join(":");
 }
@@ -12,7 +12,7 @@ export function identifierType(value: string, format = ""): ScanRole {
   if (format === "QR-Code") return "qr";
   if (format === "EAN-8" || format === "EAN-13") return "ean";
   if (format === "UPC-A" || (!format && isValidUpc(value))) return "upc";
-  if (normalizeMac(value)) return "mac";
+  if (normalizeMac(value)) return /^[a-f\d]{12}$/i.test(value.trim()) ? "asset_tag" : "mac";
   if (!format && isValidEan(value)) return "ean";
   return "serial";
 }
@@ -42,7 +42,13 @@ export function validateCodes(qr: string, ean: string, upc = ""): void {
 export function labelledCodes(value: string): { type: ScanRole; text: string }[] {
   const result: { type: ScanRole; text: string }[] = [];
   for (const part of value.split(/[\r\n;|]+/)) {
-    const field = /^(MAC(?:[- ]?(?:ID|Adresse|Address))?|S\/?N|Serial(?:[ -]?(?:Number|No\.?))?|Seriennummer|EAN(?:-8|-13)?|UPC(?:-A)?)\s*[:=]\s*(.+)$/i.exec(part.trim());
+    const fieldText = part.trim();
+    const assetTag = /^MAC[- ]?ID(?:\s*[:=]\s*|\s+)(\S.*)$/i.exec(fieldText);
+    if (assetTag) {
+      result.push({ type: "asset_tag", text: assetTag[1] });
+      continue;
+    }
+    const field = /^(MAC(?:[- ]?(?:Adresse|Address))?|S\/?N|Serial(?:[ -]?(?:Number|No\.?))?|Seriennummer|EAN(?:-8|-13)?|UPC(?:-A)?)\s*[:=]\s*(.+)$/i.exec(fieldText);
     if (!field) continue;
     const key = field[1].toUpperCase(), text = field[2].trim();
     if (key.startsWith("MAC")) {

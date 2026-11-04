@@ -20,6 +20,7 @@ const run = (async () => {
     page.on('request', request => { if (request.url().includes('.wasm')) wasmRequests.push(request.url()); });
     const bookingResults=new Map();
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
+    let lastEdit = null;
     let knownRetail = 'ean';
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
@@ -55,6 +56,9 @@ const run = (async () => {
       if (endpoint === '/api/inventory/revision') return json({ revision: 1 });
       if (endpoint === '/api/inventory/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': test\n\n' });
       if (endpoint === '/api/inventory/form-data') return json(data);
+      if (endpoint === '/api/inventory/edit-form-data') return json({...data, edit_entry:{id:1,_record_type:'asset',
+        product_model_id:100,asset_tag:'PC-001',serial_number:'OLD-SN',mac_address:'AA:BB:CC:11:22:33',
+        site_id:1,department_id:10,storage_location_id:11,status:'available',condition:'used',purchase_date:'2026-11-04'}});
       if (endpoint === '/api/settings') {
         if (req.method() === 'PUT') {
           savedSettings = req.postDataJSON();
@@ -65,6 +69,7 @@ const run = (async () => {
       }
       if (endpoint === '/api/inventory') {
         if (req.method() === 'POST') { lastAsset = req.postDataJSON(); return json({ id: 3, entry_type: 'asset' }); }
+        if (req.method() === 'PUT') { lastEdit = req.postDataJSON(); return json({ id: 1, entry_type: 'asset' }); }
         return json(inventory());
       }
       if (endpoint === '/api/scanner/lookup') {
@@ -362,6 +367,35 @@ const run = (async () => {
     await closeQr();
     console.log('PASS: Code-128-Kamerastream mit bestätigter Erkennung, Autofokus, hoher Auflösung und Track-Freigabe');
 
+    const lookupsBeforeSerial = lookups.length;
+    await page.evaluate(() => { location.hash = '/inventory/asset%3A1/edit'; });
+    await page.getByRole('heading',{name:'Inventareintrag bearbeiten',exact:true}).waitFor();
+    const serialField = page.getByLabel('Seriennummer:',{exact:true});
+    assert.equal(await serialField.inputValue(),'OLD-SN');
+    await page.setViewportSize({width:390,height:844});
+    const photoButton = page.getByRole('button',{name:'Foto aufnehmen',exact:true});
+    await photoButton.waitFor();
+    assert.equal(await photoButton.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(40, 104, 173)');
+    await photoButton.hover();
+    assert.equal(await photoButton.evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(33, 91, 152)');
+    await page.setViewportSize({width:1440,height:1000});
+    await page.getByRole('button',{name:'Seriennummer scannen',exact:true}).click();
+    const serialDialog = page.getByRole('dialog',{name:'Seriennummer scannen',exact:true});
+    await serialDialog.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/4006381333931.svg'));
+    await serialDialog.getByRole('alert').filter({hasText:'Kein Seriennummern-Barcode gefunden'}).waitFor();
+    await serialDialog.getByRole('button',{name:'Kamera starten',exact:true}).click();
+    await serialDialog.getByRole('button',{name:'87954252804 übernehmen',exact:true}).click();
+    await serialDialog.waitFor({state:'hidden'});
+    assert.equal(await serialField.inputValue(),'87954252804');
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'PC-001');
+    assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
+    assert.equal(lookups.length,lookupsBeforeSerial);
+    assert.ok(await page.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+    await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.deepEqual([lastEdit.asset.serial_number,lastEdit.asset.asset_tag,lastEdit.asset.mac_address],
+      ['87954252804','PC-001','AA:BB:CC:11:22:33']);
+    console.log('PASS: Seriennummer im Bearbeitungsformular mit Kamera übernommen; EAN abgewiesen, andere Felder unverändert, Foto-Button blau');
 
     const eanVideo = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/4006381333931.svg')).toString('base64');
     await page.evaluate(dataUrl => { window.testCodeImage = dataUrl; navigator.mediaDevices.getUserMedia = window.fakeScannerGetUserMedia; }, eanVideo);
@@ -510,12 +544,14 @@ const run = (async () => {
     await page.getByRole('alert').filter({hasText:'gehören zu unterschiedlichen Modellen'}).waitFor();
     await closeQr();
     await openQr();
-    await lookup('SN: DECT-NEW; EAN: 5901234123457; UPC: 012345678905; MAC ID: AA-BB-CC-11-22-33');
+    await lookup('SN:DECT-NEW;EAN:5901234123457;UPC:012345678905;MAC ID:00AbC-123;MAC-Adresse:AA-BB-CC-11-22-33');
+    assert.equal(await page.getByLabel('Zuordnung für 00AbC-123',{exact:true}).inputValue(),'asset_tag');
     await page.getByLabel('Fehlende Kennung ergänzen',{exact:true}).fill('DEVICE-QR');
     await page.getByRole('button',{name:'Hinzufügen',exact:true}).click();
     await page.getByLabel('Zuordnung für DEVICE-QR',{exact:true}).selectOption('qr');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'00AbC-123');
     assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'');
     assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'DECT-NEW');
     assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');

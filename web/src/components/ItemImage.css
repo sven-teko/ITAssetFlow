@@ -7,4 +7,9 @@
 .inventory-image-warning button { margin-left: auto; }
 .item-image-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .item-image-camera { display: none; }
+.item-image-actions .item-image-camera:not(:disabled),
+.item-image-picker input[type=file]:not(:disabled)::file-selector-button { color: #fff; background: #2868ad; border-color: #2868ad; }
+.item-image-picker input[type=file]::file-selector-button { font: inherit; font-weight: 600; min-height: 35px; padding: 0 11px; margin-inline-end: 10px; border: 1px solid #c9d1d9; border-radius: 5px; cursor: pointer; }
+.item-image-actions .item-image-camera:hover:not(:disabled),
+.item-image-picker input[type=file]:not(:disabled):hover::file-selector-button { background: #215b98; border-color: #215b98; }
 @media (pointer: coarse), (max-width: 600px) { .item-image-camera { display: inline-flex; } }

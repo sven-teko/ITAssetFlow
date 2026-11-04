@@ -63,6 +63,7 @@
 .qr-result { display: flex; flex-direction: column; gap: 16px; padding-top: 22px; }
 .qr-code-review { display: grid; gap: 10px; }
 .qr-code-review h3, .qr-code-review p { margin: 0; }
+.serial-scan-results button { white-space: normal; overflow-wrap: anywhere; }
 .qr-code-review > label { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #dce3eb; border-radius: 6px; }
 .qr-code-review strong { overflow-wrap: anywhere; }
 .qr-code-review small { display: block; color: #66717c; }

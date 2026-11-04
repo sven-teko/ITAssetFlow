@@ -88,7 +88,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   function detectedCodes(codes: ScannedCode[]) {
     if (codes.length === 1 && !/^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(codes[0].text)) {
       const only = codes[0];
-      void readCode(only.text, false, only.type, only.format);
+      void readCode(only.text, false, only.type, only.format, only.labelled);
       return;
     }
     setError("");
@@ -146,7 +146,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     }
   }
 
-  async function readCode(value: string, preserve = false, detectedType: CodeType = "auto", format = "") {
+  async function readCode(value: string, preserve = false, detectedType: CodeType = "auto", format = "", labelledDetection = false) {
     if (busyRef.current) return;
     const labelled = detectedType === "auto" ? labelledCodes(value) : [];
     if (labelled.length > 1) { detectedCodes(labelled.map(field => ({ ...field, format: "Eingabe", labelled: true }))); return; }
@@ -156,6 +156,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       return;
     }
     const type = labelled[0]?.type ?? (detectedType === "auto" ? identifierType(normalized, format) : detectedType);
+    if (type === "asset_tag" && normalized.length > 50) { setError("Die Produkterkennung darf höchstens 50 Zeichen enthalten."); return; }
     if (type === "ean" && !isValidEan(normalized)) { setError("Die EAN muss 8 oder 13 Ziffern und eine gültige Prüfziffer enthalten."); return; }
     if (type === "upc" && !isValidUpc(normalized)) { setError("Die UPC-A muss 12 Ziffern und eine gültige Prüfziffer enthalten."); return; }
     setRecognizedType(type);
@@ -168,8 +169,11 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setMessage("");
     setCode(normalized);
     try {
-      const result = await lookupQr(normalized, controller.signal, type);
+      const explicit = labelledDetection || labelled.length > 0;
+      const ambiguousTag = type === "asset_tag" && !explicit && !preserve;
+      const response = await lookupQr(normalized, controller.signal, ambiguousTag ? "auto" : type);
       if (controller.signal.aborted) return;
+      const result = ambiguousTag && response.code_type === "auto" ? { ...response, code_type: type } : response;
       if (!preserve && type === "upc" && !result.matches.length && !result.models?.length) {
         setReview({ codes: [{ text: normalized, type, format: format || "UPC-A" }], assignments: ["upc"] });
         setExtraCode("");
@@ -178,8 +182,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       }
       const directKeys = new Set(result.direct_asset_keys);
       const exactDevice = type !== "ean" && type !== "upc" && directKeys.size > 0;
+      const draft = type === "asset_tag" && explicit ? { asset_tag: normalized } : undefined;
       applyLookup(exactDevice ? { ...result, preferred_key: null, matches: result.matches.filter(row => directKeys.has(row.key)) }
-        : result, type, format, preserve);
+        : result, type, format, preserve, draft);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Der Code konnte nicht geprüft werden.");
     } finally {
@@ -291,7 +296,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </form>
         </> : <div className="qr-detected-code">
           <div><span className="qr-code-caption">Erkannter Code</span><strong>{lookup.code}</strong></div>
-          <span className="qr-code-badge">{recognizedFormat ? `${recognizedFormat} · ` : ""}{recognizedType === "mac" ? "MAC-Adresse" : recognizedType === "serial" ? "Seriennummer" : recognizedType === "ean" ? "EAN" : recognizedType === "upc" ? "UPC" : "QR-Code"}</span>
+          <span className="qr-code-badge">{recognizedFormat ? `${recognizedFormat} · ` : ""}{recognizedType === "asset_tag" ? "Produkterkennung" : recognizedType === "mac" ? "MAC-Adresse" : recognizedType === "serial" ? "Seriennummer" : recognizedType === "ean" ? "EAN" : recognizedType === "upc" ? "UPC" : "QR-Code"}</span>
         </div>}
 
         {error && <div className="qr-error" role="alert">{error}</div>}

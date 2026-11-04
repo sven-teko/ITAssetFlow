@@ -82,9 +82,24 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(result["matches"][0]["product_model_id"], 10)
             self.assertEqual(result["direct_asset_keys"], [])
         self.assertEqual(normalize_upc("841885106377"), "841885106377")
-        self.assertEqual(normalize_mac("MAC ID: AA-BB-CC-11-22-33"), "AA:BB:CC:11:22:33")
         with self.assertRaises(ValueError):
             normalize_upc("841885106378")
+
+    def test_mac_id_is_an_exact_asset_tag_and_not_a_mac_address(self):
+        db = Database()
+        db.rows["assets"][0].update(asset_tag="00aabbcc1122")
+        db.rows["assets"].append({**db.rows["assets"][0], "id": 2, "asset_tag": "OTHER", "mac_address": "00:AA:BB:CC:11:22"})
+        service = QrService(db)
+        for value, kind in (("00aabbcc1122", "asset_tag"), ("MAC-ID: 00aabbcc1122", "auto"), ("00aabbcc1122", "auto")):
+            result = service.lookup(value, kind)
+            self.assertEqual(result["code"], "00aabbcc1122")
+            self.assertEqual(result["code_type"], "asset_tag")
+            self.assertEqual(result["direct_asset_keys"], ["asset:1"])
+            self.assertEqual(result["models"], [])
+        self.assertEqual(service.lookup("00-Aa-Bb-Cc-11-22", "mac")["direct_asset_keys"], ["asset:2"])
+        self.assertEqual(normalize_mac("MAC-Adresse: AA-BB-CC-11-22-33"), "AA:BB:CC:11:22:33")
+        with self.assertRaises(ValueError):
+            normalize_mac("MAC ID: AA-BB-CC-11-22-33")
 
     def test_save_model_codes_keeps_sku_and_part_number(self):
         db = Database(); before = deepcopy(db.rows["product_models"][0])

@@ -5,7 +5,7 @@ import { normalizeMac, validateCodes, type ScanDraft, type ScanRole } from "./sc
 export type Assignment = ScanRole | "ignore";
 export const scanLabels: Record<Assignment, string> = {
   ean: "EAN (Produktmodell)", upc: "UPC-A (Produktmodell)", serial: "Seriennummer",
-  mac: "MAC-Adresse / MAC ID", qr: "QR-Code / Barcode", ignore: "Ignorieren",
+  mac: "MAC-Adresse", asset_tag: "Produkterkennung (MAC-ID)", qr: "QR-Code / Barcode", ignore: "Ignorieren",
 };
 
 export function proposeAssignments(codes: ScannedCode[]): Assignment[] {
@@ -26,6 +26,7 @@ export function assignedCodes(codes: ScannedCode[], assignments: Assignment[]): 
     const role = assignments[index];
     if (role === "ignore") continue;
     const value = role === "mac" ? normalizeMac(code.text) : code.text.trim();
+    if (role === "asset_tag" && value && value.length > 50) throw new Error("Die Produkterkennung darf höchstens 50 Zeichen enthalten.");
     if (!value || value.length > 100 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) {
       throw new Error(role === "mac" ? "Bitte eine gültige MAC-Adresse auswählen." : "Eine Kennung ist ungültig.");
     }
@@ -75,7 +76,7 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
     };
   }
 
-  const pairs = await fetchRoles(["serial", "mac", "qr"]);
+  const pairs = await fetchRoles(["asset_tag", "serial", "mac", "qr"]);
   const primary = pairs[0] ?? retail[0];
   let deviceKeys: Set<string> | undefined;
   const devices = new Map<string, QrMatch>();
@@ -88,6 +89,7 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
   if (deviceKeys) {
     const matches = [...deviceKeys].map(key => devices.get(key)).filter((row): row is QrMatch =>
       !!row
+      && (!draft.asset_tag || !row.asset_tag || draft.asset_tag === row.asset_tag)
       && (!draft.serial || !row.serial_number || draft.serial.toUpperCase() === row.serial_number.toUpperCase())
       && (!draft.mac || !row.mac_address || draft.mac === normalizeMac(row.mac_address)));
     if (!matches.length) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät oder Modell.");
@@ -97,7 +99,7 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
     return { lookup: { ...hit.result, matches, preferred_key: null }, draft, role: hit.role };
   }
   const qr = pairs.find(({role}) => role === "qr");
-  if (qr?.result.matches.length && !draft.serial && !draft.mac) {
+  if (qr?.result.matches.length && !draft.serial && !draft.mac && !draft.asset_tag) {
     return { lookup: qr.result, draft, role: "qr" };
   }
   return { lookup: { ...primary.result, matches: [], preferred_key: null }, draft, role: primary.role };

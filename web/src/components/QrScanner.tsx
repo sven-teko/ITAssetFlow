@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScannedCode } from "../utils/barcodeReader";
 
-type Props = { onCodes: (codes: ScannedCode[]) => void; disabled: boolean };
+type Props = { onCodes: (codes: ScannedCode[]) => void; disabled: boolean; serialOnly?: boolean };
 type CameraCapabilities = MediaTrackCapabilities & { focusMode?: string[]; zoom?: { min: number; max: number; step: number }; torch?: boolean };
 type CameraSetting = MediaTrackConstraintSet & { focusMode?: string; zoom?: number; torch?: boolean };
 type CameraTools = { zoom?: { min: number; max: number; step: number }; torch: boolean };
@@ -14,7 +14,7 @@ function cameraError(error: unknown): string {
   return "Die Kamera konnte nicht gestartet werden. Bitte HTTPS, Kameraberechtigung und Kamera prüfen.";
 }
 
-export default function QrScanner({ onCodes, disabled }: Props) {
+export default function QrScanner({ onCodes, disabled, serialOnly = false }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLSpanElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -166,13 +166,13 @@ export default function QrScanner({ onCodes, disabled }: Props) {
           <path d="M8 5.5 9.5 3h5L16 5.5h3A2 2 0 0 1 21 7.5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" /><circle cx="12" cy="12.5" r="4" />
         </svg>
       </span>
-      <div><h3>Mit Kamera scannen</h3><p>QR, EAN, UPC-A, Code 128 und Code 39.</p></div>
+      <div><h3>Mit Kamera scannen</h3><p>{serialOnly ? "Scanne den Barcode bei «SN» oder «Serial Number»." : "QR, EAN, UPC-A, Code 128 und Code 39."}</p></div>
     </div>}
     <div className={`qr-video-wrap${active ? " active" : ""}`}>
-      <video ref={videoRef} muted playsInline autoPlay aria-label="Kamerabild für QR-Code oder Barcode" />
+      <video ref={videoRef} muted playsInline autoPlay aria-label={serialOnly ? "Kamerabild für Seriennummer" : "Kamerabild für QR-Code oder Barcode"} />
       {active && <span ref={frameRef} className="qr-scan-frame" aria-hidden="true" />}
     </div>
-    {active && <p className="qr-hint">Halte die Codes von einem Gerät vollständig in den weissen Rahmen.</p>}
+    {active && <p className="qr-hint">{serialOnly ? "Halte nur den Barcode der Seriennummer in den weissen Rahmen." : "Halte die Codes von einem Gerät vollständig in den weissen Rahmen."}</p>}
     {active && (tools.zoom || tools.torch) && <div className="qr-camera-tools">
       {tools.zoom && <label className="qr-zoom-field"><span>Zoom <output>{zoom.toFixed(1)}×</output></span>
         <input aria-label="Kamera-Zoom" type="range" min={tools.zoom.min} max={tools.zoom.max} step={tools.zoom.step} value={zoom}

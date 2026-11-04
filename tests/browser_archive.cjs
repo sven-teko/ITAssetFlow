@@ -29,7 +29,7 @@ const run=(async()=>{
    if(p==='/api/inventory/events')return route.fulfill({headers,contentType:'text/event-stream',body:': test\n\n'});
    if(p==='/api/inventory/form-data')return json(form);
    if(p==='/api/inventory/edit-form-data'){await editLoad;return json({...form,edit_entry:{id:'stock:101:11:used',_record_type:'stock',product_model_id:101,storage_location_id:11,department_id:10,site_id:1,condition:'used',status:'available',stock_quantity:5,image_id:imageId,purchase_date:'2026-11-02'}});}
-   if(p==='/api/scanner/lookup'){lookup={code:url.searchParams.get('code'),type:url.searchParams.get('code_type')};return json({code:lookup.code,code_type:lookup.type,matches:[],locations:[]});}
+   if(p==='/api/scanner/lookup'){lookup={code:url.searchParams.get('code'),type:url.searchParams.get('code_type')};return json({code:lookup.code,code_type:lookup.type||'auto',matches:[],locations:[]});}
    if(p==='/api/inventory'){
     if(req.method()==='PUT'){stockSaved=true;return json({entry_type:'stock',product_model_id:101,quantity:5});}
     if(req.method()==='POST'){
@@ -72,8 +72,9 @@ const run=(async()=>{
   await page.getByRole('button',{name:'Scanner',exact:true}).click();
   await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/CODE128-MAC.svg'));
   await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
-  assert.deepEqual(lookup,{code:'AABBCC112233',type:'mac'});
-  assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
+  assert.deepEqual(lookup,{code:'AABBCC112233',type:'auto'});
+  assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'AABBCC112233');
+  assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).count(),0);
   assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'');
   await page.getByLabel('Barcode enthält').selectOption('serial');
   assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'AABBCC112233');

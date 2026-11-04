@@ -211,6 +211,7 @@ function editableSpecifications(value: unknown): Record<string, SpecificationVal
 
 import { validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
 import ItemImagePicker from "../components/ItemImagePicker";
+import SerialBarcodeDialog from "../components/SerialBarcodeDialog";
 import { saveItemImage } from "../api/archiveApi";
 import StockWithdrawalDialog from "../components/StockWithdrawalDialog";
 import { QrRequestError } from "../api/qrApi";
@@ -230,13 +231,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const scannedEan = !sourceKey && searchParams.get("code_type") === "ean";
   const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "UPC-A", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
   const rawType = sourceKey ? null : searchParams.get("code_type");
-  const scannedType: CodeType = rawType && ["qr","ean","upc","mac","serial"].includes(rawType)
+  const scannedType: CodeType = rawType && ["qr","ean","upc","mac","serial","asset_tag"].includes(rawType)
     ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);
   const scannedEanCode = scan?.ean ?? (scannedEan ? scannedCode : "");
   const scannedUpcCode = scan?.upc ?? (scannedType === "upc" ? scannedCode : "");
   const scannedQrCode = scan?.qr ?? (scannedType === "qr" ? scannedCode : "");
   const scannedModelId = scan?.modelId;
-  const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial">(scannedType === "mac" ? "mac" : "serial");
+  const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial" | "asset_tag">(
+    scannedType === "mac" || scannedType === "asset_tag" ? scannedType : "serial");
+  const [serialScannerOpen, setSerialScannerOpen] = useState(false);
   const [qrCode, setQrCode] = useState(scannedQrCode);
   const [codesModelId, setCodesModelId] = useState("");
   const [ean, setEan] = useState(scannedEanCode);
@@ -264,8 +267,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   const scannedMac = scan?.mac ?? (scannedType === "mac" ? normalizeMac(scannedCode) : null);
   const scannedSerial = scan?.serial ?? (scannedType === "serial" ? scannedCode : "");
-  const scannedTag = scan ? scannedSerial || scannedMac || scannedQrCode : scannedMac ?? scannedCode;
-  const [assetTag, setAssetTag] = useState(!scannedEan && scannedType !== "upc" && (scannedTag?.length ?? 0) <= 50 ? scannedTag ?? "" : "");
+  const scannedTag = scan?.asset_tag ?? (scan ? scannedSerial || scannedMac || scannedQrCode :
+    scannedEan || scannedType === "upc" ? "" : scannedMac ?? scannedCode);
+  const [assetTag, setAssetTag] = useState(scannedTag.length <= 50 ? scannedTag : "");
   const [serialNumber, setSerialNumber] = useState(scannedSerial);
   const [macAddress, setMacAddress] = useState(scannedMac ?? "");
   const [showMacField, setShowMacField] = useState(false);
@@ -524,7 +528,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     const model = rowById(formData.product_models, availableModelId);
     const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity";
     setQrCode(String((useModelCodes ? model?.qr_code : "") || scannedQrCode
-      || (model?.tracking_mode === "quantity" && !scannedEan && scannedType !== "upc" ? scannedCode : "")));
+      || (model?.tracking_mode === "quantity" && !scannedEan && scannedType !== "upc" && scannedType !== "asset_tag" ? scannedCode : "")));
     setEan(scannedEanCode);
     setUpc(scannedUpcCode);
   }
@@ -847,8 +851,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     if (scannedModelId !== undefined && (modelMode !== "existing" || !sameId(selectedModel?.id, scannedModelId))) {
       throw new Error("Bitte das Produktmodell verwenden, das zu den gescannten Codes gehört.");
     }
-    if (scan && currentEntryType === "stock" && (scan.serial || scan.mac)) {
-      throw new Error("Die gescannte Seriennummer oder MAC-Adresse benötigt einen Einzelartikel.");
+    if (currentEntryType === "stock" && (scan?.serial || scan?.mac || scan?.asset_tag || (scannedCode && scannedType === "asset_tag"))) {
+      throw new Error("Die gescannte Gerätekennung benötigt einen Einzelartikel.");
     }
     if (scannedEanCode && modelEan && scannedEanCode !== modelEan) {
       throw new Error("Die gescannte EAN gehört nicht zum gewählten Produktmodell. Bitte wähle das passende Modell.");
@@ -1144,14 +1148,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         saving={saving} saveDisabled={imagePreparing}
         submitLabel={isEditMode ? "Änderungen speichern" : "Eintrag speichern"}
         onCancel={() => navigate("/inventory")} onSubmit={event => void submit(event)}>
-        {scannedCode && scannedType !== "qr" && scannedType !== "upc" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
+        {!scan && scannedCode && scannedType !== "qr" && scannedType !== "upc" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
           <label>Barcode enthält <select value={barcodeAssignment} onChange={event=>{
-            const value=event.target.value as "mac" | "serial";setBarcodeAssignment(value);
+            const value=event.target.value as typeof barcodeAssignment;setBarcodeAssignment(value);
             const normalized = normalizeMac(scannedCode);
-            setSerialNumber(value === "serial" ? scannedCode : "");
-            setMacAddress(value === "mac" ? normalized ?? scannedCode : "");
+            setSerialNumber(current => value === "serial" ? current || scannedCode : current === scannedCode ? "" : current);
+            setMacAddress(current => value === "mac" ? current || normalized || "" : current === normalized ? "" : current);
             setAssetTag(tag => tag === scannedCode || tag === normalized ? (value === "mac" ? normalized ?? scannedCode : scannedCode) : tag);
-          }}><option value="serial">Seriennummer</option><option value="mac">MAC-Adresse</option></select></label>
+          }}><option value="serial">Seriennummer</option><option value="asset_tag">Produkterkennung (MAC-ID)</option>
+            {normalizeMac(scannedCode) && <option value="mac">MAC-Adresse</option>}</select></label>
         </div>}
         {scannedCode && <div className="asset-form-qr-notice">
           <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
@@ -1483,8 +1488,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               <fieldset className="asset-form-group">
                 <legend>Einzelartikel</legend>
                 <div className="asset-form-row">
-                  <label>Produkterkennung *:</label>
+                  <label htmlFor="asset-tag">Produkterkennung *:</label>
                   <input
+                    id="asset-tag"
                     type="text"
                     className={fieldClass("asset_tag")}
                     placeholder="z. B. IT-000123"
@@ -1499,14 +1505,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 </div>
                 <div className="asset-form-row">
                   <label htmlFor="asset-serial">Seriennummer:</label>
-                  <input
-                    id="asset-serial"
-                    type="text"
-                    className="asset-form-control"
-                    value={serialNumber}
-                    disabled={saving}
-                    onChange={(event) => setSerialNumber(event.target.value)}
-                  />
+                  <div className="asset-form-serial-control">
+                    <input id="asset-serial" type="text" className="asset-form-control" value={serialNumber} disabled={saving}
+                      onChange={(event) => setSerialNumber(event.target.value)} />
+                    <button type="button" disabled={saving} aria-haspopup="dialog" aria-label="Seriennummer scannen"
+                      onClick={() => setSerialScannerOpen(true)}>Scannen</button>
+                  </div>
                 </div>
                 <div className="asset-form-row">
                   <label htmlFor="asset-warranty-until">Garantie bis:</label>
@@ -1710,6 +1714,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           </div>
         </div>
       </AssetFormLayout>
+      {serialScannerOpen && <SerialBarcodeDialog onCancel={() => setSerialScannerOpen(false)} onSelect={serial => {
+        setSerialNumber(serial);
+        setSerialScannerOpen(false);
+      }} />}
       {pendingWithdrawal && editEntry && <StockWithdrawalDialog fixedAmount destinationData={formData} source={{product_model_id:Number(editEntry.product_model_id),storage_location_id:Number(editEntry.storage_location_id),
         condition:String(editEntry.condition),quantity:pendingWithdrawal.available,product_model_name:String(rowById(formData.product_models,idText(editEntry.product_model_id))?.name??"Mengenartikel")}}
         amount={pendingWithdrawal.amount} onCancel={()=>setPendingWithdrawal(null)}

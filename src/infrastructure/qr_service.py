@@ -61,10 +61,10 @@ class QrService:
                     found[row["id"]] = row
         return list(found.values())
 
-    def _assets_for_code(self, code: str, *, ean_only: bool = False) -> list[dict[str, Any]]:
+    def _assets_for_code(self, code: str, code_type: str = "auto") -> list[dict[str, Any]]:
         found = {}
         try:
-            mac = normalize_mac(code)
+            mac = normalize_mac(code) if code_type in {"auto", "mac"} else None
         except ValueError:
             mac = None
         if mac:
@@ -73,18 +73,17 @@ class QrService:
         else:
             mac_variants = ()
 
-        for field in (("ean",) if ean_only else ("qr_code", "ean", "asset_tag", "serial_number", "mac_address")):
+        fields = {"ean": ("ean",), "upc": ("ean",), "asset_tag": ("asset_tag",), "mac": ("mac_address",)}
+        for field in fields.get(code_type, ("qr_code", "ean", "asset_tag", "serial_number", "mac_address")):
             if field == "mac_address" and not mac_variants:
                 continue
 
             def query(columns: str):
                 request = self.client.table("assets").select(columns).is_("archived_at", "null")
-                if mac_variants and field in {"asset_tag", "mac_address"}:
+                legacy_tag = field == "asset_tag" and not code.upper().startswith("MAC")
+                if mac_variants and (field == "mac_address" or legacy_tag):
                     # All patterns are validated hex and fixed punctuation, so ILIKE is exact apart from case.
                     filters = [f"{field}.ilike.{variant}" for variant in mac_variants]
-                    if field == "asset_tag" and code.casefold() not in {variant.casefold() for variant in mac_variants}:
-                        # A tag may contain a literal prefix such as "MAC: ".
-                        filters.append(f'{field}.eq."{code}"')
                     return request.or_(",".join(filters))
                 return request.eq(field, code)
 
@@ -98,28 +97,42 @@ class QrService:
                 raise
             for row in self._data(response):
                 previous = found.get(row["id"], {}).get("matched_identifier")
-                if field == "mac_address" or (field == "asset_tag" and mac_variants):
+                if field == "mac_address":
                     row["matched_identifier"] = "mac"
                 elif field == "serial_number" and previous != "mac":
                     row["matched_identifier"] = "serial"
                 elif previous:
                     row["matched_identifier"] = previous
+                elif field == "asset_tag":
+                    row["matched_identifier"] = "asset_tag"
                 found[row["id"]] = row
         return list(found.values())
 
     def lookup(self, value: Any, code_type: str = "auto") -> dict[str, Any]:
         code = normalize_qr_code(value)
-        if code_type not in {"auto", "qr", "ean", "upc", "mac", "serial"}:
+        if code_type not in {"auto", "qr", "ean", "upc", "mac", "serial", "asset_tag"}:
             raise ValueError("Unbekannte Codeart.")
+        if code_type in {"auto", "asset_tag"}:
+            tag = re.fullmatch(r"MAC[- ]?ID(?:\s*[:=]\s*|\s+)(\S.*)", code, re.I)
+            if tag:
+                code, code_type = normalize_qr_code(tag[1]), "asset_tag"
         if code_type == "ean":
             normalize_ean(code)
         elif code_type == "upc":
             normalize_upc(code)
         retail_code = code_type in {"ean", "upc"}
         ean = "0" + code if code_type == "upc" else code
-        assets = self._assets_for_code(ean, ean_only=retail_code)
+        assets = self._assets_for_code(ean, code_type)
+        if code_type == "auto" and re.fullmatch(r"[a-f0-9]{12}", code, re.I):
+            # A compact barcode can be a tag, a serial number or a MAC.
+            # Prefer a literal tag over any legacy punctuation variants.
+            exact_tags = [row for row in assets if row.get("asset_tag") == code]
+            if exact_tags:
+                assets = [{**row, "matched_identifier": "asset_tag"} for row in exact_tags]
         direct_asset_ids = {row["id"] for row in assets}
-        matched = {row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)}
+        matched = {} if code_type in {"asset_tag", "mac"} else {
+            row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)
+        }
         models = matched.copy()
         other_ids = {row["product_model_id"] for row in assets}.difference(models)
         if other_ids:
