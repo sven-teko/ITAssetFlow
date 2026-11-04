@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CodeType } from "../utils/scannerCodes";
 import type { ScannedCode } from "../utils/barcodeReader";
 
-type Props = { onCode: (code: string, type: CodeType, format: string) => void; disabled: boolean };
+type Props = { onCodes: (codes: ScannedCode[]) => void; disabled: boolean };
 type CameraCapabilities = MediaTrackCapabilities & { focusMode?: string[]; zoom?: { min: number; max: number; step: number }; torch?: boolean };
 type CameraSetting = MediaTrackConstraintSet & { focusMode?: string; zoom?: number; torch?: boolean };
 type CameraTools = { zoom?: { min: number; max: number; step: number }; torch: boolean };
@@ -15,8 +14,9 @@ function cameraError(error: unknown): string {
   return "Die Kamera konnte nicht gestartet werden. Bitte HTTPS, Kameraberechtigung und Kamera prüfen.";
 }
 
-export default function QrScanner({ onCode, disabled }: Props) {
+export default function QrScanner({ onCodes, disabled }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const frameRef = useRef<HTMLSpanElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
   const generation = useRef(0);
@@ -83,19 +83,19 @@ export default function QrScanner({ onCode, disabled }: Props) {
       await videoRef.current.play();
       if (run !== generation.current) return;
       setActive(true); setStarting(false);
-      let candidate = "", confirmations = 0, attempts = 0;
+      let candidate = "", confirmations = 0;
       const scan = async () => {
         if (run !== generation.current || !videoRef.current) return;
         try {
-          const result = await read(videoRef.current, ++attempts % 3 === 0);
+          const results = frameRef.current ? await read(videoRef.current, true, frameRef.current) : [];
           if (run !== generation.current) return;
-          if (result) {
-            const key = `${result.format}:${result.text}`;
+          if (results.length) {
+            const key = JSON.stringify(results.map(result => [result.type, result.text]).sort());
             confirmations = key === candidate ? confirmations + 1 : 1;
             candidate = key;
-            // Two matching frames reduce accidental readings of linear barcodes.
-            if (result.type === "qr" || confirmations >= 2) {
-              stop(); onCode(result.text, result.type, result.format); return;
+            // Require a stable target before taking it over.
+            if (confirmations >= (results.length > 1 ? 2 : 3)) {
+              stop(); onCodes(results); return;
             }
           } else { candidate = ""; confirmations = 0; }
         } catch {
@@ -134,7 +134,7 @@ export default function QrScanner({ onCode, disabled }: Props) {
     const run = generation.current;
     const url = URL.createObjectURL(file);
     setReadingImage(true);
-    let detected: ScannedCode | null = null;
+    let detected: ScannedCode[] = [];
     try {
       const { createBarcodeReader } = await import("../utils/barcodeReader");
       const read = await createBarcodeReader();
@@ -142,14 +142,14 @@ export default function QrScanner({ onCode, disabled }: Props) {
       await image.decode();
       if (run !== generation.current) return;
       detected = await read(image, true);
-      if (!detected && run === generation.current) setError("Kein lesbarer Code gefunden. Bitte nur einen Code möglichst nah, scharf und mit etwas freiem Rand aufnehmen. Unterstützt: QR, EAN, Code 128 und Code 39.");
+      if (!detected.length && run === generation.current) setError("Kein lesbarer Code gefunden. Bitte die Codes scharf und mit etwas freiem Rand aufnehmen.");
     } catch {
       if (run === generation.current) setError("Das Code-Bild oder der Scanner konnte nicht geladen werden. Bitte ein scharfes Bild öffnen und die Seite bei Bedarf neu laden.");
     } finally {
       URL.revokeObjectURL(url); input.value = "";
       if (run === generation.current) setReadingImage(false);
     }
-    if (detected && run === generation.current) onCode(detected.text, detected.type, detected.format);
+    if (detected.length && run === generation.current) onCodes(detected);
   }
 
   return <section className={`qr-camera${active ? " is-active" : ""}`} aria-label="Scanner">
@@ -163,13 +163,13 @@ export default function QrScanner({ onCode, disabled }: Props) {
           <path d="M8 5.5 9.5 3h5L16 5.5h3A2 2 0 0 1 21 7.5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" /><circle cx="12" cy="12.5" r="4" />
         </svg>
       </span>
-      <div><h3>Mit Kamera scannen</h3><p>QR, EAN, Code 128 und Code 39 – ohne Auswahl der Codeart.</p></div>
+      <div><h3>Mit Kamera scannen</h3><p>QR, EAN, UPC-A, Code 128 und Code 39.</p></div>
     </div>}
     <div className={`qr-video-wrap${active ? " active" : ""}`}>
       <video ref={videoRef} muted playsInline autoPlay aria-label="Kamerabild für QR-Code oder Barcode" />
-      {active && <span className="qr-scan-frame" aria-hidden="true" />}
+      {active && <span ref={frameRef} className="qr-scan-frame" aria-hidden="true" />}
     </div>
-    {active && <p className="qr-hint">Einen Code nah und scharf aufnehmen. Alle Striche und den freien Rand im Bild halten.</p>}
+    {active && <p className="qr-hint">Halte die Codes von einem Gerät vollständig in den weissen Rahmen.</p>}
     {active && (tools.zoom || tools.torch) && <div className="qr-camera-tools">
       {tools.zoom && <label className="qr-zoom-field"><span>Zoom <output>{zoom.toFixed(1)}×</output></span>
         <input aria-label="Kamera-Zoom" type="range" min={tools.zoom.min} max={tools.zoom.max} step={tools.zoom.step} value={zoom}

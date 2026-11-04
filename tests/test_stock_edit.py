@@ -102,7 +102,7 @@ class StockEditTests(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import Mock, patch
         from uuid import uuid4
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session
 
         self.db.rows["product_models"][0]["name"] = "TV Box Fernbedienung (Quadratische Tasten)"

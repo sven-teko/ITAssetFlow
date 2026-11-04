@@ -145,7 +145,7 @@ export default function useInventoryView({
     const searchColumns = new Set([
       ...(meta?.column_order ?? DEFAULT_INVENTORY_META.column_order),
       "asset_tag", "serial_number", "mac_address", "qr_code", "ean",
-      "product_model_qr_code", "product_model_ean", "product_model_sku", "product_model_part_number",
+      "product_model_qr_code", "product_model_ean", "product_model_upc", "product_model_sku", "product_model_part_number",
     ]);
 
     const { from, to } = price;

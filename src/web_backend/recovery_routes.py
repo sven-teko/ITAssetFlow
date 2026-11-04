@@ -16,6 +16,7 @@ from supabase import ClientOptions, create_client
 from supabase_auth.errors import AuthRetryableError, AuthUnknownError
 
 from config import get_app_config
+from web_backend.rate_limits import RECOVERY_LIMIT_MESSAGE, RequestWindow, account_key, retry_headers
 
 RECOVERY_COOKIE = "itassetflow_recovery"
 RECOVERY_PATH = "/api/auth/recovery"
@@ -92,7 +93,8 @@ def set_recovery(response: Response, request: Request, session: Any) -> None:
     )
 
 
-def create_recovery_router(clear_login: Callable[[Response], None], allowed_origins: Sequence[str]) -> APIRouter:
+def create_recovery_router(clear_login: Callable[[Response], None], allowed_origins: Sequence[str],
+                           account_limits: RequestWindow) -> APIRouter:
     router = APIRouter(prefix=RECOVERY_PATH, tags=["password-recovery"])
 
     def check_origin(request: Request) -> None:
@@ -109,6 +111,9 @@ def create_recovery_router(clear_login: Callable[[Response], None], allowed_orig
         email = payload.email.strip()
         if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             return reply({"detail": "Bitte eine gültige E-Mail-Adresse eingeben."}, 400)
+        retry = account_limits.consume(account_key(email))
+        if retry:
+            raise HTTPException(429, RECOVERY_LIMIT_MESSAGE, headers=retry_headers(retry))
         try:
             recovery_client().auth.reset_password_for_email(email, {"redirect_to": public_app_url()})
         except Exception as error:

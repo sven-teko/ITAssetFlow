@@ -108,7 +108,7 @@ class SitePermissionTests(unittest.TestCase):
             repo.delete_inventory_entries([{"id": 123}], reason)
 
     def test_settings_routes_reject_non_admin_before_database_access(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session, WebSession
         client = FakeClient()
         try:
@@ -122,7 +122,7 @@ class SitePermissionTests(unittest.TestCase):
             app.dependency_overrides.clear()
 
     def test_settings_and_table_metadata_load_without_site_migration(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session, WebSession
         client = AccessSchemaClient(APIError({'code': 'PGRST205', 'message': "Could not find the table 'public.employee_site_access' in the schema cache", 'hint': None, 'details': None}))
         try:

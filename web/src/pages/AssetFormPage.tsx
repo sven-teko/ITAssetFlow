@@ -1,7 +1,8 @@
 import { newBookingId } from "../api/stockBooking";
 import { API_BASE } from "../api/config";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import type { ScanDraft } from "../utils/scannerCodes";
 import AssetFormLayout from "../components/AssetFormLayout";
 import { formatCHF, parseCHF } from "../utils/price";
 import { inventoryDateErrors, isValidISODate } from "../utils/dateValidation";
@@ -223,16 +224,23 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [searchParams] = useSearchParams();
   const duplicateKey = !isEditMode ? searchParams.get("duplicate") : null;
   const sourceKey = entryKey ?? duplicateKey;
+  const location = useLocation();
+  const scan = sourceKey ? undefined : (location.state as { scan?: ScanDraft } | null)?.scan;
   const scannedCode = sourceKey ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
   const scannedEan = !sourceKey && searchParams.get("code_type") === "ean";
-  const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
+  const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "UPC-A", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
   const rawType = sourceKey ? null : searchParams.get("code_type");
-  const scannedType: CodeType = rawType && ["qr","ean","mac","serial"].includes(rawType)
+  const scannedType: CodeType = rawType && ["qr","ean","upc","mac","serial"].includes(rawType)
     ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);
+  const scannedEanCode = scan?.ean ?? (scannedEan ? scannedCode : "");
+  const scannedUpcCode = scan?.upc ?? (scannedType === "upc" ? scannedCode : "");
+  const scannedQrCode = scan?.qr ?? (scannedType === "qr" ? scannedCode : "");
+  const scannedModelId = scan?.modelId;
   const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial">(scannedType === "mac" ? "mac" : "serial");
-  const [qrCode, setQrCode] = useState(scannedType === "qr" ? scannedCode : "");
+  const [qrCode, setQrCode] = useState(scannedQrCode);
   const [codesModelId, setCodesModelId] = useState("");
-  const [ean, setEan] = useState(scannedEan ? scannedCode : "");
+  const [ean, setEan] = useState(scannedEanCode);
+  const [upc, setUpc] = useState(scannedUpcCode);
   const [formData, setFormData] = useState<FormDataResponse | null>(null);
   const [editEntry, setEditEntry] = useState<GenericRow | null>(null);
   const [meta, setMeta] = useState<InventoryMeta | null>(null);
@@ -254,10 +262,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [purchaseDate, setPurchaseDate] = useState(todayISO());
   const [newPrice, setNewPrice] = useState("");
 
-  const scannedMac = scannedType === "mac" ? normalizeMac(scannedCode) : null;
-  const [assetTag, setAssetTag] = useState(!scannedEan && scannedCode.length <= 50 ? scannedMac ?? scannedCode : "");
-  const [serialNumber, setSerialNumber] = useState(scannedType === "serial" ? scannedCode : "");
-  const [macAddress, setMacAddress] = useState(scannedType === "mac" ? scannedMac ?? scannedCode : "");
+  const scannedMac = scan?.mac ?? (scannedType === "mac" ? normalizeMac(scannedCode) : null);
+  const scannedSerial = scan?.serial ?? (scannedType === "serial" ? scannedCode : "");
+  const scannedTag = scan ? scannedSerial || scannedMac || scannedQrCode : scannedMac ?? scannedCode;
+  const [assetTag, setAssetTag] = useState(!scannedEan && scannedType !== "upc" && (scannedTag?.length ?? 0) <= 50 ? scannedTag ?? "" : "");
+  const [serialNumber, setSerialNumber] = useState(scannedSerial);
+  const [macAddress, setMacAddress] = useState(scannedMac ?? "");
   const [showMacField, setShowMacField] = useState(false);
   const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
   const [imagePreparing,setImagePreparing]=useState(false);
@@ -409,7 +419,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
           const codeSource = recordType === "asset" ? currentEdit
             : data.product_models.find(model => String(model.id) === String(currentEdit.product_model_id));
           setQrCode(String(codeSource?.qr_code ?? ""));
-          setEan(String(codeSource?.ean ?? ""));
+          setCodesModelId(idText(currentEdit.product_model_id));
+          setEan(recordType === "asset" ? String(currentEdit.ean ?? "") : "");
           if (recordType === "asset") {
             setAssetTag(String(currentEdit.asset_tag ?? ""));
             setSerialNumber(String(currentEdit.serial_number ?? ""));
@@ -429,8 +440,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             setConnectedChildIds([]);
             setSpecValues({});
           }
-        } else if (data.product_categories[0]) {
-          setCategoryId(idText(data.product_categories[0].id));
+        } else {
+          const matchingModels = data.product_models.filter(model => model.is_active !== false && (
+            scannedModelId !== undefined ? sameId(model.id, scannedModelId) :
+              Boolean(scannedEanCode && (model.ean === scannedEanCode || `0${model.upc}` === scannedEanCode)
+                || scannedUpcCode && (model.upc === scannedUpcCode || model.ean === `0${scannedUpcCode}`))
+          ));
+          const match = matchingModels.length === 1 ? matchingModels[0] : undefined;
+          setCategoryId(idText(match?.category_id ?? data.product_categories[0]?.id));
+          if (match) setSelectedModelId(idText(match.id));
         }
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -444,7 +462,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
     void loadForm();
     return () => controller.abort();
-  }, [duplicateKey, sourceKey, isEditMode, navigate, onSessionExpired]);
+  }, [duplicateKey, sourceKey, isEditMode, navigate, onSessionExpired, scannedModelId, scannedEanCode, scannedUpcCode]);
   const categories = useMemo(
     () =>
       [...(formData?.product_categories ?? [])].sort((left, right) =>
@@ -496,16 +514,24 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   );
 
   // Nach einem Kategorienwechsel ein verfügbares Modell auswählen und alte Eingaben verwerfen.
+  const chooseScannedModel = !sourceKey && Boolean(scannedEanCode || scannedUpcCode);
   const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
     ? selectedModelId
-    : idText(existingModels[0]?.id);
+    : chooseScannedModel ? "" : idText(existingModels[0]?.id);
 
   if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
     setCodesModelId(availableModelId);
     const model = rowById(formData.product_models, availableModelId);
     const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity";
-    setQrCode(String((useModelCodes ? model?.qr_code : "") || (scannedType === "qr" || model?.tracking_mode === "quantity" && !scannedEan ? scannedCode : "")));
-    setEan(String((useModelCodes ? model?.ean : "") || (scannedEan ? scannedCode : "")));
+    setQrCode(String((useModelCodes ? model?.qr_code : "") || scannedQrCode
+      || (model?.tracking_mode === "quantity" && !scannedEan && scannedType !== "upc" ? scannedCode : "")));
+    setEan(scannedEanCode);
+    setUpc(scannedUpcCode);
+  }
+  if (isEditMode && editRecordType === "asset" && codesModelId && availableModelId !== codesModelId) {
+    setCodesModelId(availableModelId);
+    setEan("");
+    setUpc("");
   }
 
   if (modelMode === "existing" && selectedModelId !== availableModelId) {
@@ -517,6 +543,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     () => rowById(formData?.product_models ?? [], selectedModelId),
     [formData, selectedModelId],
   );
+  const modelEan = modelMode === "existing" ? String(selectedModel?.ean ?? "").trim() : "";
+  const modelUpc = modelMode === "existing" ? String(selectedModel?.upc ?? "").trim() : "";
   const currentTrackingMode: TrackingMode =
     modelMode === "existing"
       ? (String(selectedModel?.tracking_mode ?? "serialized") as TrackingMode)
@@ -816,7 +844,21 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       throw new Error(Object.values(dateErrors).join("\n"));
     }
 
-    validateCodes(qrCode, ean);
+    if (scannedModelId !== undefined && (modelMode !== "existing" || !sameId(selectedModel?.id, scannedModelId))) {
+      throw new Error("Bitte das Produktmodell verwenden, das zu den gescannten Codes gehört.");
+    }
+    if (scan && currentEntryType === "stock" && (scan.serial || scan.mac)) {
+      throw new Error("Die gescannte Seriennummer oder MAC-Adresse benötigt einen Einzelartikel.");
+    }
+    if (scannedEanCode && modelEan && scannedEanCode !== modelEan) {
+      throw new Error("Die gescannte EAN gehört nicht zum gewählten Produktmodell. Bitte wähle das passende Modell.");
+    }
+    if (scannedUpcCode && modelUpc && scannedUpcCode !== modelUpc) {
+      throw new Error("Die gescannte UPC gehört nicht zum gewählten Produktmodell. Bitte wähle das passende Modell.");
+    }
+    const eanToLink = modelEan ? "" : ean.trim();
+    const upcToLink = modelUpc ? "" : upc.trim();
+    validateCodes(qrCode, eanToLink, upcToLink);
     if (macAddress.trim() && !normalizeMac(macAddress)) throw new Error("Bitte eine gültige MAC-Adresse eingeben.");
     const price = newPrice.trim() ? parseCHF(newPrice) : 0;
     let modelPayload: Record<string, unknown>;
@@ -854,7 +896,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     const departmentOriginalId = originalId(formData.departments, departmentId);
     const payload: Record<string, unknown> = {
       model: modelPayload,
-      scanner_codes: { qr_code: qrCode.trim() || null, ean: ean.trim() || null },
+      scanner_codes: { qr_code: qrCode.trim() || null, ...(eanToLink ? { ean: eanToLink } : {}), ...(upcToLink ? { upc: upcToLink } : {}) },
       entry_type: currentEntryType,
       condition,
       storage_location_id: originalId(formData.storage_locations, locationId),
@@ -1102,7 +1144,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         saving={saving} saveDisabled={imagePreparing}
         submitLabel={isEditMode ? "Änderungen speichern" : "Eintrag speichern"}
         onCancel={() => navigate("/inventory")} onSubmit={event => void submit(event)}>
-        {scannedCode && scannedType !== "qr" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
+        {scannedCode && scannedType !== "qr" && scannedType !== "upc" && !scannedEan && currentEntryType === "asset" && <div className="asset-form-barcode-assignment">
           <label>Barcode enthält <select value={barcodeAssignment} onChange={event=>{
             const value=event.target.value as "mac" | "serial";setBarcodeAssignment(value);
             const normalized = normalizeMac(scannedCode);
@@ -1113,7 +1155,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         </div>}
         {scannedCode && <div className="asset-form-qr-notice">
           <strong>{scannedFormat || (scannedEan ? "EAN" : "Kennung")}: {scannedCode}</strong>
-          <span>Die Kennung wird beim Speichern mit diesem Artikel verknüpft.</span>
+          <span>{scannedEan || scannedType === "upc" ? "Der Handelscode wird mit dem Produktmodell verknüpft." : "Die Kennung wird beim Speichern mit diesem Artikel verknüpft."}</span>
         </div>}
         {errorMessage && (
           <div
@@ -1158,6 +1200,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     {existingModels.length === 0 && (
                       <option value="">Kein aktives Produktmodell vorhanden</option>
                     )}
+                    {chooseScannedModel && existingModels.length > 0 && <option value="">Produktmodell auswählen</option>}
                     {existingModels.map((model) => {
                       const manufacturer = manufacturersById.get(idText(model.manufacturer_id));
                       const manufacturerName = String(manufacturer?.name ?? "").trim();
@@ -1429,8 +1472,12 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 <input id="item-qr" type="text" maxLength={100} className="asset-form-control" value={qrCode} disabled={saving}
                   onChange={event => setQrCode(event.target.value)} /></div>
               <div className="asset-form-row"><label htmlFor="item-ean">EAN:</label>
-                <input id="item-ean" type="text" inputMode="numeric" maxLength={13} className="asset-form-control" value={ean} disabled={saving}
-                  placeholder="EAN-8 oder EAN-13" onChange={event => setEan(event.target.value)} /></div>
+                <input id="item-ean" type="text" inputMode="numeric" maxLength={13} className="asset-form-control" value={modelEan || ean} disabled={saving}
+                  readOnly={Boolean(modelEan)} title={modelEan ? "EAN unter Einstellungen → Produktmodelle ändern" : "EAN des Produktmodells"}
+                  placeholder="EAN des Produktmodells" onChange={event => setEan(event.target.value)} /></div>
+              <div className="asset-form-row"><label htmlFor="item-upc">UPC-A:</label>
+                <input id="item-upc" type="text" inputMode="numeric" maxLength={12} className="asset-form-control" value={modelUpc || upc}
+                  disabled={saving} readOnly={Boolean(modelUpc)} placeholder="UPC des Produktmodells" onChange={event => setUpc(event.target.value)} /></div>
             </fieldset>
             {currentEntryType === "asset" ? (
               <fieldset className="asset-form-group">

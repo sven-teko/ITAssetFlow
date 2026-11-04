@@ -253,7 +253,7 @@ class QrTests(unittest.TestCase):
         self.assertNotIn("sku", payload["model"])
 
     def test_viewer_cannot_book_qr_stock(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session
         app.dependency_overrides[get_web_session] = lambda: SimpleNamespace(client=self.db, email="viewer@example.test", role="viewer")
         try:

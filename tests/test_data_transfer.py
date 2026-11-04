@@ -184,7 +184,7 @@ class ExportTests(unittest.TestCase):
 
 class ExportApiTests(unittest.TestCase):
     def setUp(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session
         self.app, self.dependency = app, get_web_session
         self.db = ExportClient({"assets": [{"id": 1, "asset_tag": "SICHTBAR"},

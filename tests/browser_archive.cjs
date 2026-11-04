@@ -87,6 +87,7 @@ const run=(async()=>{
   await page.setViewportSize({width:390,height:844});
   const capture=page.locator('input[capture="environment"]');
   assert.equal(await capture.getAttribute('accept'),'image/*');
+  assert.equal(await page.getByRole('button',{name:'Foto aufnehmen'}).evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(40, 104, 173)');
   const [chooser]=await Promise.all([page.waitForEvent('filechooser'),page.getByRole('button',{name:'Foto aufnehmen'}).click()]);
   await chooser.setFiles(path.join(__dirname,'fixtures/QR-CABLE.png'));
   await page.getByAltText('Vorschau des Artikelbilds').waitFor();
@@ -165,15 +166,18 @@ const run=(async()=>{
   assert.equal(deletions,1);assert.equal(rows.some(row=>row.id===3),false);
   console.log('PASS: Löschen im Archiv verlangt Bestätigung und stellt keinen Artikel wieder her');
   await page.setViewportSize({width:1440,height:1000});
-  form.product_models.push({id:101,name:'Fernbedienung',category_id:1,manufacturer_id:1,tracking_mode:'quantity',is_active:true,specifications:{}});
+  form.product_models.push({id:101,name:'Fernbedienung',category_id:1,manufacturer_id:1,tracking_mode:'quantity',is_active:true,specifications:{},ean:'96385074'});
   form.storage_locations.push({id:12,name:'Ziel',site_id:1,department_id:10,is_active:true});
   await page.goto('http://127.0.0.1:5176/#/inventory/stock%3Atest/edit');
   await page.getByRole('status').filter({hasText:'Daten für den Inventareintrag werden geladen'}).waitFor();
   assert.equal(await page.locator('.asset-form-spinner').evaluate(el=>getComputedStyle(el).animationName),'asset-form-spin');
   finishEditLoad();
   await page.getByRole('heading',{name:'Inventareintrag bearbeiten',exact:true}).waitFor();
+  assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'96385074');
+  assert.equal(await page.getByLabel('EAN:',{exact:true}).evaluate(el=>el.readOnly),true);
   await page.setViewportSize({width:390,height:844});
   assert.equal(await page.getByRole('button',{name:'Foto aufnehmen'}).isVisible(),true);
+  assert.equal(await page.getByRole('button',{name:'Foto aufnehmen'}).evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(40, 104, 173)');
   await page.setViewportSize({width:1440,height:1000});
   await row(/^Lagerort \*:/).locator('select').selectOption('12');
   await page.getByRole('button',{name:/speichern/i}).click();

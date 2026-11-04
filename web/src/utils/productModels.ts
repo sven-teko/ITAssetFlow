@@ -23,6 +23,7 @@ export type ProductModel = {
   sku: string | null;
   qr_code?: string | null;
   ean?: string | null;
+  upc?: string | null;
   tracking_mode: string;
   unit_code: string;
   is_active: boolean;
@@ -43,6 +44,7 @@ export type ModelDraft = {
   sku: string;
   qr_code: string;
   ean: string;
+  upc: string;
   specifications: Record<string, string>;
 };
 
@@ -85,16 +87,17 @@ export function createModelDraft(model: ProductModel, fields: ModelField[]): Mod
     sku: model.sku ?? "",
     qr_code: model.qr_code ?? "",
     ean: model.ean ?? "",
+    upc: model.upc ?? "",
     specifications: Object.fromEntries(fields.map(({ key }) => [key, specificationText(model.specifications[key])])),
   };
 }
 
 export function modelChanges(model: ProductModel, fields: ModelField[], draft: ModelDraft): Record<string, unknown> {
   if (!draft.name.trim()) throw new Error("Bitte eine Modellbezeichnung eingeben.");
-  validateCodes(draft.qr_code, draft.ean);
+  validateCodes(draft.qr_code, draft.ean, draft.upc);
   const original = createModelDraft(model, fields);
   const changes: Record<string, unknown> = {};
-  for (const key of ["name", "part_number", "sku", "qr_code", "ean"] as const) {
+  for (const key of ["name", "part_number", "sku", "qr_code", "ean", "upc"] as const) {
     if (draft[key] !== original[key]) changes[key] = draft[key].trim() || null;
   }
   if (draft.manufacturer_name.trim() !== original.manufacturer_name) {

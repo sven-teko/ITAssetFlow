@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from supabase import Client
-from infrastructure.scanner_codes import normalize_ean, code_values, normalize_mac
+from infrastructure.scanner_codes import normalize_ean, normalize_upc, code_values, normalize_mac
 from infrastructure.scanner_schema import missing_scanner_column, select_scanner_compatible, write_scanner_compatible
 
 
@@ -34,27 +34,34 @@ class QrService:
             if len(page) < 500:
                 return rows
 
-    def _models_for_code(self, code: str) -> list[dict[str, Any]]:
+    def _models_for_code(self, code: str, *, retail_type: str | None = None) -> list[dict[str, Any]]:
         # ilike benötigt maskierte Platzhalter; zusätzlich exakt vergleichen.
         escaped = code.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_").replace("*", r"\*")
         found = {}
-        for field in ("qr_code", "ean", "sku", "part_number"):
+        filters = {} if retail_type else dict.fromkeys(("qr_code", "ean", "upc", "sku", "part_number"), code)
+        if retail_type == "upc" or (not retail_type and len(code) == 12 and code.isascii() and code.isdigit()):
+            filters.update(upc=code, ean="0" + code)
+        elif retail_type == "ean" or (not retail_type and len(code) == 13 and code.startswith("0")):
+            filters["ean"] = code
+            if len(code) == 13 and code.startswith("0"):
+                filters["upc"] = code[1:]
+        for field, value in filters.items():
             def query(columns: str):
                 result = self.client.table("product_models").select(columns)
-                result = result.eq(field, code) if field in {"qr_code", "ean"} else result.ilike(field, escaped)
+                result = result.eq(field, value) if field in {"qr_code", "ean", "upc"} else result.ilike(field, escaped)
                 return result.limit(100)
             try:
-                response = select_scanner_compatible(query, "product_models", "id,name,sku,part_number,qr_code,ean,tracking_mode,is_active")
+                response = select_scanner_compatible(query, "product_models", "id,name,sku,part_number,qr_code,ean,upc,tracking_mode,is_active")
             except Exception as error:
                 if missing_scanner_column(error, "product_models") == field:
                     continue
                 raise
             for row in self._data(response):
-                if str(row.get(field) or "").strip().casefold() == code.casefold():
+                if str(row.get(field) or "").strip().casefold() == value.casefold():
                     found[row["id"]] = row
         return list(found.values())
 
-    def _assets_for_code(self, code: str) -> list[dict[str, Any]]:
+    def _assets_for_code(self, code: str, *, ean_only: bool = False) -> list[dict[str, Any]]:
         found = {}
         try:
             mac = normalize_mac(code)
@@ -66,7 +73,7 @@ class QrService:
         else:
             mac_variants = ()
 
-        for field in ("qr_code", "ean", "asset_tag", "serial_number", "mac_address"):
+        for field in (("ean",) if ean_only else ("qr_code", "ean", "asset_tag", "serial_number", "mac_address")):
             if field == "mac_address" and not mac_variants:
                 continue
 
@@ -102,15 +109,18 @@ class QrService:
 
     def lookup(self, value: Any, code_type: str = "auto") -> dict[str, Any]:
         code = normalize_qr_code(value)
-        if code_type not in {"auto", "qr", "ean", "mac", "serial"}:
+        if code_type not in {"auto", "qr", "ean", "upc", "mac", "serial"}:
             raise ValueError("Unbekannte Codeart.")
         if code_type == "ean":
             normalize_ean(code)
-        assets = self._assets_for_code(code)
-        direct_asset_match = bool(assets)
-        matched_models = self._models_for_code(code)
+        elif code_type == "upc":
+            normalize_upc(code)
+        ean_only = code_type == "ean"
+        assets = self._assets_for_code("0" + code if code_type == "upc" else code, ean_only=code_type in {"ean", "upc"})
+        direct_asset_ids = {row["id"] for row in assets}
+        matched_models = self._models_for_code(code, retail_type=code_type if code_type in {"ean", "upc"} else None)
         # Eine EAN kann mehrere Einzelgeräte desselben Modells bezeichnen.
-        seen_assets = {row["id"] for row in assets}
+        seen_assets = direct_asset_ids.copy()
         for model in matched_models:
             if model.get("tracking_mode") in {"serialized", "hybrid"}:
                 response = select_scanner_compatible(
@@ -124,8 +134,17 @@ class QrService:
         model_ids = set(row["product_model_id"] for row in assets) | set(row["id"] for row in matched_models)
         models = {}
         if model_ids:
-            response = self.client.table("product_models").select("id,name,sku,tracking_mode,is_active").in_("id", list(model_ids)).execute()
+            response = select_scanner_compatible(
+                lambda columns: self.client.table("product_models").select(columns).in_("id", list(model_ids)),
+                "product_models", "id,name,sku,tracking_mode,is_active,ean",
+            )
             models = {row["id"]: row for row in self._data(response)}
+        if ean_only or code_type == "upc":
+            # A corrected model EAN takes precedence over copies left on older devices.
+            assets = [row for row in assets if not models.get(row["product_model_id"], {}).get("ean")
+                      or models[row["product_model_id"]]["ean"] == ("0" + code if code_type == "upc" else code)
+                      or row["product_model_id"] in {model["id"] for model in matched_models}]
+        direct_asset_match = any(row["id"] in direct_asset_ids for row in assets)
 
         sites = {row["id"]: row for row in self._all("sites", "id,name")}
         departments = {row["id"]: row for row in self._all("departments", "id,name,site_id")}
@@ -167,7 +186,11 @@ class QrService:
         detected = next((row.get("matched_identifier") for row in assets if row.get("matched_identifier")), code_type)
         stocked = [row for row in matches if row["record_type"] == "stock" and row["quantity"] > 0]
         preferred = stocked[0]["key"] if not direct_asset_match and len(stocked) == 1 else None
-        return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations, "preferred_key": preferred}
+        return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations,
+                "preferred_key": preferred,
+                "direct_asset_keys": [f"asset:{row['id']}" for row in assets if row["id"] in direct_asset_ids],
+                "models": [{key: model.get(key) for key in ("id", "name", "tracking_mode")}
+                           for model in matched_models if model.get("is_active") is not False]}
 
     def save_model_codes(self, model_id: Any, values: dict[str, Any], *, only_empty: bool = False) -> None:
         changes = code_values(values)
@@ -175,7 +198,7 @@ class QrService:
             return
         rows = self._data(select_scanner_compatible(
             lambda columns: self.client.table("product_models").select(columns).eq("id", model_id).limit(1),
-            "product_models", "id,qr_code,ean",
+            "product_models", "id,qr_code,ean,upc",
         ))
         if not rows:
             raise ValueError("Das Produktmodell existiert nicht mehr.")

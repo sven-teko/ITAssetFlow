@@ -2,7 +2,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
+from http_test_client import TestClient
 from postgrest.exceptions import APIError
 
 from web_backend.app import REFRESH_COOKIE, app, get_web_session

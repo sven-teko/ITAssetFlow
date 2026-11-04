@@ -625,7 +625,11 @@ export default function InventoryPage({
         error={actions.archiveError} onCancel={actions.cancelArchive} onConfirm={reason => void actions.confirmArchive(reason)} />}
       {qrOpen && <QrWorkflowDialog canEdit={canEdit} onClose={() => setQrOpen(false)}
         onArchive={key => { setQrOpen(false); actions.archiveEntries([key]); }}
-        onCreate={(code, type, format) => { setQrOpen(false); navigate(`/inventory/new?code=${encodeURIComponent(code)}&code_type=${type}&code_format=${encodeURIComponent(format)}`); }}
+        onCreate={(code, type, format, draft) => {
+          setQrOpen(false);
+          if (draft) navigate("/inventory/new", { state: { scan: draft } });
+          else navigate(`/inventory/new?code=${encodeURIComponent(code)}&code_type=${type}&code_format=${encodeURIComponent(format)}`);
+        }}
         onEdit={(key) => { setQrOpen(false); navigate(`/inventory/${encodeURIComponent(key)}/edit`); }}
         onChanged={data.loadData} />}
 

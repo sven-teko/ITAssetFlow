@@ -78,7 +78,7 @@ export default function ItemImagePicker({ existingId, value, disabled, onChange,
     <input ref={cameraInput} hidden type="file" aria-label="Kamerafoto" accept="image/*" capture="environment"
       disabled={disabled || busy} onChange={selectPhoto}/>
     <div className="item-image-actions">
-      <button type="button" className="item-image-camera" disabled={disabled || busy} onClick={() => cameraInput.current?.click()}>Foto aufnehmen</button>
+      <button type="button" className="item-image-camera primary-button" disabled={disabled || busy} onClick={() => cameraInput.current?.click()}>Foto aufnehmen</button>
       {source && <button type="button" disabled={disabled || busy} onClick={() => { setPreview(""); onChange(null); }}>Bild entfernen</button>}
     </div>
     {busy && <p role="status">Bild wird vorbereitet …</p>}{error && <p role="alert" className="archive-error">{error}</p>}

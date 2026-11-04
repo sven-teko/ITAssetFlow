@@ -45,6 +45,7 @@ from web_backend.preferences_routes import create_preferences_router
 from web_backend.archive_routes import ArchiveReason, create_archive_router
 from web_backend.backup_routes import create_backup_router
 from web_backend.inventory_paging import InventoryPageRequest, InventorySnapshots, filtered, options_for, page_token
+from web_backend.rate_limits import LOGIN_LIMIT_MESSAGE, RateLimitMiddleware, RateLimits, account_key, retry_headers
 
 from inventory import (
     CONDITION_LABELS,
@@ -62,7 +63,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.6",
+    version="1.6.8",
 )
 
 
@@ -159,6 +160,9 @@ print(
     CORS_ORIGIN_REGEX,
 )
 
+RATE_LIMITS = RateLimits()
+app.add_middleware(RateLimitMiddleware, limits=RATE_LIMITS, render=os.getenv("RENDER") == "true")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_CORS_ORIGINS,
@@ -169,7 +173,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "Retry-After"],
 )
 
 
@@ -333,7 +337,7 @@ INVENTORY_CHANGES = InventoryChangeBroker()
 # Modelle
 
 class LoginPayload(BaseModel):
-    email: str
+    email: str = Field(max_length=320)
     password: str
 
 
@@ -553,6 +557,8 @@ def _repository_http_exception(
                 "available": float(balance),
             })
     if code == "PGRST202" and any(name in message for name in ("save_inventory_entry", "move_inventory_entry")):
+        if "save_inventory_entry_with_upc" in message:
+            return HTTPException(503, detail="Für die UPC muss die aktuelle database/scanner_codes.sql in Supabase ausgeführt werden.")
         return HTTPException(503, detail="Die Datenbank dieses Servers benötigt das aktuelle ITAssetFlow-Update.")
     if code in {"40001", "23505"}:
         status_code = 409
@@ -861,6 +867,10 @@ def login(
     payload: LoginPayload,
     response: Response,
 ) -> dict[str, Any]:
+    retry = RATE_LIMITS.login_account.consume(account_key(payload.email))
+    if retry:
+        raise HTTPException(429, LOGIN_LIMIT_MESSAGE, headers=retry_headers(retry))
+
     config = get_app_config()
 
     try:
@@ -1605,7 +1615,7 @@ def inventory_meta(
 
 # Einstellungen und Produktmodelle
 
-app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS))
+app.include_router(create_recovery_router(clear_auth_cookies, ALLOWED_CORS_ORIGINS, RATE_LIMITS.recovery_account))
 app.include_router(create_preferences_router(get_web_session))
 app.include_router(create_backup_router(require_admin_session))
 app.include_router(create_archive_router(get_web_session, require_editor_session, require_admin_session, INVENTORY_CHANGES.publish))

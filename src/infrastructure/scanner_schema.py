@@ -24,12 +24,12 @@ def missing_scanner_column(error: Exception, table: str) -> str | None:
         return None
     if code == "42703":
         match = re.search(
-            rf'column\s+(?:"?public"?\.)?"?{table}"?\."?(qr_code|ean)"?\s+does not exist',
+            rf'column\s+(?:"?public"?\.)?"?{table}"?\."?(qr_code|ean|upc)"?\s+does not exist',
             message, re.IGNORECASE,
         )
         return match[1].lower() if match else None
     match = re.search(
-        rf"Could not find the ['\"](qr_code|ean)['\"] column of ['\"]{table}['\"]",
+        rf"Could not find the ['\"](qr_code|ean|upc)['\"] column of ['\"]{table}['\"]",
         message, re.IGNORECASE,
     )
     return match[1].lower() if match else None

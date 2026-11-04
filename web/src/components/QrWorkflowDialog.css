@@ -61,6 +61,12 @@
 .qr-code-badge { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #d7e1ed; border-radius: 4px; color: #536b86; font-size: 11px; }
 
 .qr-result { display: flex; flex-direction: column; gap: 16px; padding-top: 22px; }
+.qr-code-review { display: grid; gap: 10px; }
+.qr-code-review h3, .qr-code-review p { margin: 0; }
+.qr-code-review > label { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding: 8px; border: 1px solid #dce3eb; border-radius: 6px; }
+.qr-code-review strong { overflow-wrap: anywhere; }
+.qr-code-review small { display: block; color: #66717c; }
+.qr-code-review select { min-height: 36px; max-width: 100%; }
 .qr-result h3, .qr-result p { margin: 0; }
 .qr-result > label, .qr-result-fields > label { display: grid; gap: 8px; font-size: 13px; font-weight: 600; }
 .qr-result label select, .qr-result label input { font-weight: 400; }

@@ -205,7 +205,7 @@ class EmployeeTests(unittest.TestCase):
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from web_backend.app import app, get_web_session
         self.app = app
         self.db = Mock()

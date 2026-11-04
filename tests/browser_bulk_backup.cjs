@@ -127,7 +127,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.equal(newAsset.model.id,1);
     assert.equal(newAsset.storage_location_id,1);
     assert.deepEqual(newAsset.assignment,{employee_id:null,department_id:1});
-    assert.deepEqual(newAsset.scanner_codes,{qr_code:null,ean:null});
+    assert.deepEqual(newAsset.scanner_codes,{qr_code:null});
     assert.equal(newAsset.asset.serial_number,null);
     assert.equal(newAsset.asset.new_price,100);
     assert.equal(newAsset.connection_changes,undefined);

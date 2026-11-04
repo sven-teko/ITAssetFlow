@@ -44,6 +44,9 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       await seed(`supabase/migrations/${f}.sql`);
     await seed("supabase/migrations/20261103122054_inventory_connections.sql");
     await seed("supabase/migrations/20261103123433_atomic_csv_and_archive_connections.sql");
+    await db.exec("ALTER TABLE public.assets DISABLE TRIGGER assets_link_ean_to_model; UPDATE public.assets SET ean='96385074' WHERE id=30");
+    await seed("database/scanner_codes.sql");
+    assert.equal((await q("SELECT ean FROM public.product_models WHERE id=100"))[0].ean,"96385074");
     await as("admin", async () => {
       await q("SELECT public.set_employee_site_access(2,ARRAY[1,2]::bigint[])");
       await q("SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])");
@@ -84,6 +87,24 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       const created=await save(createdPayload);
       assert.deepEqual(await save(createdPayload),created);
       assert.equal((await q("SELECT employee_id FROM public.asset_assignments WHERE asset_id=$1 AND valid_to IS NULL",[created.id]))[0].employee_id,2);
+      const linked = await save({...createdPayload, request_id: randomUUID(),
+        model:{mode:"new",category_id:20,manufacturer_id:20,name:"EAN-Modell",tracking_mode:"serialized"},
+        scanner_codes:{ean:"0012345678905"},asset:{...createdPayload.asset,asset_tag:"EAN-GERAET"}});
+      assert.equal((await q("SELECT ean FROM public.product_models WHERE id=$1",[linked.product_model_id]))[0].ean,"0012345678905");
+      assert.equal((await q("SELECT ean FROM public.assets WHERE id=$1",[linked.id]))[0].ean,null);
+      const saveUpc = async data => (await q("SELECT public.save_inventory_entry_with_upc($1,false) result",[data]))[0].result;
+      const withUpc = {...createdPayload, request_id:randomUUID(), model:{mode:"existing",id:linked.product_model_id},
+        asset:{...createdPayload.asset,asset_tag:"UPC-GERAET"}, scanner_codes:{upc:"841885106377"}};
+      const upcResult = await saveUpc(withUpc);
+      assert.deepEqual(await saveUpc(withUpc),upcResult);
+      assert.deepEqual((await q("SELECT ean,upc FROM public.product_models WHERE id=$1",[linked.product_model_id]))[0],
+        {ean:"0012345678905",upc:"841885106377"});
+      await fails(() => saveUpc({...withUpc,request_id:randomUUID(),scanner_codes:{upc:"012345678905"},
+        asset:{...withUpc.asset,asset_tag:"UPC-KONFLIKT"}}),"23514");
+      assert.equal((await q("SELECT id FROM public.assets WHERE asset_tag='UPC-KONFLIKT'")).length,0);
+      await fails(() => save({...createdPayload, request_id:randomUUID(), scanner_codes:{ean:"4006381333931"},
+        asset:{...createdPayload.asset,asset_tag:"EAN-KONFLIKT"}}),"23514");
+      assert.equal((await q("SELECT ean FROM public.product_models WHERE id=100"))[0].ean,"96385074");
       const accessory = async tag => (await save({...createdPayload, request_id: randomUUID(), asset:{...createdPayload.asset, asset_tag:tag}})).id;
       const display = await accessory("MONITOR");
       const mouse = await accessory("MAUS");

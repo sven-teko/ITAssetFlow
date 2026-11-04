@@ -28,7 +28,7 @@ FILTERS = {
     "storageLocations": ("storage_location", None),
 }
 SEARCH_FIELDS = tuple(dict.fromkeys((*PREFERRED_COLUMN_ORDER, "asset_tag", "serial_number",
-    "mac_address", "qr_code", "ean", "product_model_qr_code", "product_model_ean",
+    "mac_address", "qr_code", "ean", "product_model_qr_code", "product_model_ean", "product_model_upc",
     "product_model_sku", "product_model_part_number")))
 DATETIME_FIELDS = {"created_at", "updated_at", "archived_at"}
 try:

@@ -4,14 +4,16 @@ import QrScanner from "./QrScanner";
 import StockWithdrawalDialog from "./StockWithdrawalDialog";
 import { newBookingId, type WithdrawalSubmission } from "../api/stockBooking";
 import "./QrWorkflowDialog.css";
-import { isValidEan, identifierType, type CodeType } from "../utils/scannerCodes";
+import { isValidEan, isValidUpc, identifierType, labelledCodes, type CodeType, type ScanDraft } from "../utils/scannerCodes";
+import { assignedCodes, proposeAssignments, resolveScannerBatch, scanLabels, type Assignment } from "../utils/scannerBatch";
+import type { ScannedCode } from "../utils/barcodeReader";
 import { APP_VERSION } from "../release";
 
 type Props = {
   onArchive: (key: string) => void;
   canEdit: boolean;
   onClose: () => void;
-  onCreate: (code: string, type: CodeType, format: string) => void;
+  onCreate: (code: string, type: CodeType, format: string, draft?: ScanDraft) => void;
   onEdit: (key: string) => void;
   onChanged: () => Promise<void>;
 };
@@ -38,6 +40,8 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   const [needsRefresh, setNeedsRefresh] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [review, setReview] = useState<{ codes: ScannedCode[]; assignments: Assignment[] } | null>(null);
+  const [extraCode, setExtraCode] = useState("");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -58,15 +62,88 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setMessage("");
   }
 
+  function applyLookup(result: QrLookup, type: CodeType, format: string, preserve = false, draft?: ScanDraft) {
+    if (!result.matches.length) {
+      setLookup(null);
+      if (preserve) setError("Der Artikel wurde nicht mehr gefunden. Bitte den Code erneut scannen.");
+      else if (canEdit) onCreate(result.code, result.code_type ?? type, format, draft);
+      else setError("Dieser Code ist noch nicht erfasst. Für neue Artikel sind Bearbeitungsrechte erforderlich.");
+      return;
+    }
+    setReview(null);
+    setLookup(result);
+    setRecognizedType(result.code_type ?? type);
+    setNeedsRefresh(false);
+    if (!preserve || !result.matches.some(row => row.key === selectedKey)) {
+      const preferred = result.matches.find(row => row.key === result.preferred_key);
+      const row = preferred ?? result.matches[0];
+      setSelectedKey(preferred || result.matches.length === 1 ? row.key : "");
+      setLocationId(String(row.storage_location_id ?? result.locations[0]?.id ?? ""));
+      setCondition(row.condition || "used");
+      setQuantity("1");
+    }
+  }
+
+  function detectedCodes(codes: ScannedCode[]) {
+    if (codes.length === 1 && !/^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(codes[0].text)) {
+      const only = codes[0];
+      void readCode(only.text, false, only.type, only.format);
+      return;
+    }
+    setError("");
+    setExtraCode("");
+    setReview({ codes, assignments: proposeAssignments(codes) });
+  }
+
+  function addMissingCode(event: FormEvent) {
+    event.preventDefault();
+    if (!review || loading || !extraCode.trim() || review.codes.length >= 10) return;
+    const labelled = labelledCodes(extraCode)[0];
+    const text = labelled?.text ?? extraCode.trim();
+    const type = labelled?.type ?? identifierType(text);
+    if (!review.codes.some(code => code.text === text && code.type === type)) {
+      setReview({ codes: [...review.codes, { text, type, format: "Eingabe" }], assignments: [...review.assignments, type] });
+    }
+    setExtraCode("");
+    setError("");
+  }
+
+  async function readBatch() {
+    if (!review || loading) return;
+    setError("");
+    let draft: ScanDraft;
+    try { draft = assignedCodes(review.codes, review.assignments); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Bitte die Zuordnung prüfen."); return; }
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setLoading(true);
+    try {
+      const result = await resolveScannerBatch(draft, controller.signal);
+      if (controller.signal.aborted) return;
+      const format = review.codes[review.assignments.indexOf(result.role)]?.format ?? "";
+      setCode(result.lookup.code);
+      setRecognizedFormat(format);
+      applyLookup(result.lookup, result.role, format, false, result.draft);
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Die Codes konnten nicht geprüft werden.");
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }
+
   async function readCode(value: string, preserve = false, detectedType: CodeType = "auto", format = "") {
     if (busyRef.current) return;
-    const normalized = value.trim();
+    const labelled = detectedType === "auto" ? labelledCodes(value) : [];
+    if (labelled.length > 1) { detectedCodes(labelled.map(field => ({ ...field, format: "Eingabe", labelled: true }))); return; }
+    const normalized = labelled[0]?.text ?? value.trim();
     if (!normalized || normalized.length > 100 || Array.from(normalized).some((char) => { const n = char.codePointAt(0) ?? 0; return n < 32 || n === 127; })) {
       setError("Bitte eine Artikelkennung mit 1 bis 100 Zeichen ohne Zeilenumbrüche eingeben.");
       return;
     }
-    const type = detectedType === "auto" ? identifierType(normalized, format) : detectedType;
+    const type = labelled[0]?.type ?? (detectedType === "auto" ? identifierType(normalized, format) : detectedType);
     if (type === "ean" && !isValidEan(normalized)) { setError("Die EAN muss 8 oder 13 Ziffern und eine gültige Prüfziffer enthalten."); return; }
+    if (type === "upc" && !isValidUpc(normalized)) { setError("Die UPC-A muss 12 Ziffern und eine gültige Prüfziffer enthalten."); return; }
     setRecognizedType(type);
     setRecognizedFormat(format);
     requestRef.current?.abort();
@@ -79,24 +156,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     try {
       const result = await lookupQr(normalized, controller.signal, type);
       if (controller.signal.aborted) return;
-      if (result.matches.length === 0) {
-        setLookup(null);
-        if (preserve) setError("Der Artikel wurde nicht mehr gefunden. Bitte den Code erneut scannen.");
-        else if (canEdit) onCreate(result.code, result.code_type ?? type, format);
-        else setError("Dieser Code ist noch nicht erfasst. Für neue Artikel sind Bearbeitungsrechte erforderlich.");
-        return;
-      }
-      setLookup(result);
-      setRecognizedType(result.code_type ?? type);
-      setNeedsRefresh(false);
-      if (!preserve || !result.matches.some(row => row.key === selectedKey)) {
-        const preferred=result.matches.find(row=>row.key===result.preferred_key);
-        const row = preferred ?? result.matches[0];
-        setSelectedKey(preferred || result.matches.length === 1 ? row.key : "");
-        setLocationId(String(row.storage_location_id ?? result.locations[0]?.id ?? ""));
-        setCondition(row.condition || "used");
-        setQuantity("1");
-      }
+      applyLookup(result, type, format, preserve);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Der Code konnte nicht geprüft werden.");
     } finally {
@@ -163,9 +223,35 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       </header>
 
       <div className="qr-dialog-body">
-        {!lookup ? <>
+        {review ? <section className="qr-code-review" aria-label="Erkannte Codes zuordnen">
+          <h3>Erkannte Codes zuordnen</h3>
+          <p>Prüfe die Zuordnung. Für Codes wie IPUI oder IPEI wähle «Ignorieren».</p>
+          {review.codes.map((item, index) => <label key={`${item.type}:${item.text}`}>
+            <span><strong>{item.text}</strong><small>{item.format}</small></span>
+            <select aria-label={`Zuordnung für ${item.text}`} value={review.assignments[index]} disabled={loading}
+              onChange={event => {
+                const choice = event.target.value as Assignment;
+                setReview({ ...review, assignments: review.assignments.map((role, i) => i === index ? choice : role) });
+                setError("");
+              }}>
+              {Object.entries(scanLabels).map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+            </select>
+          </label>)}
+          {review.codes.length < 10 && <form className="qr-code-form" onSubmit={addMissingCode}>
+            <label htmlFor="scanner-extra-code">Fehlende Kennung ergänzen</label>
+            <div className="qr-code-input-row">
+              <input id="scanner-extra-code" value={extraCode} maxLength={100} disabled={loading}
+                onChange={event => setExtraCode(event.target.value)} />
+              <button type="submit" disabled={loading || !extraCode.trim()}>Hinzufügen</button>
+            </div>
+          </form>}
+          <div className="qr-camera-controls">
+            <button type="button" className="primary-button" disabled={loading} onClick={() => void readBatch()}>{loading ? "Codes werden geprüft …" : "Zuordnung prüfen"}</button>
+            <button type="button" disabled={loading} onClick={() => { setReview(null); setError(""); }}>Neu scannen</button>
+          </div>
+        </section> : !lookup ? <>
           {loading ? <div className="qr-camera" role="status">Code wird geprüft …</div>
-            : <QrScanner disabled={saving} onCode={(value, type, format) => void readCode(value, false, type, format)} />}
+            : <QrScanner disabled={saving} onCodes={detectedCodes} />}
           <div className="qr-section-divider"><span>oder manuell eingeben</span></div>
           <form className="qr-code-form" onSubmit={submit}>
             <label htmlFor="qr-code-input">Code eingeben</label>
@@ -178,7 +264,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </form>
         </> : <div className="qr-detected-code">
           <div><span className="qr-code-caption">Erkannter Code</span><strong>{lookup.code}</strong></div>
-          <span className="qr-code-badge">{recognizedFormat ? `${recognizedFormat} · ` : ""}{recognizedType === "mac" ? "MAC-Adresse" : recognizedType === "serial" ? "Seriennummer" : recognizedType === "ean" ? "EAN" : "QR-Code"}</span>
+          <span className="qr-code-badge">{recognizedFormat ? `${recognizedFormat} · ` : ""}{recognizedType === "mac" ? "MAC-Adresse" : recognizedType === "serial" ? "Seriennummer" : recognizedType === "ean" ? "EAN" : recognizedType === "upc" ? "UPC" : "QR-Code"}</span>
         </div>}
 
         {error && <div className="qr-error" role="alert">{error}</div>}

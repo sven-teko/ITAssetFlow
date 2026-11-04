@@ -20,11 +20,11 @@ from inventory import (
 
 
 MODEL_COLUMNS = (
-    "id,manufacturer_id,category_id,name,part_number,sku,qr_code,ean,"
+    "id,manufacturer_id,category_id,name,part_number,sku,qr_code,ean,upc,"
     "specifications,tracking_mode,unit_code,is_active"
 )
 EDITABLE_COLUMNS = {
-    "name", "manufacturer_id", "manufacturer_name", "part_number", "sku", "qr_code", "ean", "is_active", "specifications",
+    "name", "manufacturer_id", "manufacturer_name", "part_number", "sku", "qr_code", "ean", "upc", "is_active", "specifications",
 }
 CREATE_COLUMNS = (EDITABLE_COLUMNS - {"is_active"}) | {"category_id", "tracking_mode", "unit_code"}
 NO_MANUFACTURER = "Keiner"
@@ -276,7 +276,7 @@ class ProductModelService:
             raise HTTPException(404, "Das Produktmodell existiert nicht mehr oder ist nicht zugänglich.")
         row = self._editable_values(changes)
         row = {key: value for key, value in row.items()
-               if not (key in {"qr_code", "ean"} and key not in current and value is None)}
+               if not (key in {"qr_code", "ean", "upc"} and key not in current and value is None)}
 
         category = self._get_row("product_categories", current["category_id"], "specification_schema")
         fields = model_fields(category.get("specification_schema")) if category else []

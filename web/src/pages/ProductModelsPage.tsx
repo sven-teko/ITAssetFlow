@@ -339,6 +339,9 @@ export default function ProductModelsPage({
                         <FormRow id="model-ean" label="EAN (optional):">
                           <input id="model-ean" className="asset-form-control" type="text" inputMode="numeric" maxLength={13} value={draft.ean} onChange={event => changeDraft({ ean: event.target.value })} />
                         </FormRow>
+                        <FormRow id="model-upc" label="UPC-A (optional):">
+                          <input id="model-upc" className="asset-form-control" type="text" inputMode="numeric" maxLength={12} value={draft.upc} onChange={event => changeDraft({ upc: event.target.value })} />
+                        </FormRow>
                         <FormRow id="model-sku" label="SKU:">
                           <input id="model-sku" className="asset-form-control" type="text" value={draft.sku} onChange={event => changeDraft({ sku: event.target.value })} />
                         </FormRow>

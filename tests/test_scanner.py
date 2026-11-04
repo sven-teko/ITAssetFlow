@@ -2,7 +2,7 @@ import unittest
 from copy import deepcopy
 from unittest.mock import Mock, patch
 from test_qr_update import Database, QrService, AssetRepository
-from infrastructure.scanner_codes import normalize_ean, code_values
+from infrastructure.scanner_codes import normalize_ean, normalize_upc, normalize_mac, code_values
 
 
 class ScannerTests(unittest.TestCase):
@@ -53,6 +53,27 @@ class ScannerTests(unittest.TestCase):
         db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True, "ean": "96385074"})
         self.assertEqual(QrService(db).lookup("96385074", "ean")["matches"][0]["key"], "asset:1")
 
+    def test_model_ean_takes_precedence_over_legacy_device_copy(self):
+        db = Database()
+        db.rows["assets"][0]["ean"] = "96385074"
+        db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True, "ean": "0012345678905"})
+        self.assertEqual(QrService(db).lookup("96385074", "ean")["matches"], [])
+        self.assertEqual(QrService(db).lookup("0012345678905", "ean")["matches"][0]["key"], "asset:1")
+
+    def test_distinct_upc_and_ean_find_same_model_and_upc_zero_alias(self):
+        db = Database()
+        db.rows["product_models"][0].update(ean="6938818307575", upc="841885106377")
+        service = QrService(db)
+        for code, kind in (("841885106377", "upc"), ("0841885106377", "ean"), ("6938818307575", "ean")):
+            result = service.lookup(code, kind)
+            self.assertEqual(result["models"][0]["id"], 10)
+            self.assertEqual(result["matches"][0]["product_model_id"], 10)
+            self.assertEqual(result["direct_asset_keys"], [])
+        self.assertEqual(normalize_upc("841885106377"), "841885106377")
+        self.assertEqual(normalize_mac("MAC ID: AA-BB-CC-11-22-33"), "AA:BB:CC:11:22:33")
+        with self.assertRaises(ValueError):
+            normalize_upc("841885106378")
+
     def test_save_model_codes_keeps_sku_and_part_number(self):
         db = Database(); before = deepcopy(db.rows["product_models"][0])
         QrService(db).save_model_codes(10, {"qr_code": "INTERNAL", "ean": "0012345678905"})
@@ -83,7 +104,7 @@ class ScannerTests(unittest.TestCase):
         db.table.assert_not_called()
 
     def test_new_api_and_old_api_require_editor_to_book(self):
-        from fastapi.testclient import TestClient
+        from http_test_client import TestClient
         from types import SimpleNamespace
         from web_backend.app import app, get_web_session
         db=Database()

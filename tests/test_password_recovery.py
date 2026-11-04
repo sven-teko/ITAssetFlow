@@ -32,7 +32,9 @@ class PasswordRecoveryTests(unittest.TestCase):
         self.factory_mock = self.factory.start()
         self.clear_login = Mock()
         app = FastAPI()
-        app.include_router(recovery.create_recovery_router(self.clear_login, ["http://localhost:5173"]))
+        app.include_router(recovery.create_recovery_router(
+            self.clear_login, ["http://localhost:5173"], recovery.RequestWindow(3, 600),
+        ))
         self.http = TestClient(app, base_url="https://itassetflow-demo.onrender.com", headers={"Origin": "https://itassetflow-demo.onrender.com"})
         self.base = "/api/auth/recovery"
 
