@@ -127,6 +127,32 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(QrService(db).lookup("96385074", "ean")["matches"], [])
         self.assertEqual(QrService(db).lookup("0012345678905", "ean")["matches"][0]["key"], "asset:1")
 
+    def test_legacy_device_barcode_does_not_hide_hybrid_stock(self):
+        from unittest.mock import Mock
+        from types import SimpleNamespace
+        from uuid import uuid4
+        db = Database()
+        code = "7611552033830"
+        model = db.rows["product_models"][0]
+        model.update(tracking_mode="hybrid", ean=code)
+        db.rows["assets"][0].update(product_model_id=10, qr_code=code)
+        service = QrService(db)
+        for registered in (True, False):
+            if not registered:
+                model["ean"] = "4006381333931"
+            result = service.lookup(code, "ean")
+            self.assertEqual(result["legacy_retail"], not registered)
+            self.assertEqual(result["direct_asset_keys"], [])
+            self.assertEqual({row["key"] for row in result["matches"]}, {"asset:1", "stock:10:3:used"})
+            self.assertEqual(result["preferred_key"], "stock:10:3:used")
+            db.rpc = Mock(return_value=SimpleNamespace(execute=Mock(return_value=SimpleNamespace(data={
+                "saved": True, "quantity": 6, "changed_quantity": 1,
+            }))))
+            self.assertTrue(service.adjust({
+                "request_id": str(uuid4()), "code": code, "code_type": "ean", "product_model_id": 10,
+                "storage_location_id": 3, "condition": "used", "quantity": 1, "direction": "add",
+            })["saved"])
+
     def test_distinct_upc_and_ean_find_same_model_and_upc_zero_alias(self):
         db = Database()
         db.rows["product_models"][0].update(ean="6938818307575", upc="841885106377")

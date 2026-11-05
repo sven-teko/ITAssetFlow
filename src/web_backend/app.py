@@ -64,7 +64,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.15",
+    version="1.6.17",
 )
 
 
@@ -559,6 +559,8 @@ def _repository_http_exception(
                 "available": float(balance),
             })
     if code == "PGRST202" and any(name in message for name in ("save_inventory_entry", "move_inventory_entry")):
+        if "save_inventory_entry_with_stock_mode" in message:
+            return HTTPException(503, detail="Für den ersten Mengenbestand dieses Produktmodells fehlt das aktuelle Datenbank-Update (scanner_stock_mode).")
         if "save_inventory_entry_with_upc" in message:
             return HTTPException(503, detail="Für die UPC muss die aktuelle database/scanner_codes.sql in Supabase ausgeführt werden.")
         return HTTPException(503, detail="Die Datenbank dieses Servers benötigt das aktuelle ITAssetFlow-Update.")

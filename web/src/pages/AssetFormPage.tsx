@@ -227,8 +227,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const rawType = sourceKey ? null : searchParams.get("code_type");
   const scannedType: CodeType = rawType && ["qr","ean","upc","mac","serial","asset_tag"].includes(rawType)
     ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);
-  const scannedEanCode = scan?.ean ?? (scannedEan ? scannedCode : "");
-  const scannedUpcCode = scan?.upc ?? (scannedType === "upc" ? scannedCode : "");
+  const scannedEanCode = scan?.legacyRetail === "ean" && scan.entryType !== "stock" ? "" : scan?.ean ?? (scannedEan ? scannedCode : "");
+  const scannedUpcCode = scan?.legacyRetail === "upc" && scan.entryType !== "stock" ? "" : scan?.upc ?? (scannedType === "upc" ? scannedCode : "");
   const scannedQrCode = scan?.qr ?? (scannedType === "qr" ? scannedCode : "");
   const scannedModelId = scan?.modelId;
   const scannedDevice = Boolean(scan?.serial || scan?.mac || scan?.asset_tag ||
@@ -254,8 +254,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelName, setModelName] = useState("");
   const [manufacturerText, setManufacturerText] = useState("Keiner");
-  const [newTrackingMode, setNewTrackingMode] = useState<TrackingMode>("serialized");
-  const [hybridEntryType, setHybridEntryType] = useState<EntryType>("asset");
+  const [newTrackingMode, setNewTrackingMode] = useState<TrackingMode>(scan?.entryType === "stock" ? "quantity" : "serialized");
+  const [hybridEntryType, setHybridEntryType] = useState<EntryType>(scan?.entryType ?? "asset");
 
   const [status, setStatus] = useState("available");
   const [purchaseDate, setPurchaseDate] = useState(inventoryTodayISO);
@@ -526,7 +526,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
     setCodesModelId(availableModelId);
     const model = rowById(formData.product_models, availableModelId);
-    const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity";
+    const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity" || scan?.entryType === "stock";
     setQrCode(String((useModelCodes ? model?.qr_code : "") || scannedQrCode));
     setEan(scannedEanCode);
     setUpc(scannedUpcCode);
@@ -548,9 +548,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   );
   const modelEan = modelMode === "existing" ? String(selectedModel?.ean ?? "").trim() : "";
   const modelUpc = modelMode === "existing" ? String(selectedModel?.upc ?? "").trim() : "";
+  const enableStockForModel = !isEditMode && scan?.entryType === "stock" && modelMode === "existing"
+    && scan.modelId !== undefined && sameId(selectedModel?.id, scan.modelId) && selectedModel?.tracking_mode === "serialized";
   const currentTrackingMode: TrackingMode =
     modelMode === "existing"
-      ? (String(selectedModel?.tracking_mode ?? "serialized") as TrackingMode)
+      ? enableStockForModel ? "hybrid" : (String(selectedModel?.tracking_mode ?? "serialized") as TrackingMode)
       : newTrackingMode;
   const currentEntryType: EntryType = isEditMode
     ? editRecordType === "stock"
@@ -869,10 +871,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     if (currentEntryType === "stock" && scannedDevice) {
       throw new Error("Die gescannte Gerätekennung benötigt einen Einzelartikel.");
     }
-    if (scannedEanCode && modelEan && scannedEanCode !== modelEan) {
+    if (scannedEanCode && modelEan && scannedEanCode !== modelEan && scan?.legacyRetail !== "ean") {
       throw new Error("Die gescannte EAN gehört nicht zum gewählten Produktmodell. Bitte wähle das passende Modell.");
     }
-    if (scannedUpcCode && modelUpc && scannedUpcCode !== modelUpc) {
+    if (scannedUpcCode && modelUpc && scannedUpcCode !== modelUpc && scan?.legacyRetail !== "upc") {
       throw new Error("Die gescannte UPC gehört nicht zum gewählten Produktmodell. Bitte wähle das passende Modell.");
     }
     const eanToLink = modelEan ? "" : ean.trim();
@@ -928,6 +930,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       condition,
       storage_location_id: originalId(formData.storage_locations, locationId),
     };
+    if (enableStockForModel && currentEntryType === "stock") payload.enable_stock_for_model = true;
 
     if (currentEntryType === "asset") {
       payload.asset = {
@@ -956,12 +959,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     } else {
       let stockQuantity = 1;
 
-      if (isEditMode && !quantity.trim()) throw new Error("Bitte die Bestandsmenge eingeben.");
+      if ((isEditMode || scan?.entryType === "stock") && !quantity.trim()) throw new Error("Bitte die Bestandsmenge eingeben.");
       if (quantity.trim()) {
         stockQuantity = readStockQuantity(quantity) ?? NaN;
 
-        if (!Number.isInteger(stockQuantity) || stockQuantity < (isEditMode ? 0 : 1)) {
-          throw new Error(isEditMode ? "Menge muss eine ganze Zahl ab 0 sein." : "Menge muss eine ganze Zahl grösser als 0 sein.");
+        if (!Number.isSafeInteger(stockQuantity) || stockQuantity < (isEditMode ? 0 : 1) || stockQuantity > 1_000_000) {
+          throw new Error(isEditMode ? "Menge muss eine ganze Zahl zwischen 0 und 1’000’000 sein."
+            : "Menge muss eine ganze Zahl zwischen 1 und 1’000’000 sein.");
         }
       }
 
@@ -1420,6 +1424,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             {!isEditMode && currentTrackingMode === "hybrid" && (
               <fieldset className="asset-form-group">
                 <legend>Eintragsart</legend>
+                {enableStockForModel && hybridEntryType === "stock" &&
+                  <p className="asset-form-empty-info">Beim Speichern kann dieses Produktmodell künftig Einzelgeräte und Mengenbestand führen.</p>}
                 <div className="asset-form-row">
                   <label>Für Hybrid-Modell:</label>
                   <select
@@ -1427,7 +1433,11 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     value={hybridEntryType}
                     disabled={saving}
                     onChange={(event) => {
-                      setHybridEntryType(event.target.value as EntryType);
+                      const nextType = event.target.value as EntryType;
+                      setHybridEntryType(nextType);
+                      if (modelMode === "existing") {
+                        setQrCode(nextType === "stock" ? String(selectedModel?.qr_code || scannedQrCode) : scannedQrCode);
+                      }
                       setSpecValues({});
                     }}
                   >
@@ -1597,12 +1607,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               <fieldset className="asset-form-group">
                 <legend>Mengenbestand</legend>
                 <div className="asset-form-row">
-                  <label>Menge [Stück] *:</label>
+                  <label htmlFor="asset-stock-quantity">Menge [Stück] *:</label>
                   <input
+                    id="asset-stock-quantity"
                     type="text"
                     inputMode="numeric"
                     className="asset-form-control"
-                    placeholder={isEditMode ? "Bestandsmenge eingeben" : "leer = 1"}
+                    placeholder={isEditMode || scan?.entryType === "stock" ? "Bestandsmenge eingeben" : "leer = 1"}
                     value={quantity}
                     disabled={saving}
                     onChange={(event) => setQuantity(event.target.value)}

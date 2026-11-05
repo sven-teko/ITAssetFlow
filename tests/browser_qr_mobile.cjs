@@ -76,7 +76,10 @@ const run = (async () => {
         return json(data);
       }
       if (endpoint === '/api/inventory') {
-        if (req.method() === 'POST') { lastAsset = req.postDataJSON(); return json({ id: 3, entry_type: 'asset' }); }
+        if (req.method() === 'POST') {
+          lastAsset = req.postDataJSON();
+          return json({ id: 3, entry_type: lastAsset.entry_type, product_model_id:lastAsset.model.id });
+        }
         if (req.method() === 'PUT') { lastEdit = req.postDataJSON(); return json({ id: 1, entry_type: 'asset' }); }
         return json(inventory());
       }
@@ -791,7 +794,47 @@ const run = (async () => {
     internetBoxMatch = 'model';
     await openQr(); await lookup('7611552033830');
     await createFromModel.waitFor();
-    await closeQr();
+    const createStock = page.getByRole('button',{name:'Mengenartikel erfassen',exact:true});
+    internetBoxModel.ean = '7611552033830';
+    await createStock.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'115');
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).count(),0);
+    const quantityInput = page.getByLabel('Menge [Stück] *:',{exact:true});
+    const fillStockLocation = async () => {
+      await row(/^Standort \*:/).locator('select').selectOption('1');
+      await row(/^Abteilung \*:/).locator('select').selectOption('10');
+      await row(/^Lagerort \*:/).locator('select').selectOption('11');
+    };
+    await fillStockLocation();
+    const previousSave = lastAsset;
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.getByText('Bitte die Bestandsmenge eingeben.',{exact:true}).waitFor();
+    await quantityInput.fill('1000001');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.getByText('Menge muss eine ganze Zahl zwischen 1 und 1’000’000 sein.',{exact:true}).waitFor();
+    assert.equal(lastAsset,previousSave);
+    await quantityInput.fill('5');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.entry_type,'stock');
+    assert.equal(lastAsset.stock.quantity,5);
+    assert.equal(lastAsset.model.id,115);
+    assert.equal(lastAsset.enable_stock_for_model,true);
+    assert.equal(lastAsset.asset,undefined);
+    await openQr(); await lookup('5901234123457');
+    await createStock.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    await row(/^Bezeichnung \*:/).locator('input').fill('Neuer EAN-Mengenartikel');
+    await fillStockLocation();
+    await quantityInput.fill('12');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.model.mode,'new');
+    assert.equal(lastAsset.model.tracking_mode,'quantity');
+    assert.equal(lastAsset.scanner_codes.ean,'5901234123457');
+    assert.equal(lastAsset.stock.quantity,12);
+    console.log('PASS: EAN-Mengenartikel für bestehendes Einzelmodell und neues Mengenmodell; leere und zu grosse Menge abgefangen.');
     console.log('PASS: Einzelne EAN 7611552033830 legt Internet Box Light mit demselben Modell und eigener Gerätekennung an.');
     const testModel = data.product_models.find(model => model.id === 105);
     const modelUpc = testModel.upc;
@@ -979,6 +1022,7 @@ const run = (async () => {
     await openQr(); await lookup('7611552033830');
     await page.getByRole('heading',{name:'Internet Box Light',exact:true}).waitFor();
     assert.equal(await createFromModel.count(),0);
+    assert.equal(await createStock.count(),0);
     await closeQr();
     await openQr(); await lookup('DECT-6-SN');
     await page.locator('.qr-asset-identifier').filter({hasText:/^DECT-6$/}).waitFor();

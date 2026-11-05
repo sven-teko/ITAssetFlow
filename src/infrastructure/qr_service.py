@@ -155,11 +155,19 @@ class QrService:
             if exact_tags:
                 assets = [{**row, "matched_identifier": "asset_tag"} for row in exact_tags]
         exact = [row for row in assets if row.get("matched_identifier") not in {"ean", "upc"}]
-        if exact:
-            assets = exact
-        matched = {} if device_only or exact or code_type in {"asset_tag", "mac"} else {
+        matched = {} if device_only or (exact and not retail_code) or code_type in {"asset_tag", "mac"} else {
             row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)
         }
+        registered_retail = bool(retail_code and matched)
+        if retail_code and len(matched) == 1 and {row["product_model_id"] for row in exact} == set(matched) \
+                and next(iter(matched.values())).get("tracking_mode") == "serialized":
+            matched = {}  # Keep the exact-device shortcut for a model with only individual devices.
+        if retail_code and matched:
+            # A registered trade code describes the model. An old device barcode must not hide stock.
+            assets = [row for row in assets if row["product_model_id"] in matched]
+            exact = []
+        elif exact:
+            assets = exact
         models = matched.copy()
         other_ids = {row["product_model_id"] for row in assets}.difference(models)
         if other_ids:
@@ -172,6 +180,15 @@ class QrService:
             # A corrected model EAN takes precedence over copies left on older devices.
             assets = [row for row in assets if row["product_model_id"] in matched
                       or models.get(row["product_model_id"], {}).get("ean") in {None, "", ean}]
+        legacy_retail = bool(retail_code and exact and not registered_retail)
+        if retail_code and not device_only and not matched:
+            legacy_ids = {row["product_model_id"] for row in assets}
+            if len(legacy_ids) == 1:
+                legacy_id = next(iter(legacy_ids))
+                legacy_model = models.get(legacy_id)
+                if legacy_model and legacy_model.get("is_active") is not False and legacy_model.get("tracking_mode") in {"quantity", "hybrid"}:
+                    matched[legacy_id] = legacy_model
+                    exact = []
         # A unique code stored only on a device stays a device match. Explicit
         # model codes and shared legacy EANs keep the model-wide results.
         direct_asset_ids = {row["id"] for row in assets} if exact or (not matched and len(assets) == 1) else set()
@@ -245,6 +262,7 @@ class QrService:
         stocked = [row for row in matches if row["record_type"] == "stock" and row["quantity"] > 0]
         preferred = stocked[0]["key"] if not direct_asset_match and len(stocked) == 1 else None
         return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations,
+                "legacy_retail": legacy_retail,
                 "preferred_key": preferred,
                 "direct_asset_keys": [f"asset:{row['id']}" for row in assets if row["id"] in direct_asset_ids],
                 "models": [{key: model.get(key) for key in ("id", "name", "tracking_mode")}
@@ -325,7 +343,18 @@ class QrService:
         condition = str(payload.get("condition") or "").strip()
         if direction not in {"add", "remove"} or condition not in {"new", "like_new", "used", "worn", "defective"}:
             raise ValueError("Ungültige Buchungsart oder ungültiger Zustand.")
-        models = self._models_for_code(code)
+        retail_type = payload.get("code_type")
+        if retail_type == "ean":
+            normalize_ean(code)
+        elif retail_type == "upc":
+            normalize_upc(code)
+        else:
+            retail_type = None
+        models = self._models_for_code(code, retail_type=retail_type)
+        if retail_type and not models:
+            legacy_ids = {row["product_model_id"] for row in self._assets_for_code(code, retail_type)}
+            if legacy_ids == {model_id}:
+                models = self._data(self.client.table("product_models").select("id,tracking_mode,is_active").eq("id", model_id).limit(1).execute())
         if not any(row["id"] == model_id and row.get("tracking_mode") in {"quantity", "hybrid"} and row.get("is_active") is not False for row in models):
             raise ValueError("Code und Mengenartikel stimmen nicht überein. Bitte erneut scannen.")
         locations = self._data(self.client.table("storage_locations").select("id,department_id,is_active").eq("id", location_id).limit(1).execute())

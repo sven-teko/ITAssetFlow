@@ -209,7 +209,8 @@ class AssetRepository:
                 if (payload.get("scanner_codes") or {}).get("upc"):
                     raise ValueError("Bitte die UPC zuerst beim Produktmodell speichern und danach die Entnahme buchen.")
                 return reduce_edited_stock(self.client, payload)
-        rpc_name = ("save_inventory_entry_with_upc" if (payload.get("scanner_codes") or {}).get("upc") else
+        rpc_name = ("save_inventory_entry_with_stock_mode" if payload.get("enable_stock_for_model") is True else
+                    "save_inventory_entry_with_upc" if (payload.get("scanner_codes") or {}).get("upc") else
                     "save_inventory_entry_with_connections" if "connection_changes" in payload else "save_inventory_entry")
         result = self.client.rpc(rpc_name, {"p_payload": payload, "p_editing": editing}).execute().data
         if not isinstance(result, dict) or result.get("entry_type") not in {"asset", "stock"}:

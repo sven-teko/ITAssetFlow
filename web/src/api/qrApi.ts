@@ -29,7 +29,8 @@ export type QrLocation = {
 };
 
 export type QrLookup = { code: string; code_type?: CodeType; preferred_key?: string | null; matches: QrMatch[]; locations: QrLocation[];
-  models?: { id: number; name: string; tracking_mode: string }[]; direct_asset_keys?: string[]; device_match_keys?: string[] };
+  models?: { id: number; name: string; tracking_mode: string }[]; direct_asset_keys?: string[]; device_match_keys?: string[];
+  legacy_retail?: boolean };
 
 export type QrDeviceDetails = {
   serial_number: string | null;

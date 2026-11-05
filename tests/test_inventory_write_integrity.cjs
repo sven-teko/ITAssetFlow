@@ -17,6 +17,7 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
   };
   const fails = (fn,code,detail) => assert.rejects(fn, e => e.code===code && (detail===undefined || Number(e.detail)===detail));
   const save = async (data, editing=false) => (await q("SELECT public.save_inventory_entry($1,$2) result",[data,editing]))[0].result;
+  const saveStockMode = async data => (await q("SELECT public.save_inventory_entry_with_stock_mode($1,false) result",[data]))[0].result;
   const move = async (key,destination,quantity,expected,location=null,id=randomUUID()) =>
     (await q("SELECT public.move_inventory_entry($1,$2,$3,$4,$5,$6,$7) result",[key,destination,id,quantity,expected,location,"Test-Umlagerung"]))[0].result;
   const level = async id => Number((await q("SELECT quantity FROM public.stock_levels WHERE product_model_id=101 AND storage_location_id=$1 AND condition='used'",[id]))[0]?.quantity||0);
@@ -47,6 +48,7 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
     await db.exec("ALTER TABLE public.assets DISABLE TRIGGER assets_link_ean_to_model; UPDATE public.assets SET ean='96385074' WHERE id=30");
     await seed("database/scanner_codes.sql");
     assert.equal((await q("SELECT ean FROM public.product_models WHERE id=100"))[0].ean,"96385074");
+    await seed("supabase/migrations/20261105122517_scanner_stock_mode.sql");
     await as("admin", async () => {
       await q("SELECT public.set_employee_site_access(2,ARRAY[1,2]::bigint[])");
       await q("SELECT public.set_employee_site_access(3,ARRAY[1]::bigint[])");
@@ -71,7 +73,24 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       model:{mode:"existing",id:101},condition:"used",storage_location_id:11,
       stock:{department_id:10,quantity:11,purchase_date:"2026-01-01"},
     };
+    const openingReceipt = {enable_stock_for_model:true, entry_type:"stock", request_id:randomUUID(),
+      model:{mode:"existing", id:100}, storage_location_id:11, condition:"new",
+      stock:{quantity:5,department_id:10,purchase_date:"2026-01-01"}, scanner_codes:{ean:"96385074"}};
     await as("editor", async () => {
+      await fails(() => saveStockMode({...openingReceipt, storage_location_id:33}),"42501");
+      await fails(() => saveStockMode({...openingReceipt, stock:{...openingReceipt.stock,quantity:0}}),"P0001");
+      assert.equal((await q("SELECT tracking_mode FROM public.product_models WHERE id=100"))[0].tracking_mode,"serialized");
+      const opened = await saveStockMode(openingReceipt);
+      assert.equal(opened.entry_type,"stock");
+      assert.deepEqual(await saveStockMode(openingReceipt),opened);
+      assert.equal((await q("SELECT tracking_mode FROM public.product_models WHERE id=100"))[0].tracking_mode,"hybrid");
+      assert.equal(Number((await q("SELECT quantity FROM public.stock_levels WHERE product_model_id=100 AND storage_location_id=11 AND condition='new'"))[0].quantity),5);
+      assert.equal((await q("SELECT asset_tag FROM public.assets WHERE id=10"))[0].asset_tag,"PC-10");
+      const newStock = await save({...openingReceipt, enable_stock_for_model:undefined, request_id:randomUUID(),
+        model:{mode:"new",category_id:20,manufacturer_id:20,name:"EAN-Mengenmodell",tracking_mode:"quantity"},
+        scanner_codes:{ean:"5901234123457"}});
+      assert.equal(newStock.entry_type,"stock");
+      assert.equal((await q("SELECT ean FROM public.product_models WHERE id=$1",[newStock.product_model_id]))[0].ean,"5901234123457");
       await fails(() => q("SELECT public.delete_scoped_asset(10)"),"42501");
       await fails(() => q("DELETE FROM public.assets WHERE id=10"),"42501");
       await fails(() => save(asset,true),"23514");
@@ -159,6 +178,7 @@ const {PGlite} = require(process.env.PGLITE_MODULE || "@electric-sql/pglite");
       assert.equal((await q("SELECT public.search_inventory_archive(0,'','Allschwil','customer',NULL,NULL) result"))[0].result.total,0);
     });
     await as("viewer", async () => {
+      await fails(() => saveStockMode(openingReceipt),"42501");
       await fails(() => q("SELECT public.import_inventory_snapshot('{}')"),"42501");
       await fails(() => save(stock,true),"42501");
       await fails(() => move("stock:101:11:used",12,1,9),"42501");

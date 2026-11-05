@@ -1,6 +1,8 @@
 export type CodeType = "auto" | "qr" | "ean" | "upc" | "mac" | "serial" | "asset_tag";
 export type ScanRole = Exclude<CodeType, "auto">;
-export type ScanDraft = Partial<Record<ScanRole, string>> & { modelId?: number; newModel?: boolean };
+export type ScanDraft = Partial<Record<ScanRole, string>> & {
+  modelId?: number; newModel?: boolean; entryType?: "asset" | "stock"; legacyRetail?: "ean" | "upc";
+};
 export const barcodeFormats: Record<string, string> = {
   QRCode: "QR-Code", EAN8: "EAN-8", EAN13: "EAN-13", UPCA: "UPC-A",
   Code128: "Code 128", Code39: "Code 39", Code93: "Code 93", ITF: "ITF", Codabar: "Codabar",
