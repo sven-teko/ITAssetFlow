@@ -7,7 +7,6 @@ import "./QrWorkflowDialog.css";
 import { isValidEan, isValidUpc, identifierType, labelledCodes, type CodeType, type ScanDraft } from "../utils/scannerCodes";
 import { assignedCodes, proposeAssignments, resolveScannerBatch, scanLabels, type Assignment } from "../utils/scannerBatch";
 import type { ScannedCode } from "../utils/barcodeReader";
-import { APP_VERSION } from "../release";
 
 type Props = {
   onArchive: (key: string) => void;
@@ -256,7 +255,6 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           <button type="button" onClick={() => setCollectingMore(false)}>Zurück zur Zuordnung</button>
         </section> : review ? <section className="qr-code-review" aria-label="Erkannte Codes zuordnen">
           <h3>Erkannte Codes zuordnen</h3>
-          <p>Prüfe die Zuordnung. Für Codes wie IPUI oder IPEI wähle «Ignorieren».</p>
           {review.codes.map((item, index) => <label key={`${item.type}:${item.text}`}>
             <span><strong>{item.text}</strong><small>{item.format}</small></span>
             <select aria-label={`Zuordnung für ${item.text}`} value={review.assignments[index]} disabled={loading}
@@ -362,7 +360,6 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       </div>
 
       <footer className="qr-dialog-footer">
-        {!lookup && <small className="qr-build-version">v{APP_VERSION}</small>}
         {lookup && <button type="button" className="qr-next-button" disabled={saving || loading || addPending} onClick={() => {
           setLookup(null); setCode(""); setRecognizedType(null); setRecognizedFormat(""); setNeedsRefresh(false); setMessage(""); setError("");
         }}>Weiteren Code scannen</button>}

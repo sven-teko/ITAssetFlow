@@ -1,6 +1,22 @@
 export type CodeType = "auto" | "qr" | "ean" | "upc" | "mac" | "serial" | "asset_tag";
 export type ScanRole = Exclude<CodeType, "auto">;
 export type ScanDraft = Partial<Record<ScanRole, string>> & { modelId?: number };
+export const barcodeFormats: Record<string, string> = {
+  QRCode: "QR-Code", EAN8: "EAN-8", EAN13: "EAN-13", UPCA: "UPC-A",
+  Code128: "Code 128", Code39: "Code 39", Code93: "Code 93", ITF: "ITF", Codabar: "Codabar",
+  DataMatrix: "Data Matrix", PDF417: "PDF417", Aztec: "Aztec",
+};
+
+export function isSerialCandidate(code: { labelled?: boolean; type: CodeType; format: string; text: string }): boolean {
+  const value = code.text.trim();
+  if (!value || value.length > 100 || [...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return false;
+  if (code.labelled) return code.type === "serial";
+  if (/^(?:IPUI|IPEI|SAP|P\/N|EAN(?:-8|-13)?|UPC(?:-A)?|MAC(?:[- ]?(?:Adresse|Address|ID))?)\s*[:=]/i.test(value)) return false;
+  if (["QR-Code", "Data Matrix", "PDF417", "Aztec"].includes(code.format)) {
+    return /^[a-z\d][a-z\d._:+/-]*$/i.test(value) && !value.includes("://");
+  }
+  return code.type === "serial" || code.type === "asset_tag" || code.type === "mac";
+}
 
 export function normalizeMac(value: string): string | null {
   const text = value.trim().replace(/^MAC(?:[- ]?(?:Adresse|Address))?\s*[:=]\s*/i, "");

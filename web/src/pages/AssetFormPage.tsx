@@ -209,7 +209,7 @@ function editableSpecifications(value: unknown): Record<string, SpecificationVal
   return result;
 }
 
-import { validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
+import { barcodeFormats, validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
 import ItemImagePicker from "../components/ItemImagePicker";
 import SerialBarcodeDialog from "../components/SerialBarcodeDialog";
 import { saveItemImage } from "../api/archiveApi";
@@ -229,7 +229,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const scan = sourceKey ? undefined : (location.state as { scan?: ScanDraft } | null)?.scan;
   const scannedCode = sourceKey ? "" : (searchParams.get("code") ?? searchParams.get("qr") ?? "").trim();
   const scannedEan = !sourceKey && searchParams.get("code_type") === "ean";
-  const scannedFormat = ["QR-Code", "EAN-8", "EAN-13", "UPC-A", "Code 128", "Code 39"].find(format => format === searchParams.get("code_format"));
+  const scannedFormat = Object.values(barcodeFormats).find(format => format === searchParams.get("code_format"));
   const rawType = sourceKey ? null : searchParams.get("code_type");
   const scannedType: CodeType = rawType && ["qr","ean","upc","mac","serial","asset_tag"].includes(rawType)
     ? rawType as CodeType : searchParams.has("qr") ? "qr" : identifierType(scannedCode,scannedFormat);

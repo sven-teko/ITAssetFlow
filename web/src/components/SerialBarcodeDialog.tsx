@@ -1,16 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScannedCode } from "../utils/barcodeReader";
+import { isSerialCandidate } from "../utils/scannerCodes";
 import QrScanner from "./QrScanner";
 import "./QrWorkflowDialog.css";
 
 function serialCandidates(codes: ScannedCode[]): string[] {
-  const labelled = codes.filter(code => code.labelled && code.type === "serial");
-  const candidates = labelled.length ? labelled : codes.filter(code =>
-    !code.labelled && (code.type === "serial" || code.type === "asset_tag" || code.type === "mac") &&
-    (code.format === "Code 128" || code.format === "Code 39") &&
-    !/^(?:IPUI|IPEI|SAP|P\/N|EAN(?:-8|-13)?|UPC(?:-A)?|MAC(?:[- ]?(?:Adresse|Address|ID))?)\s*[:=]/i.test(code.text));
-  return [...new Set(candidates.map(code => code.text.trim()).filter(value =>
-    value && value.length <= 100 && ![...value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)))];
+  const candidates = codes.filter(isSerialCandidate);
+  const labelled = candidates.filter(code => code.labelled);
+  return [...new Set((labelled.length ? labelled : candidates).map(code => code.text.trim()))];
 }
 
 export default function SerialBarcodeDialog({ onCancel, onSelect }: { onCancel: () => void; onSelect: (serial: string) => void }) {

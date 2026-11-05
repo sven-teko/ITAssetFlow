@@ -105,7 +105,9 @@ const run = (async () => {
       await page.getByRole('button', { name: /^Scanner$/ }).filter({ visible: true }).click();
       await page.getByRole('dialog', { name: 'Scanner' }).waitFor();
       assert.equal(await page.locator('#scan-code-type').count(),0);
-      await page.locator('.qr-auto-label').waitFor();
+      await page.getByRole('button', { name: 'Kamera starten', exact: true }).waitFor();
+      assert.equal(await page.getByText('Automatische Erkennung',{exact:true}).count(),0);
+      assert.equal(await page.locator('.qr-dialog-footer').getByText(/^v\d+\./).count(),0);
     };
     const lookup = async code => {
       await page.getByLabel('QR-Code / EAN / Artikelkennung', { exact: true }).fill(code);
@@ -307,12 +309,24 @@ const run = (async () => {
     await closeQr();
     console.log('PASS: Verbindungsabbruch und ungültige Antwort nach bereits gespeicherter Buchung; Wiederholung ohne Doppelbuchung');
 
+    const longSerial = '854000802011AAWH33P1602';
+    const barcodeFixture = format => path.join(__dirname,'fixtures',longSerial+'-'+format+'.svg');
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(barcodeFixture('DataMatrix'));
+    await page.getByRole('heading',{name:'Neuer Inventareintrag',exact:true}).waitFor();
+    assert.deepEqual(lookups.at(-1),{code:longSerial,type:'serial'});
+    assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),longSerial);
+    await page.getByRole('button',{name:'Abbrechen',exact:true}).click();
+    console.log('PASS: Data Matrix mit alphanumerischer Seriennummer erkennt exakt den eingegebenen Code');
+
     const imageData = 'data:image/png;base64,' + fs.readFileSync(path.join(__dirname, 'fixtures/QR-CABLE.png')).toString('base64');
     await page.evaluate(dataUrl => {
       window.testStreams = [];
       navigator.mediaDevices.getUserMedia = async constraints => {
         window.testCameraConstraints = constraints;
         const image = new Image(); image.src = window.testCodeImage || dataUrl; await image.decode();
+        const alternate = new Image();
+        if (window.testCameraAlternate) { alternate.src = window.testCameraAlternate; await alternate.decode(); }
         const neighbors = (window.testCameraNeighbors || []).map(spec => {
           const neighbor = new Image(); neighbor.src = spec.url;
           return { ...spec, image: neighbor };
@@ -323,9 +337,14 @@ const run = (async () => {
         const paint = () => {
           context.fillStyle = 'white'; context.fillRect(0, 0, canvas.width, canvas.height);
           if (!window.testBlankCamera) {
-            const factor=Math.min(canvas.width*(neighbors.length ? .55 : .75)/image.naturalWidth,canvas.height*.65/image.naturalHeight);
-            const w=image.naturalWidth*factor,h=image.naturalHeight*factor;
-            context.drawImage(image,(canvas.width-w)/2,(canvas.height-h)/2,w,h);
+            const showAlternate = alternate.src && window.testCameraShowAlternate;
+            const visible = showAlternate ? alternate : image;
+            const maxWidth = showAlternate ? .92 : neighbors.length ? .55 : .75;
+            const factor=Math.min(canvas.width*maxWidth/visible.naturalWidth,canvas.height*.65/visible.naturalHeight);
+            const w=visible.naturalWidth*factor,h=visible.naturalHeight*factor;
+            if (showAlternate) context.globalAlpha = .19;
+            context.drawImage(visible,(canvas.width-w)/2,(canvas.height-h)/2,w,h);
+            context.globalAlpha = 1;
           }
           for (const {image, x, y, size} of neighbors) context.drawImage(image, x, y, size, size);
         };
@@ -383,10 +402,23 @@ const run = (async () => {
     const serialDialog = page.getByRole('dialog',{name:'Seriennummer scannen',exact:true});
     await serialDialog.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/4006381333931.svg'));
     await serialDialog.getByRole('alert').filter({hasText:'Kein Seriennummern-Barcode gefunden'}).waitFor();
+    await page.evaluate(({ ean, longCode }) => {
+      window.testCodeImage = ean;
+      window.testCameraAlternate = longCode;
+      window.testCameraShowAlternate = false;
+    }, {
+      ean:'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/4006381333931.svg')).toString('base64'),
+      longCode:'data:image/svg+xml;base64,' + fs.readFileSync(barcodeFixture('Code128')).toString('base64'),
+    });
     await serialDialog.getByRole('button',{name:'Kamera starten',exact:true}).click();
-    await serialDialog.getByRole('button',{name:'87954252804 übernehmen',exact:true}).click();
+    await serialDialog.getByText('Suche nach Codes …',{exact:true}).waitFor();
+    await page.waitForTimeout(1_400);
+    assert.equal(await page.evaluate(()=>window.testStreams.at(-1).getVideoTracks()[0].readyState),'live');
+    assert.equal(await serialDialog.locator('.qr-scan-frame.has-code').count(),0);
+    await page.evaluate(() => { window.testCameraShowAlternate = true; });
+    await serialDialog.getByRole('button',{name:longSerial+' übernehmen',exact:true}).click();
     await serialDialog.waitFor({state:'hidden'});
-    assert.equal(await serialField.inputValue(),'87954252804');
+    assert.equal(await serialField.inputValue(),longSerial);
     assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'PC-001');
     assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
     assert.equal(lookups.length,lookupsBeforeSerial);
@@ -394,17 +426,26 @@ const run = (async () => {
     await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.deepEqual([lastEdit.asset.serial_number,lastEdit.asset.asset_tag,lastEdit.asset.mac_address],
-      ['87954252804','PC-001','AA:BB:CC:11:22:33']);
+      [longSerial,'PC-001','AA:BB:CC:11:22:33']);
+    await page.evaluate(() => { window.testCameraAlternate = ''; window.testCameraShowAlternate = false; });
     console.log('PASS: Seriennummer im Bearbeitungsformular mit Kamera übernommen; EAN abgewiesen, andere Felder unverändert, Foto-Button blau');
 
     const eanVideo = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/4006381333931.svg')).toString('base64');
-    await page.evaluate(dataUrl => { window.testCodeImage = dataUrl; navigator.mediaDevices.getUserMedia = window.fakeScannerGetUserMedia; }, eanVideo);
+    await page.evaluate(dataUrl => { window.testCodeImage = dataUrl; window.testBlankCamera = true;
+      navigator.mediaDevices.getUserMedia = window.fakeScannerGetUserMedia; }, eanVideo);
     await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
+    const frame = page.locator('.qr-scan-frame');
+    const frameColor = () => frame.evaluate(el => getComputedStyle(el).borderColor);
+    await page.getByRole('status').filter({hasText:'Suche nach Codes …'}).waitFor();
+    assert.equal(await frameColor(),'rgb(255, 255, 255)');
+    await page.evaluate(() => { window.testBlankCamera = false; });
+    await page.getByRole('status').filter({hasText:'Code erkannt – wird geprüft …'}).waitFor();
+    assert.equal(await frameColor(),'rgb(74, 222, 128)');
     await page.getByRole('heading',{name:'USB-C Kabel',exact:true}).waitFor();
     assert.deepEqual(lookups.at(-1), {code:'4006381333931',type:'ean'});
     assert.equal(await page.evaluate(() => window.testStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended'))),true);
     await closeQr();
-    console.log('PASS: EAN-13 auch aus simuliertem Kamerabild erkannt und Kamera freigegeben');
+    console.log('PASS: Weisser Suchrahmen ohne Treffer; grüner Rahmen und Status beim erkannten EAN-13, bevor der Treffer übernommen wird');
 
     const distractingQr = 'data:image/svg+xml;base64,' + fs.readFileSync(path.join(__dirname,'fixtures/QR-NUMERIC.svg')).toString('base64');
     const lookupsBefore = lookups.length;
@@ -414,9 +455,10 @@ const run = (async () => {
     }, distractingQr);
     await openQr();
     await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
-    await page.getByText('Kamera aktiv', {exact:true}).waitFor();
+    await page.getByText('Suche nach Codes …', {exact:true}).waitFor();
     await page.waitForTimeout(750);
     assert.equal(lookups.length, lookupsBefore, 'QR ausserhalb des Rahmens bleibt unberücksichtigt');
+    assert.equal(await page.locator('.qr-scan-frame.has-code').count(),0);
     await closeQr();
     await page.evaluate(url => { window.testCameraNeighbors = [{ url, x: 65, y: 100, size: 90 }]; }, distractingQr);
     await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
@@ -430,6 +472,7 @@ const run = (async () => {
     }, {url:distractingQr, ean:eanVideo});
     await openQr(); await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
     await page.getByRole('heading',{name:'Erkannte Codes zuordnen',exact:true}).waitFor();
+    assert.equal(await page.getByText(/^Prüfe die Zuordnung\./).count(),0);
     const cameraChoices = page.getByRole('combobox',{name:'Zuordnung für 4006381333931',exact:true});
     assert.equal(await cameraChoices.count(), 2);
     for (const choice of await cameraChoices.all()) {
@@ -650,7 +693,7 @@ const run = (async () => {
       assert.equal(await page.locator('.qr-dialog').evaluate(el=>el.scrollWidth > el.clientWidth),false);
       await page.evaluate(()=>{window.testBlankCamera=true;window.testPortraitCamera=true;});
       await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
-      await page.getByText('Kamera aktiv',{exact:true}).waitFor();
+      await page.getByText('Suche nach Codes …',{exact:true}).waitFor();
       await page.getByLabel('Kamera-Zoom').press('ArrowRight');
       await page.getByRole('button',{name:'Licht an',exact:true}).click();
       assert.equal(await page.getByRole('button',{name:'Licht aus',exact:true}).getAttribute('aria-pressed'),'true');

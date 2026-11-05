@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ScannedCode } from "../utils/barcodeReader";
+import { isSerialCandidate } from "../utils/scannerCodes";
+import { createScanObservations } from "../utils/scanObservations";
 
 type Props = { onCodes: (codes: ScannedCode[]) => void; disabled: boolean; serialOnly?: boolean };
 type CameraCapabilities = MediaTrackCapabilities & { focusMode?: string[]; zoom?: { min: number; max: number; step: number }; torch?: boolean };
@@ -29,6 +31,8 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
   const [zoom, setZoom] = useState(1);
   const [torch, setTorch] = useState(false);
   const [error, setError] = useState("");
+  const [scanHint, setScanHint] = useState("");
+  const [codeInFrame, setCodeInFrame] = useState(false);
 
   const release = useCallback(() => {
     generation.current += 1;
@@ -40,7 +44,7 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
   }, []);
 
   const stop = useCallback(() => {
-    release(); setActive(false); setStarting(false); setReadingImage(false); setTools({ torch: false }); setTorch(false);
+    release(); setActive(false); setStarting(false); setReadingImage(false); setTools({ torch: false }); setTorch(false); setCodeInFrame(false);
   }, [release]);
 
   useEffect(() => {
@@ -50,7 +54,7 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
   }, [release, stop]);
 
   async function start() {
-    stop(); setError("");
+    stop(); setError(""); setScanHint("");
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       setError("Für den Kamerazugriff ist eine vertrauenswürdige HTTPS-Verbindung erforderlich. Alternativ Code-Bild öffnen oder Kennung eingeben.");
       return;
@@ -83,29 +87,34 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
       await videoRef.current.play();
       if (run !== generation.current) return;
       setActive(true); setStarting(false);
-      let candidate = "", confirmations = 0, stableSince = 0;
+      const observe = createScanObservations();
+      const started = performance.now();
+      let lastFrame = -1;
+      let lastDetection = -Infinity;
       const scan = async () => {
-        if (run !== generation.current || !videoRef.current) return;
+        const video = videoRef.current, frame = frameRef.current;
+        if (run !== generation.current || !video) return;
         try {
-          const results = frameRef.current ? await read(videoRef.current, true, frameRef.current) : [];
-          if (run !== generation.current) return;
-          if (results.length) {
-            const key = JSON.stringify(results.map(result => [result.type, result.text]).sort());
-            if (key === candidate) confirmations += 1;
-            else { confirmations = 1; stableSince = performance.now(); }
-            candidate = key;
-            const tradeCount = results.filter(code => code.type === "upc" || code.type === "ean").length;
-            // Allow the other product code to come into focus before finishing.
-            if (confirmations >= (results.length > 1 ? 2 : 3)
-              && (tradeCount !== 1 || performance.now() - stableSince >= 1_200)) {
-              stop(); onCodes(results); return;
-            }
-          } else { candidate = ""; confirmations = 0; }
+          if (frame && video.readyState >= 2 && video.currentTime !== lastFrame) {
+            lastFrame = video.currentTime;
+            const results = await read(video, frame);
+            if (run !== generation.current) return;
+            const candidates = serialOnly ? results.filter(isSerialCandidate) : results;
+            const now = performance.now();
+            if (candidates.length) lastDetection = now;
+            // Hold the visual cue briefly when the camera is refocusing.
+            setCodeInFrame(now - lastDetection <= 450);
+            const confirmed = observe(candidates, now);
+            if (confirmed.length) { stop(); onCodes(confirmed); return; }
+            if (now - started > 3_500) setScanHint(serialOnly
+              ? "Halte den Barcode bei «SN» waagrecht in den Rahmen. Ändere den Abstand leicht, bis die Striche scharf sind."
+              : "Ändere den Abstand leicht, bis der Code scharf ist. Lasse an beiden Enden des Barcodes etwas Platz.");
+          }
         } catch {
           if (run !== generation.current) return;
           stop(); setError("Das Kamerabild konnte nicht gelesen werden. Bitte die Kamera erneut starten oder ein Bild öffnen."); return;
         }
-        timerRef.current = window.setTimeout(() => void scan(), 180);
+        timerRef.current = window.setTimeout(() => void scan(), 150);
       };
       void scan();
       const cameras = (await navigator.mediaDevices.enumerateDevices().catch(() => []))
@@ -144,7 +153,7 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
       const image = new Image(); image.src = url;
       await image.decode();
       if (run !== generation.current) return;
-      detected = await read(image, true);
+      detected = await read(image);
       if (!detected.length && run === generation.current) setError("Kein lesbarer Code gefunden. Bitte die Codes scharf und mit etwas freiem Rand aufnehmen.");
     } catch {
       if (run === generation.current) setError("Das Code-Bild oder der Scanner konnte nicht geladen werden. Bitte ein scharfes Bild öffnen und die Seite bei Bedarf neu laden.");
@@ -156,23 +165,22 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
   }
 
   return <section className={`qr-camera${active ? " is-active" : ""}`} aria-label="Scanner">
-    <div className="qr-capture-heading">
-      <span className="qr-auto-label"><span aria-hidden="true">✓</span> Automatische Erkennung</span>
-      {(active || starting) && <span className="qr-camera-status" role="status">{starting ? "Kamera startet …" : "Kamera aktiv"}</span>}
-    </div>
-    {!active && <div className="qr-camera-intro">
+    {(active || starting) && <p className={`qr-camera-status${codeInFrame ? " has-code" : ""}`} role="status">
+      {starting ? "Kamera startet …" : codeInFrame ? "Code erkannt – wird geprüft …" : "Suche nach Codes …"}
+    </p>}
+    {!active && !starting && <div className="qr-camera-intro">
       <span className="qr-camera-symbol" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
           <path d="M8 5.5 9.5 3h5L16 5.5h3A2 2 0 0 1 21 7.5v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z" /><circle cx="12" cy="12.5" r="4" />
         </svg>
       </span>
-      <div><h3>Mit Kamera scannen</h3><p>{serialOnly ? "Scanne den Barcode bei «SN» oder «Serial Number»." : "QR, EAN, UPC-A, Code 128 und Code 39."}</p></div>
+      <div><h3>Mit Kamera scannen</h3><p>{serialOnly ? "Scanne den Barcode bei «SN» oder «Serial Number»." : "QR-Codes, EAN, UPC und weitere Barcodes."}</p></div>
     </div>}
-    <div className={`qr-video-wrap${active ? " active" : ""}`}>
+    <div className={`qr-video-wrap${active || starting ? " active" : ""}`}>
       <video ref={videoRef} muted playsInline autoPlay aria-label={serialOnly ? "Kamerabild für Seriennummer" : "Kamerabild für QR-Code oder Barcode"} />
-      {active && <span ref={frameRef} className="qr-scan-frame" aria-hidden="true" />}
+      {active && <span ref={frameRef} className={`qr-scan-frame${codeInFrame ? " has-code" : ""}`} aria-hidden="true" />}
     </div>
-    {active && <p className="qr-hint">{serialOnly ? "Halte nur den Barcode der Seriennummer in den weissen Rahmen." : "Halte die Codes von einem Gerät vollständig in den weissen Rahmen."}</p>}
+    {active && <p className="qr-hint">{scanHint || (serialOnly ? "Halte nur den Barcode der Seriennummer in den weissen Rahmen." : "Halte die Codes von einem Gerät vollständig in den weissen Rahmen.")}</p>}
     {active && (tools.zoom || tools.torch) && <div className="qr-camera-tools">
       {tools.zoom && <label className="qr-zoom-field"><span>Zoom <output>{zoom.toFixed(1)}×</output></span>
         <input aria-label="Kamera-Zoom" type="range" min={tools.zoom.min} max={tools.zoom.max} step={tools.zoom.step} value={zoom}
