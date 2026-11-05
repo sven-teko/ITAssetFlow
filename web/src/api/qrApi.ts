@@ -9,6 +9,7 @@ export type QrMatch = {
   asset_tag?: string;
   serial_number?: string;
   mac_address?: string;
+  qr_code?: string | null;
   product_model_id: number;
   product_model_name: string;
   storage_location_id: number | null;
@@ -28,7 +29,7 @@ export type QrLocation = {
 };
 
 export type QrLookup = { code: string; code_type?: CodeType; preferred_key?: string | null; matches: QrMatch[]; locations: QrLocation[];
-  models?: { id: number; name: string; tracking_mode: string }[]; direct_asset_keys?: string[] };
+  models?: { id: number; name: string; tracking_mode: string }[]; direct_asset_keys?: string[]; device_match_keys?: string[] };
 
 export class QrRequestError extends Error {
   status: number;

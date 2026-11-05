@@ -34,6 +34,23 @@ class QrService:
             if len(page) < 500:
                 return rows
 
+    def _current_asset_locations(self, asset_ids: list[int]) -> dict[int, int]:
+        locations = {}
+        # Bound the URL length as well as the response page size.
+        for start in range(0, len(asset_ids), 200):
+            batch = asset_ids[start:start + 200]
+            offset = 0
+            while True:
+                page = self._data(self.client.table("asset_locations").select("asset_id,storage_location_id")
+                                  .in_("asset_id", batch).is_("valid_to", "null").order("asset_id")
+                                  .order("valid_from", desc=True).order("id", desc=True).range(offset, offset + 499).execute())
+                for row in page:
+                    locations.setdefault(row["asset_id"], row["storage_location_id"])
+                if len(page) < 500:
+                    break
+                offset += len(page)
+        return locations
+
     def _models_for_code(self, code: str, *, retail_type: str | None = None) -> list[dict[str, Any]]:
         # ilike benötigt maskierte Platzhalter; zusätzlich exakt vergleichen.
         escaped = code.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_").replace("*", r"\*")
@@ -187,12 +204,11 @@ class QrService:
                 "department_name": departments.get(location.get("department_id"), {}).get("name") or "",
             }
 
+        current_locations = self._current_asset_locations([asset["id"] for asset in assets])
         matches = []
         for asset in assets:
-            response = self.client.table("asset_locations").select("storage_location_id").eq("asset_id", asset["id"]).is_("valid_to", "null").order("valid_from", desc=True).limit(1).execute()
-            current = self._data(response)
             model = models.get(asset["product_model_id"], {})
-            matches.append({**asset, **context(current[0]["storage_location_id"] if current else None),
+            matches.append({**asset, **context(current_locations.get(asset["id"])),
                 "key": f"asset:{asset['id']}", "record_type": "asset", "quantity": 1,
                 "product_model_name": model.get("name") or asset["asset_tag"]})
 

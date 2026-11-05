@@ -18,7 +18,7 @@ class Query:
     def __init__(self, client, table):
         self.client, self.table = client, table
         self.filters, self.operation, self.payload = [], "select", None
-        self.bounds, self.sort, self.maximum = None, None, None
+        self.bounds, self.sort, self.maximum = None, [], None
 
     def select(self, *_args): return self
     def eq(self, key, value): self.filters.append(lambda r: str(r.get(key)) == str(value)); return self
@@ -38,7 +38,7 @@ class Query:
         ))
         return self
     def range(self, start, end): self.bounds = (start, end + 1); return self
-    def order(self, key, desc=False): self.sort = (key, desc); return self
+    def order(self, key, desc=False): self.sort.append((key, desc)); return self
     def limit(self, count): self.maximum = count; return self
     def update(self, payload): self.operation, self.payload = "update", deepcopy(payload); return self
     def insert(self, payload): self.operation, self.payload = "insert", deepcopy(payload); return self
@@ -64,8 +64,7 @@ class Query:
         elif self.operation == "update":
             for row in matching: row.update(self.payload)
             self.client.writes.append((self.table, self.operation, deepcopy(self.payload)))
-        if self.sort:
-            key, desc = self.sort
+        for key, desc in reversed(self.sort):
             matching = sorted(matching, key=lambda row: row.get(key, 0), reverse=desc)
         if self.maximum is not None: matching = matching[:self.maximum]
         if self.bounds: matching = matching[self.bounds[0]:self.bounds[1]]

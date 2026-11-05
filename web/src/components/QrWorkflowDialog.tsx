@@ -18,12 +18,14 @@ type Props = {
 };
 
 const CONDITIONS: Record<string, string> = { new: "Neu", like_new: "Neuwertig", used: "Gebraucht", worn: "Abgenutzt", defective: "Defekt" };
+type StockTarget = { code: string; product_model_id: number; storage_location_id: number; condition: string };
+type AddBooking = StockTarget & { direction: "add"; quantity: number; request_id: string };
 
 export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, onChanged, onArchive }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
-  const pendingAdd=useRef<Record<string,unknown> | null>(null);
+  const pendingAdd = useRef<AddBooking | null>(null);
   const [withdrawalOpen,setWithdrawalOpen]=useState(false);
   const [addPending,setAddPending]=useState(false);
   const [code, setCode] = useState("");
@@ -55,6 +57,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     && String(row.storage_location_id) === locationId && row.condition === condition)?.quantity ?? 0;
 
   function selectMatch(row: QrMatch) {
+    if (busyRef.current || pendingAdd.current) return;
     setSelectedKey(row.key);
     setLocationId(String(row.storage_location_id ?? lookup?.locations[0]?.id ?? ""));
     setCondition(row.condition || "used");
@@ -192,9 +195,13 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   }
 
   async function book(direction: "add" | "remove", withdrawal?:WithdrawalSubmission) {
-    if (!selected || !lookup || busyRef.current || !canEdit || needsRefresh && !withdrawal && !pendingAdd.current) return;
-    const amount = withdrawal?.quantity ?? Number(quantity);
-    if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000 || !locationId) {
+    const retry = direction === "add" ? pendingAdd.current : null;
+    if (selected?.record_type !== "stock" || !lookup || busyRef.current || !canEdit
+      || (pendingAdd.current && !retry) || (needsRefresh && !withdrawal && !retry)) return;
+    const amount = retry?.quantity ?? withdrawal?.quantity ?? Number(quantity);
+    const target: StockTarget = retry ?? { code: lookup.code, product_model_id: selected.product_model_id,
+      storage_location_id: Number(locationId), condition };
+    if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1_000_000 || !target.storage_location_id) {
       setError("Bitte einen Lagerort und eine ganze Menge zwischen 1 und 1’000’000 wählen.");
       return;
     }
@@ -203,34 +210,37 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       return;
     }
     if(direction === "remove" && !withdrawal){setWithdrawalOpen(true);return;}
-    const payload = withdrawal ? {code:lookup.code,product_model_id:selected.product_model_id,storage_location_id:Number(locationId),condition,direction,...withdrawal}
-      : pendingAdd.current ?? {code:lookup.code,product_model_id:selected.product_model_id,storage_location_id:Number(locationId),condition,quantity:amount,direction,request_id:newBookingId()};
-    if(direction === "add") {pendingAdd.current=payload;setAddPending(true);}
+    const addition: AddBooking | null = direction === "add"
+      ? retry ?? { ...target, direction: "add", quantity: amount, request_id: newBookingId() } : null;
+    const payload = addition ?? { ...target, direction, ...withdrawal };
+    if (addition) { pendingAdd.current = addition; setAddPending(true); }
     busyRef.current = true;
     setSaving(true); setError(""); setMessage("");
     try {
       const result = await adjustQrStock(payload);
-      pendingAdd.current=null;setAddPending(false);setWithdrawalOpen(false);setNeedsRefresh(false);
       if (!result.saved) throw new QrRequestError("Die Buchung wurde nicht bestätigt. Bitte Bestand neu prüfen.", 500);
+      pendingAdd.current = null; setAddPending(false); setWithdrawalOpen(false); setNeedsRefresh(false);
       if (result.quantity !== null) {
-        const location = lookup.locations.find((row) => String(row.id) === locationId);
-        const updated: QrMatch = { ...selected, storage_location_id: Number(locationId), condition,
+        const { product_model_id, storage_location_id, condition: bookedCondition } = target;
+        const location = lookup.locations.find(row => row.id === storage_location_id);
+        const updated: QrMatch = { ...selected, product_model_id, storage_location_id, condition: bookedCondition,
           ...(location ? { storage_location_name: location.storage_location_name,
             site_name: location.site_name, department_name: location.department_name } : {}),
-          key: `stock:${selected.product_model_id}:${locationId}:${condition}`, quantity: result.quantity };
+          key: `stock:${product_model_id}:${storage_location_id}:${bookedCondition}`, quantity: result.quantity };
         setLookup((current) => current ? { ...current, matches: [
           ...current.matches.filter((row) => row.key !== updated.key), updated,
         ] } : current);
         setSelectedKey(updated.key);
+        setLocationId(String(storage_location_id)); setCondition(bookedCondition);
       } else setNeedsRefresh(true);
-      setMessage(`${direction === "add" ? "Zugang" : result.asset_count ? "Übernahme als Einzelartikel" : "Entnahme ins Archiv"} von ${amount} Stück gespeichert.${result.quantity === null ? " Bitte den Bestand neu prüfen." : ""}`);
+      setMessage(`${direction === "add" ? "Zugang" : result.asset_count ? "Übernahme als Einzelartikel" : "Entnahme ins Archiv"} von ${result.changed_quantity} Stück gespeichert.${result.quantity === null ? " Bitte den Bestand neu prüfen." : ""}`);
       void onChanged();
     } catch (cause) {
-      const uncertain = cause instanceof QrRequestError && (cause.status === 0 || cause.status >= 500);
+      const uncertain = !!retry || (cause instanceof QrRequestError && (cause.status === 0 || cause.status >= 500));
       setNeedsRefresh(uncertain);
       if (!uncertain) {pendingAdd.current=null;setAddPending(false);}
       if(withdrawal) throw cause;
-      setError(uncertain ? "Der Buchungsstatus ist unklar. Bitte zuerst den Bestand neu prüfen, bevor du erneut buchst."
+      setError(uncertain ? "Der Buchungsstatus ist unklar. Wähle «Buchung erneut prüfen», um die ursprüngliche Buchung zu klären."
         : cause instanceof Error ? cause.message : "Die Buchung konnte nicht gespeichert werden.");
     } finally { busyRef.current = false; setSaving(false); }
   }
@@ -305,11 +315,11 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
             && lookup.matches.every(row => row.product_model_id === lookup.matches[0].product_model_id)
             && <div><h3>{lookup.matches[0].product_model_name}</h3><p>{lookup.matches.length} Einträge zum Produktmodell</p></div>}
           {lookup.matches.length > 1 && <label>Artikel auswählen
-            <select aria-label="Gefundenen Artikel auswählen" value={selected?.key ?? ""} disabled={saving || loading}
+            <select aria-label="Gefundenen Artikel auswählen" value={selected?.key ?? ""} disabled={saving || loading || addPending}
               onChange={event => { const row = lookup.matches.find(item => item.key === event.target.value); if (row) selectMatch(row); }}>
               <option value="" disabled>Bitte einen passenden Eintrag auswählen</option>
               {lookup.matches.map(row => <option key={row.key} value={row.key}>
-                {row.asset_tag || row.product_model_name} · {row.site_name} · {row.storage_location_name} · {CONDITIONS[row.condition] ?? row.condition}
+                {lookup.device_match_keys?.includes(row.key) ? "Gerät erkannt: " : ""}{row.asset_tag || row.product_model_name} · {row.site_name} · {row.storage_location_name} · {CONDITIONS[row.condition] ?? row.condition}
               </option>)}
             </select>
           </label>}

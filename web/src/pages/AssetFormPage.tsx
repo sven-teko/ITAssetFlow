@@ -237,6 +237,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const scannedUpcCode = scan?.upc ?? (scannedType === "upc" ? scannedCode : "");
   const scannedQrCode = scan?.qr ?? (scannedType === "qr" ? scannedCode : "");
   const scannedModelId = scan?.modelId;
+  const scannedDevice = Boolean(scan?.serial || scan?.mac || scan?.asset_tag ||
+    (scannedCode && (scannedType === "serial" || scannedType === "mac" || scannedType === "asset_tag")));
   const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial" | "asset_tag">(
     scannedType === "mac" || scannedType === "asset_tag" ? scannedType : "serial");
   const [serialScannerOpen, setSerialScannerOpen] = useState(false);
@@ -501,24 +503,21 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             return false;
           }
 
-          if (!isEditMode) {
-            return true;
-          }
-
           const trackingMode = String(model.tracking_mode ?? "")
             .trim()
             .toLocaleLowerCase();
+          if (!isEditMode) return !scannedDevice || trackingMode !== "quantity";
 
           return editRecordType === "stock"
             ? trackingMode === "quantity" || trackingMode === "hybrid"
             : trackingMode === "serialized" || trackingMode === "hybrid";
         })
         .sort(compareNames),
-    [categoryId, editEntry, editRecordType, formData, isEditMode],
+    [categoryId, editEntry, editRecordType, formData, isEditMode, scannedDevice],
   );
 
   // Nach einem Kategorienwechsel ein verfügbares Modell auswählen und alte Eingaben verwerfen.
-  const chooseScannedModel = !sourceKey && Boolean(scannedEanCode || scannedUpcCode);
+  const chooseScannedModel = !sourceKey && Boolean(scannedDevice || scannedEanCode || scannedUpcCode);
   const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
     ? selectedModelId
     : chooseScannedModel ? "" : idText(existingModels[0]?.id);
@@ -527,8 +526,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     setCodesModelId(availableModelId);
     const model = rowById(formData.product_models, availableModelId);
     const useModelCodes = editRecordType === "stock" || model?.tracking_mode === "quantity";
-    setQrCode(String((useModelCodes ? model?.qr_code : "") || scannedQrCode
-      || (model?.tracking_mode === "quantity" && !scannedEan && scannedType !== "upc" && scannedType !== "asset_tag" ? scannedCode : "")));
+    setQrCode(String((useModelCodes ? model?.qr_code : "") || scannedQrCode));
     setEan(scannedEanCode);
     setUpc(scannedUpcCode);
   }
@@ -851,7 +849,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     if (scannedModelId !== undefined && (modelMode !== "existing" || !sameId(selectedModel?.id, scannedModelId))) {
       throw new Error("Bitte das Produktmodell verwenden, das zu den gescannten Codes gehört.");
     }
-    if (currentEntryType === "stock" && (scan?.serial || scan?.mac || scan?.asset_tag || (scannedCode && scannedType === "asset_tag"))) {
+    if (currentEntryType === "stock" && scannedDevice) {
       throw new Error("Die gescannte Gerätekennung benötigt einen Einzelartikel.");
     }
     if (scannedEanCode && modelEan && scannedEanCode !== modelEan) {
@@ -1203,7 +1201,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     }}
                   >
                     {existingModels.length === 0 && (
-                      <option value="">Kein aktives Produktmodell vorhanden</option>
+                      <option value="">{scannedDevice ? "Kein aktives Modell für Einzelartikel vorhanden" : "Kein aktives Produktmodell vorhanden"}</option>
                     )}
                     {chooseScannedModel && existingModels.length > 0 && <option value="">Produktmodell auswählen</option>}
                     {existingModels.map((model) => {
@@ -1234,6 +1232,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                           {TRACKING_LABELS[currentTrackingMode] ?? currentTrackingMode}
                         </div>
                       </>
+                    ) : existingModels.length > 0 ? (
+                      <span>Wähle ein Produktmodell für den gescannten Artikel.</span>
                     ) : (
                       <span>
                         Für diese Artikelart ist noch kein aktives Produktmodell vorhanden. Wähle
@@ -1308,7 +1308,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                       }}
                     >
                       <option value="serialized">Einzelartikel</option>
-                      <option value="quantity">Mengenbestand</option>
+                      <option value="quantity" disabled={scannedDevice}>Mengenbestand</option>
                     </select>
                   </div>
                 </>
@@ -1404,7 +1404,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     }}
                   >
                     <option value="asset">Einzelnes Asset</option>
-                    <option value="stock">Mengenbestand</option>
+                    <option value="stock" disabled={scannedDevice}>Mengenbestand</option>
                   </select>
                 </div>
               </fieldset>

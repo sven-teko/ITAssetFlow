@@ -22,6 +22,7 @@ const run = (async () => {
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     let lastEdit = null;
     let knownRetail = 'ean';
+    let twoStockLocations = false;
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
       default_visible_columns: ['asset_tag', 'product_model_name', 'status', 'site_name'],
@@ -74,6 +75,14 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
+        if (code === 'DECT-6-SN' || code === 'OTHER-SERIAL') {
+          const isDect = code === 'DECT-6-SN';
+          const key = isDect ? 'asset:6' : 'asset:1';
+          return json({code, code_type:'serial', locations:[location], direct_asset_keys:[key], matches:[{
+            key, record_type:'asset', product_model_id:isDect ? 105 : 100, product_model_name:isDect ? 'Test DECT' : 'TestBook',
+            asset_tag:isDect ? 'DECT-6' : 'PC-001', serial_number:code, ...location, storage_location_id:11, condition:'used', quantity:1,
+          }]});
+        }
         if (code === '6938818307575' || code === '841885106377') {
           const known = code === (knownRetail === 'ean' ? '6938818307575' : '841885106377');
           return json({
@@ -86,6 +95,12 @@ const run = (async () => {
         }
         const matches = (code === 'QR-CABLE' || code === '4006381333931' || code === '87954252804') ? [{ key: 'stock:101:11:new', record_type: 'stock', product_model_id: 101, product_model_name: 'USB-C Kabel', ...location, storage_location_id: 11, condition: 'new', quantity: stock }]
           : (code === 'PC-001' || code === '96385074') ? [{ key: 'asset:1', record_type: 'asset', id: 1, asset_tag: 'PC-001', product_model_id: 100, product_model_name: 'TestBook', ...location, storage_location_id: 11, condition: 'used', quantity: 1 }] : [];
+        if (twoStockLocations && code === '4006381333931') {
+          const second = {...location,id:12,site_name:'Zürich',storage_location_name:'Lager Zürich'};
+          return json({code,code_type:'ean',locations:[location,second],matches:[matches[0],{
+            ...matches[0],...second,key:'stock:101:12:new',storage_location_id:12,quantity:20,
+          }]});
+        }
         return json({ code, matches: code === '96385074' ? [...matches, {...matches[0], key:'asset:2', id:2, asset_tag:'PC-002'}] : matches, locations: [location] });
       }
       if (endpoint === '/api/scanner/stock') {
@@ -237,11 +252,17 @@ const run = (async () => {
       await closeQr();
     }
     await openQr();
+    data.product_models.push({id:104,name:'Akkus',category_id:1,manufacturer_id:1,is_active:true,tracking_mode:'quantity',specifications:{}});
     await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/CODE128-NEW.svg'));
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.match(await page.locator('.asset-form-qr-notice').textContent(),/Code 128: PART-128-NEW/);
     assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'PART-128-NEW');
     assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'');
+    const row = label => page.locator('.asset-form-row').filter({ has: page.locator('label').filter({ hasText: label }) });
+    const productModel = row(/^Produktmodell \*:/).locator('select');
+    assert.equal(await productModel.inputValue(),'');
+    assert.equal(await productModel.locator('option[value="104"]').count(),0);
+    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'');
     await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
     assert.ok(wasmRequests.length > 0);
     assert.ok(wasmRequests.every(url=>url.startsWith(process.env.UI_BASE_URL || 'http://127.0.0.1:5173')),'WASM muss vom Anwendungsserver kommen');
@@ -250,13 +271,16 @@ const run = (async () => {
     await openQr(); await lookup('QR-NEU-42');
     await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
     assert.equal(await page.locator('.asset-form-qr-notice').textContent().then(text => text.includes('QR-NEU-42')), true);
-    const row = label => page.locator('.asset-form-row').filter({ has: page.locator('label').filter({ hasText: label }) });
     assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(), 'QR-NEU-42');
     assert.equal(await row(/^Produkterkennung \*:/).locator('input').getAttribute('readonly'), null);
     await row(/^Standort \*:/).locator('select').selectOption('1');
     await row(/^Abteilung \*:/).locator('select').selectOption('10');
     await row(/^Lagerort \*:/).locator('select').selectOption('11');
     await page.getByLabel('Kaufdatum *:', { exact: true }).fill('2026-10-22');
+    await page.getByRole('button', { name: /speichern/i }).click();
+    await page.getByRole('alert').filter({hasText:'Produktmodell'}).waitFor();
+    assert.equal(lastAsset,null);
+    await productModel.selectOption('100');
     await page.getByRole('button', { name: /speichern/i }).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.equal(lastAsset.asset.serial_number, 'QR-NEU-42');
@@ -308,6 +332,30 @@ const run = (async () => {
     assert.equal(stock,2);
     await closeQr();
     console.log('PASS: Verbindungsabbruch und ungültige Antwort nach bereits gespeicherter Buchung; Wiederholung ohne Doppelbuchung');
+
+    twoStockLocations = true;
+    await openQr(); await lookup('4006381333931');
+    const stockMatches = page.getByLabel('Gefundenen Artikel auswählen',{exact:true});
+    await stockMatches.selectOption('stock:101:11:new');
+    await page.getByLabel('Menge [Stück]',{exact:true}).fill('3');
+    uncertain = true;
+    await page.getByRole('button',{name:'Bestand erhöhen',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Buchungsstatus ist unklar'}).waitFor();
+    assert.ok(await stockMatches.isDisabled());
+    assert.ok(await page.getByLabel('Lagerort für Scanner-Buchung').isDisabled());
+    const originalBooking = bookings.at(-1);
+    await page.getByRole('button',{name:'Buchung erneut prüfen',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Zugang von 3 Stück gespeichert.'}).waitFor();
+    assert.deepEqual(bookings.at(-1),originalBooking);
+    assert.equal(stock,5);
+    assert.equal(await stockMatches.inputValue(),'stock:101:11:new');
+    assert.match(await page.locator('.qr-stock-balance').textContent(),/5 Stück/);
+    await stockMatches.selectOption('stock:101:12:new');
+    assert.match(await page.locator('.qr-stock-balance').textContent(),/20 Stück/);
+    await closeQr();
+    twoStockLocations = false;
+    stock = 2;
+    console.log('PASS: Bei unklarer Buchung bleibt die Auswahl gesperrt; Wiederholung bestätigt dieselben 3 Stück am ursprünglichen Lagerort.');
 
     const longSerial = '854000802011AAWH33P1602';
     const barcodeFixture = format => path.join(__dirname,'fixtures',longSerial+'-'+format+'.svg');
@@ -585,6 +633,19 @@ const run = (async () => {
     await openQr(); await lookup('EAN: 96385074; UPC: 841885106377');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'gehören zu unterschiedlichen Modellen'}).waitFor();
+    await closeQr();
+    knownRetail = 'ean';
+    await openQr(); await lookup('SN:DECT-6-SN;EAN:6938818307575');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    const modelResults = page.getByLabel('Gefundenen Artikel auswählen',{exact:true});
+    assert.equal(await modelResults.inputValue(),'asset:6');
+    assert.equal(await modelResults.locator('option:not([disabled])').count(),2);
+    assert.match(await modelResults.locator('option[value="asset:6"]').textContent(),/Gerät erkannt/);
+    await closeQr();
+    await openQr(); await lookup('SN:OTHER-SERIAL;EAN:6938818307575');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'gehört zu einem anderen Produktmodell'}).waitFor();
+    assert.equal(await modelResults.count(),0);
     await closeQr();
     await openQr();
     await lookup('SN:DECT-NEW;EAN:5901234123457;UPC:012345678905;MAC ID:00AbC-123;MAC-Adresse:AA-BB-CC-11-22-33');

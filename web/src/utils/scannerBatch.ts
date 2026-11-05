@@ -45,7 +45,7 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
 }> {
   const fetchRoles = (roles: ScanRole[]) => Promise.all(roles.flatMap(role => draft[role]
     ? [lookupQr(draft[role], signal, role).then(result => ({ role, result }))] : []));
-  const retail = await fetchRoles(["ean", "upc"]);
+  const [retail, pairs] = await Promise.all([fetchRoles(["ean", "upc"]), fetchRoles(["asset_tag", "serial", "mac", "qr"])]);
   let modelIds: Set<number> | undefined;
   for (const { result } of retail) {
     const ids = new Set((result.models ?? []).map(model => model.id));
@@ -64,6 +64,26 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
     for (const {result} of retail) {
       for (const row of result.matches) if (matchedIds.has(row.product_model_id)) rows.set(row.key, row);
     }
+    let matchedDeviceKeys: Set<string> | undefined;
+    const devices = new Map<string, QrMatch>();
+    for (const {role, result} of pairs) {
+      const directKeys = new Set(result.direct_asset_keys ?? []);
+      const exact = result.matches.filter(row => row.record_type === "asset" && directKeys.has(row.key) && (
+        role === "serial" ? row.serial_number === draft.serial
+          : role === "mac" ? !!row.mac_address && normalizeMac(row.mac_address) === draft.mac
+          : role === "asset_tag" ? row.asset_tag === draft.asset_tag
+          : row.qr_code === draft.qr || row.asset_tag === draft.qr
+      ));
+      if (!exact.length) continue;
+      const compatible = exact.filter(row => matchedIds.has(row.product_model_id));
+      if (!compatible.length) throw new Error(`Die Kennung «${scanLabels[role]}» gehört zu einem anderen Produktmodell als die gescannte EAN oder UPC.`);
+      const keys = new Set(compatible.map(row => row.key));
+      matchedDeviceKeys = matchedDeviceKeys ? intersect(matchedDeviceKeys, keys) : keys;
+      for (const row of compatible) devices.set(row.key, row);
+    }
+    if (matchedDeviceKeys?.size === 0) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät.");
+    const deviceMatchKeys = [...(matchedDeviceKeys ?? [])];
+    for (const key of deviceMatchKeys) if (!rows.has(key)) rows.set(key, devices.get(key)!);
     // A retail code identifies a model, so even an unregistered SN must not
     // hide its other devices or open the create form instead.
     const matches = [...rows.values()];
@@ -71,12 +91,12 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
       throw new Error("Mehrere Produktmodelle passen. Bitte die Produktcodes einzeln prüfen.");
     }
     return {
-      lookup: { ...usable.result, matches, preferred_key: matches.length === 1 ? matches[0].key : null },
+      lookup: { ...usable.result, matches, device_match_keys: deviceMatchKeys,
+        preferred_key: deviceMatchKeys.length === 1 ? deviceMatchKeys[0] : matches.length === 1 ? matches[0].key : null },
       draft: { ...draft, modelId }, role: usable.role,
     };
   }
 
-  const pairs = await fetchRoles(["asset_tag", "serial", "mac", "qr"]);
   const primary = pairs[0] ?? retail[0];
   let deviceKeys: Set<string> | undefined;
   const devices = new Map<string, QrMatch>();

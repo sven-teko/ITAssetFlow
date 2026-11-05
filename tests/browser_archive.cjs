@@ -81,6 +81,7 @@ const run=(async()=>{
   assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).count(),0);
   await page.getByLabel('Barcode enthält').selectOption('mac');
   const row=label=>page.locator('.asset-form-row').filter({has:page.locator('label').filter({hasText:label})});
+  await row(/^Produktmodell \*:/).locator('select').selectOption('100');
   await row(/^Standort \*:/).locator('select').selectOption('1');
   await row(/^Abteilung \*:/).locator('select').selectOption('10');
   await row(/^Lagerort \*:/).locator('select').selectOption('11');

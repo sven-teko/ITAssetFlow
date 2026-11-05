@@ -53,6 +53,23 @@ class ScannerTests(unittest.TestCase):
         db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True, "ean": "96385074"})
         self.assertEqual(QrService(db).lookup("96385074", "ean")["matches"][0]["key"], "asset:1")
 
+    def test_model_lookup_batches_locations_and_selects_latest_active_row(self):
+        db = Database()
+        db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True, "ean": "96385074"})
+        db.rows["assets"] = [dict(db.rows["assets"][0], id=i, asset_tag=f"PC-{i:03}") for i in range(1, 101)]
+        db.rows["asset_locations"].extend([
+            {"id": 2, "asset_id": 1, "storage_location_id": 4, "valid_from": "2026-10-02", "valid_to": None},
+            {"id": 3, "asset_id": 1, "storage_location_id": 5, "valid_from": "2026-10-02", "valid_to": None},
+            {"id": 4, "asset_id": 1, "storage_location_id": 6, "valid_from": "2026-11-01", "valid_to": "2026-11-02"},
+        ])
+        with patch.object(db, "table", wraps=db.table) as table:
+            result = QrService(db).lookup("96385074", "ean")
+        self.assertEqual(len(result["matches"]), 100)
+        self.assertEqual(sum(call.args == ("asset_locations",) for call in table.call_args_list), 1)
+        by_id = {row["id"]: row for row in result["matches"]}
+        self.assertEqual(by_id[1]["storage_location_id"], 5)
+        self.assertIsNone(by_id[100]["storage_location_id"])
+
     def test_legacy_device_ean_finds_other_devices_of_its_model(self):
         db = Database()
         db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True})
