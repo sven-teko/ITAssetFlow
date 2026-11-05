@@ -1,7 +1,7 @@
 """Einheitliche Datumsprüfung für Web- und Desktop-Eingaben."""
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 
@@ -33,12 +33,15 @@ def normalize_date(value: Any, label: str, *, required: bool = False) -> str | N
 def normalize_inventory_dates(payload: dict[str, Any]) -> dict[str, Any]:
     """Prüft vor dem ersten Schreibzugriff; verändert das Original nicht."""
     result = dict(payload)
+    today = datetime.now(UTC).date().isoformat()
     for key in ("asset", "stock"):
         values = payload.get(key)
         if not isinstance(values, dict):
             continue
         values = dict(values)
         purchase = normalize_date(values.get("purchase_date"), "Kaufdatum", required=True)
+        if purchase and purchase > today:
+            raise ValueError("Das Kaufdatum darf nicht in der Zukunft liegen.")
         values["purchase_date"] = purchase
         if key == "asset":
             warranty = normalize_date(values.get("warranty_until"), "Garantie bis")

@@ -31,6 +31,15 @@ export type QrLocation = {
 export type QrLookup = { code: string; code_type?: CodeType; preferred_key?: string | null; matches: QrMatch[]; locations: QrLocation[];
   models?: { id: number; name: string; tracking_mode: string }[]; direct_asset_keys?: string[]; device_match_keys?: string[] };
 
+export type QrDeviceDetails = {
+  serial_number: string | null;
+  mac_address: string | null;
+  condition: string | null;
+  status: string | null;
+  has_power_supply: boolean | null;
+  image_id: string | null;
+};
+
 export class QrRequestError extends Error {
   status: number;
   available?: number;
@@ -56,6 +65,16 @@ export async function lookupQr(code: string, signal?: AbortSignal, codeType: Cod
   const data = await request(`lookup?code=${encodeURIComponent(code)}&code_type=${codeType}${deviceOnly ? "&device_only=true" : ""}`, { signal }) as QrLookup | null;
   if (!data || !Array.isArray(data.matches) || !Array.isArray(data.locations)) {
     throw new QrRequestError("Die Antwort zum Code ist unvollständig.", 500);
+  }
+  return data;
+}
+
+export async function loadQrDeviceDetails(key: string, signal: AbortSignal): Promise<QrDeviceDetails> {
+  const match = /^asset:(\d+)$/.exec(key);
+  if (!match) throw new Error("Ungültige Gerätekennung.");
+  const data = await request(`assets/${match[1]}`, { signal, cache: "no-store" }) as QrDeviceDetails | null;
+  if (!data || typeof data !== "object" || !("has_power_supply" in data)) {
+    throw new Error("Die Gerätedetails konnten nicht geladen werden.");
   }
   return data;
 }

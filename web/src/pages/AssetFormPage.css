@@ -202,6 +202,9 @@ select.asset-form-control {
   white-space: pre-line;
 }
 
+.asset-form-field-feedback { display: grid; gap: 5px; min-width: 0; }
+.asset-form-field-feedback small { color: #991b1b; overflow-wrap: anywhere; }
+
 .asset-form-actions {
   display: flex;
   align-items: center;

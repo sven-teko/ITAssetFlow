@@ -105,6 +105,11 @@ class DateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Kaufdatum fehlt"):
             normalize_inventory_dates({"asset": {"warranty_until": "2028-01-01"}})
 
+    def test_purchase_may_not_be_in_the_future(self):
+        for kind in ("asset", "stock"):
+            with self.subTest(kind=kind), self.assertRaisesRegex(ValueError, "Kaufdatum.*Zukunft"):
+                normalize_inventory_dates({kind: {"purchase_date": "9999-01-01"}})
+
     def test_warranty_cannot_precede_purchase(self):
         with self.assertRaisesRegex(ValueError, "vor dem Kaufdatum"):
             normalize_inventory_dates({"asset": {"purchase_date": "2026-10-21", "warranty_until": "2026-10-20"}})

@@ -1,10 +1,11 @@
 export function parseCHF(value: string): number {
-  const normalized = value.trim().replace(/^CHF\s*/i, "")
-    .replace(/[’'\s]/g, "").replace(/[.,]-$/, "").replace(",", ".");
-  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized) || !Number.isSafeInteger(Math.round(Number(normalized) * 100))) {
-    throw new Error("Bitte einen gültigen CHF-Betrag ab 0 mit maximal zwei Nachkommastellen eingeben.");
+  const text = value.trim().replace(/^CHF\s*/i, "").replace(/’/g, "'").replace(/[\u00a0\u202f]/g, " ");
+  const valid = /^(?:\d+|\d{1,3}([' ])\d{3}(?:\1\d{3})*)(?:[.,](?:\d{1,2}|-))?$/.test(text);
+  const amount = Number(text.replace(/[' ]/g, "").replace(/[.,]-$/, "").replace(",", "."));
+  if (!valid || !Number.isSafeInteger(Math.round(amount * 100))) {
+    throw new Error("Bitte einen CHF-Betrag wie 12.50 oder 1’250.00 eingeben.");
   }
-  return Number(normalized);
+  return amount;
 }
 
 export function formatCHF(value: number): string {

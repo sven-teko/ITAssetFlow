@@ -76,6 +76,11 @@
 .qr-result h3 { font-size: 19px; line-height: 1.4; overflow-wrap: anywhere; }
 .qr-result-heading > span { color: #66717c; font-size: 12px; }
 .qr-asset-identifier { font-weight: 600; overflow-wrap: anywhere; }
+.qr-device-details { background: #f8fafc; border: 1px solid #dce3eb; border-radius: 7px; padding: 12px 15px; }
+.qr-device-details dl { margin: 0; display: grid; gap: 8px; }
+.qr-device-details dl > div { display: grid; grid-template-columns: minmax(105px, 1fr) minmax(0, 2fr); gap: 10px; }
+.qr-device-details dt { color: #536579; }
+.qr-device-details dd { margin: 0; overflow-wrap: anywhere; }
 .qr-stock-balance { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 15px 16px; background: #edf4fb; border: 1px solid #d8e6f5; border-radius: 7px; }
 .qr-stock-balance > span { color: #526b87; font-size: 13px; }
 .qr-stock-balance strong { font-size: 22px; color: #205c9d; }

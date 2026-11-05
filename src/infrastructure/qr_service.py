@@ -250,6 +250,24 @@ class QrService:
                 "models": [{key: model.get(key) for key in ("id", "name", "tracking_mode")}
                            for model in matched_models if model.get("is_active") is not False]}
 
+    def asset_details(self, asset_id: int) -> dict[str, Any]:
+        rows = self._data(select_scanner_compatible(
+            lambda columns: self.client.table("assets").select(columns).eq("id", asset_id)
+            .is_("archived_at", "null").limit(1),
+            "assets", "id,serial_number,mac_address,condition,status,specifications",
+        ))
+        if not rows:
+            raise ValueError("Dieses Gerät wurde nicht gefunden oder ist nicht freigegeben.")
+        asset = rows[0]
+        specifications = asset.get("specifications")
+        power = specifications.get("has_power_supply") if isinstance(specifications, dict) else None
+        images = self._data(self.client.table("inventory_images").select("id").eq("item_key", f"asset:{asset_id}")
+                            .eq("is_current", True).limit(1).execute())
+        return {key: asset.get(key) for key in ("serial_number", "mac_address", "condition", "status")} | {
+            "has_power_supply": power if isinstance(power, bool) else None,
+            "image_id": images[0]["id"] if images else None,
+        }
+
     def save_model_codes(self, model_id: Any, values: dict[str, Any], *, only_empty: bool = False) -> None:
         changes = code_values(values)
         if not changes:

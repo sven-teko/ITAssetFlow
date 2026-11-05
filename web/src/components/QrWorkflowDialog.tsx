@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adjustQrStock, lookupQr, QrRequestError, type QrLookup, type QrMatch } from "../api/qrApi";
 import QrScanner from "./QrScanner";
+import QrDeviceDetails from "./QrDeviceDetails";
 import StockWithdrawalDialog from "./StockWithdrawalDialog";
 import { newBookingId, type WithdrawalSubmission } from "../api/stockBooking";
 import "./QrWorkflowDialog.css";
@@ -34,6 +35,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   const [lookup, setLookup] = useState<QrLookup | null>(null);
   const [createDraft, setCreateDraft] = useState<ScanDraft | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
+  const [detailsKey, setDetailsKey] = useState("");
   const [locationId, setLocationId] = useState("");
   const [condition, setCondition] = useState("used");
   const [quantity, setQuantity] = useState("1");
@@ -60,6 +62,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   function selectMatch(row: QrMatch) {
     if (busyRef.current || pendingAdd.current) return;
     setSelectedKey(row.key);
+    setDetailsKey("");
     setLocationId(String(row.storage_location_id ?? lookup?.locations[0]?.id ?? ""));
     setCondition(row.condition || "used");
     setQuantity("1");
@@ -67,6 +70,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   }
 
   function applyLookup(result: QrLookup, type: CodeType, format: string, preserve = false, draft?: ScanDraft) {
+    setDetailsKey("");
     const candidate = draft ?? (preserve ? createDraft : null);
     const model = result.models?.find(row => row.id === candidate?.modelId);
     const createFromModel = candidate?.asset_tag && candidate.ean && candidate.modelId !== undefined &&
@@ -359,9 +363,17 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
               <p className="qr-asset-identifier">{selected.asset_tag}</p>
               <p className="qr-hint">{[selected.site_name, selected.department_name, selected.storage_location_name].filter(Boolean).join(" · ")}</p>
               <div className="qr-book-buttons">
-                <button type="button" className="primary-button" disabled={!canEdit || saving} onClick={() => onEdit(selected.key)}>Gerät bearbeiten</button>
-                <button type="button" className="qr-remove" disabled={!canEdit || saving} onClick={() => void removeAsset()}>Gerät löschen</button>
+                <button type="button" className="primary-button" disabled={loading || saving}
+                  aria-expanded={detailsKey === selected.key}
+                  onClick={() => setDetailsKey(detailsKey === selected.key ? "" : selected.key)}>
+                  {detailsKey === selected.key ? "Details ausblenden" : "Details anzeigen"}
+                </button>
+                {canEdit && <>
+                  <button type="button" disabled={loading || saving} onClick={() => onEdit(selected.key)}>Gerät bearbeiten</button>
+                  <button type="button" className="qr-remove" disabled={loading || saving} onClick={() => void removeAsset()}>Gerät löschen</button>
+                </>}
               </div>
+              {detailsKey === selected.key && <QrDeviceDetails key={selected.key} assetKey={selected.key} />}
             </> : <>
               <div className="qr-stock-balance"><span>Aktueller Bestand</span><strong>{needsRefresh ? "Bitte prüfen" : `${balance} Stück`}</strong></div>
               <div className="qr-result-fields">

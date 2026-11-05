@@ -126,11 +126,21 @@ export async function resolveScannerCandidates(codes: ScannedCode[], signal: Abo
       ? [] : [{ role: type, text: text.trim(), format, labelled }]);
   if (!probes.length) return;
   const result = await resolveProbes(probes, signal);
-  const tags = [...new Set(probes.filter(probe => probe.role === "asset_tag" && probe.text.length <= 50).map(probe => probe.text))];
-  const eans = [...new Set(probes.filter(probe => probe.role === "ean").map(probe => probe.text))];
-  const draft: ScanDraft | undefined = tags.length === 1 && eans.length === 1
-    ? { asset_tag: tags[0], ean: eans[0], modelId: result.modelId,
-        newModel: result.modelId === undefined && !result.lookup.matches.length }
-    : undefined;
-  return { ...result, draft };
+  const assignments = proposeAssignments(codes);
+  // Leave unclear codes visible for review instead of discarding them on the way to the form.
+  const needsReview = codes.some((code, index) => assignments[index] === "ignore"
+    && (code.type === "qr" || (code.type === "serial"
+      && !codes.some((other, otherIndex) => assignments[otherIndex] === "serial" && other.text.trim() === code.text.trim())))
+    && !/^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(code.text));
+  if (needsReview) return { ...result, draft: undefined };
+  try {
+    const draft = assignedCodes(codes, assignments);
+    if (draft.asset_tag && draft.ean) {
+      return { ...result, draft: { ...draft, modelId: result.modelId,
+        newModel: result.modelId === undefined && !result.lookup.matches.length } };
+    }
+  } catch {
+    // Multiple values for the same role or a bad value need a manual choice.
+  }
+  return { ...result, draft: undefined };
 }

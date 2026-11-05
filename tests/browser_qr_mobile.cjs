@@ -21,6 +21,8 @@ const run = (async () => {
     const bookingResults=new Map();
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     let lastEdit = null;
+    let detailRequests = 0;
+    const rawSpecs = {has_power_supply:true, 'Legacy Field':{array:[1, true]}, old_note:'behalten'};
     let knownRetail = 'ean';
     let retailWithoutAssets = false;
     const deviceOnlyLookups = [];
@@ -60,7 +62,9 @@ const run = (async () => {
       if (endpoint === '/api/inventory/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': test\n\n' });
       if (endpoint === '/api/inventory/form-data') return json(data);
       if (endpoint === '/api/inventory/edit-form-data') return json({...data, edit_entry:{id:1,_record_type:'asset',
-        product_model_id:100,asset_tag:'PC-001',serial_number:'OLD-SN',mac_address:'AA:BB:CC:11:22:33',specifications:{has_power_supply:true},
+        product_model_id:100,asset_tag:'PC-001',serial_number:'OLD-SN',mac_address:'AA:BB:CC:11:22:33',
+        specifications:{has_power_supply:true,'legacy field':rawSpecs['Legacy Field'],old_note:'behalten'},
+        raw_specifications:rawSpecs,specification_key_aliases:{'Legacy Field':'legacy field'},
         site_id:1,department_id:10,storage_location_id:11,status:'available',condition:'used',purchase_date:'2026-11-04'}});
       if (endpoint === '/api/settings') {
         if (req.method() === 'PUT') {
@@ -74,6 +78,11 @@ const run = (async () => {
         if (req.method() === 'POST') { lastAsset = req.postDataJSON(); return json({ id: 3, entry_type: 'asset' }); }
         if (req.method() === 'PUT') { lastEdit = req.postDataJSON(); return json({ id: 1, entry_type: 'asset' }); }
         return json(inventory());
+      }
+      if (endpoint === '/api/scanner/assets/6') {
+        detailRequests++;
+        return json({serial_number:'DECT-6-SN',mac_address:'AA:BB:CC:11:22:33',condition:'used',
+          status:'in_use',has_power_supply:false,image_id:null});
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
@@ -481,11 +490,26 @@ const run = (async () => {
     assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
     assert.equal(lookups.length,lookupsBeforeSerial);
     assert.ok(await page.evaluate(()=>window.testStreams.every(s=>s.getTracks().every(t=>t.readyState==='ended'))));
+    await page.getByLabel('Hat Netzteil?',{exact:true}).selectOption('false');
+    const oldEdit = lastEdit;
+    const dateInput = page.getByLabel('Kaufdatum *:',{exact:true});
+    const priceInput = page.getByLabel('Neupreis:',{exact:true});
+    await dateInput.fill('2099-01-01');
+    await page.getByText('Das Kaufdatum darf nicht in der Zukunft liegen.',{exact:true}).waitFor();
+    await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+    assert.equal(lastEdit,oldEdit);
+    await dateInput.fill('2026-10-22');
+    await priceInput.fill('12 50');
+    await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
+    await page.getByText('Bitte einen CHF-Betrag wie 12.50 oder 1’250.00 eingeben.',{exact:true}).waitFor();
+    assert.equal(lastEdit,oldEdit);
+    await priceInput.fill('1’250,50');
     await page.getByRole('button',{name:'Änderungen speichern',exact:true}).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.deepEqual([lastEdit.asset.serial_number,lastEdit.asset.asset_tag,lastEdit.asset.mac_address],
       [longSerial,'PC-001','AA:BB:CC:11:22:33']);
-    assert.equal(lastEdit.asset.specifications.has_power_supply,true);
+    assert.deepEqual(lastEdit.asset.specifications,{...rawSpecs,has_power_supply:false});
+    assert.equal(lastEdit.asset.new_price,1250.5);
     await page.evaluate(() => { window.testCameraAlternate = ''; window.testCameraShowAlternate = false; });
     console.log('PASS: Seriennummer im Bearbeitungsformular mit Kamera übernommen; EAN abgewiesen, andere Felder unverändert, Foto-Button blau');
 
@@ -711,6 +735,26 @@ const run = (async () => {
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.equal(lastAsset.asset.specifications.has_power_supply,false);
     assert.equal(lastAsset.model.id,105);
+    const testModel = data.product_models.find(model => model.id === 105);
+    const modelUpc = testModel.upc;
+    delete testModel.upc;
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/QR-MULTI.png'));
+    await createFromModel.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'00AABBCC1122');
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'6938818307575');
+    assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'DECT-NEU');
+    assert.equal(await page.getByLabel('UPC-A:',{exact:true}).inputValue(),'841885106377');
+    await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
+    testModel.upc = modelUpc;
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/QR-MULTI-AMBIGUOUS.png'));
+    await page.getByLabel('Zuordnung für DECT-ZWEIT',{exact:true}).waitFor();
+    assert.equal(await createFromModel.count(),0);
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'Bitte nur eine Kennung für «Seriennummer» auswählen.'}).waitFor();
+    await closeQr();
     retailWithoutAssets = true;
     await openQr(); await lookup('MAC ID:00AABBCC1133;EAN:6938818307575');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
@@ -874,6 +918,16 @@ const run = (async () => {
 
     role = 'viewer'; await page.reload();
     await page.locator('.inventory-table tbody tr').first().waitFor();
+    await openQr(); await lookup('DECT-6-SN');
+    await page.locator('.qr-asset-identifier').filter({hasText:/^DECT-6$/}).waitFor();
+    assert.equal(detailRequests,0);
+    await page.getByRole('button',{name:'Details anzeigen',exact:true}).click();
+    const details = page.locator('.qr-device-details');
+    await details.getByText('DECT-6-SN',{exact:true}).waitFor();
+    assert.deepEqual(await details.locator('dd').allTextContents(),['DECT-6-SN','AA:BB:CC:11:22:33','Gebraucht','Im Einsatz','Nein']);
+    assert.equal(detailRequests,1);
+    assert.equal(await page.getByRole('button',{name:'Gerät bearbeiten',exact:true}).count(),0);
+    await closeQr();
     await openQr(); await lookup('QR-CABLE');
     await page.getByRole('heading', { name: 'USB-C Kabel', exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Bestand erhöhen', exact: true }).isDisabled(), true);

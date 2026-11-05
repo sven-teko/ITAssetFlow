@@ -57,13 +57,14 @@ from inventory import (
     get_category_key,
     get_condition_key,
     get_inventory_group,
+    normalize_specification_key,
     normalize_specifications,
 )
 
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.15",
+    version="1.6.16",
 )
 
 
@@ -479,13 +480,14 @@ def _normalize_form_data(
             edit_entry
         )
 
-        normalized_entry["specifications"] = (
-            normalize_specifications(
-                normalized_entry.get(
-                    "specifications"
-                )
-            )
-        )
+        raw_specs = normalized_entry.get("specifications")
+        normalized_entry["specifications"] = normalize_specifications(raw_specs)
+        if isinstance(raw_specs, dict) and raw_specs.keys() != normalized_entry["specifications"].keys():
+            normalized_entry["raw_specifications"] = raw_specs
+            normalized_entry["specification_key_aliases"] = {
+                key: normalized for key in raw_specs
+                if (normalized := normalize_specification_key(key)) != key
+            }
 
         result["edit_entry"] = (
             normalized_entry
@@ -1235,6 +1237,16 @@ def lookup_qr(code: str, code_type: str = "auto", device_only: bool = False, web
         return QrService(web_session.client, actor_email=web_session.email).lookup(code, code_type, device_only=device_only)
     except Exception as error:
         raise _repository_http_exception(error) from error
+
+
+@app.get("/api/scanner/assets/{asset_id}")
+def scanner_asset_details(asset_id: int, response: Response,
+                          web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return QrService(web_session.client).asset_details(asset_id)
+    except Exception as error:
+        raise _repository_http_exception(error, value_error_status=404) from error
 
 
 @app.post("/api/scanner/stock")

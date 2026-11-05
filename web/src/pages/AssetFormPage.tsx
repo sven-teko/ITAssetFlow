@@ -5,7 +5,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import type { ScanDraft } from "../utils/scannerCodes";
 import AssetFormLayout from "../components/AssetFormLayout";
 import { formatCHF, parseCHF } from "../utils/price";
-import { inventoryDateErrors, isValidISODate } from "../utils/dateValidation";
+import { inventoryDateErrors, inventoryTodayISO, isValidISODate } from "../utils/dateValidation";
 
 
 type GenericRow = Record<string, unknown>;
@@ -171,13 +171,6 @@ function displaySpecValue(value: unknown): string {
   return String(value);
 }
 
-function todayISO(): string {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-
-  return local.toISOString().slice(0, 10);
-}
-
 function dateInputValue(value: unknown): string {
   const text = String(value ?? "").trim();
 
@@ -188,25 +181,26 @@ function dateInputValue(value: unknown): string {
   return "";
 }
 
+function specificationObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
 function editableSpecifications(value: unknown): Record<string, SpecificationValue> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return {};
-  }
+  const result: Array<[string, SpecificationValue]> = [];
 
-  const result: Record<string, SpecificationValue> = {};
-
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, raw] of Object.entries(specificationObject(value))) {
     if (
       typeof raw === "string" ||
       typeof raw === "number" ||
       typeof raw === "boolean" ||
       raw === null
     ) {
-      result[key.trim().toLocaleLowerCase()] = raw as SpecificationValue;
+      result.push([key.trim().toLocaleLowerCase(), raw]);
     }
   }
 
-  return result;
+  return Object.fromEntries(result);
 }
 
 import { barcodeFormats, validateCodes, normalizeMac, identifierType, type CodeType } from "../utils/scannerCodes";
@@ -264,8 +258,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [hybridEntryType, setHybridEntryType] = useState<EntryType>("asset");
 
   const [status, setStatus] = useState("available");
-  const [purchaseDate, setPurchaseDate] = useState(todayISO());
+  const [purchaseDate, setPurchaseDate] = useState(inventoryTodayISO);
   const [newPrice, setNewPrice] = useState("");
+  const [priceError, setPriceError] = useState("");
 
   const scannedMac = scan?.mac ?? (scannedType === "mac" ? normalizeMac(scannedCode) : null);
   const scannedSerial = scan?.serial ?? (scannedType === "serial" ? scannedCode : "");
@@ -294,6 +289,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [employeeId, setEmployeeId] = useState("");
 
   const [specValues, setSpecValues] = useState<Record<string, SpecificationValue>>({});
+  const changedSpecs = useRef(new Set<string>());
   const errorMessageRef = useRef<HTMLDivElement>(null);
   const submissionInProgress = useRef(false);
 
@@ -313,6 +309,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       setErrorMessage("");
       setFormData(null);
       setEditEntry(null);
+      changedSpecs.current.clear();
+      setPriceError("");
       setPendingWithdrawal(null);
       setImageChange(undefined);
 
@@ -400,7 +398,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               .trim()
               .toLocaleLowerCase(),
           );
-          if (isEditMode) setPurchaseDate(dateInputValue(currentEdit.purchase_date) || todayISO());
+          if (isEditMode) setPurchaseDate(dateInputValue(currentEdit.purchase_date) || inventoryTodayISO());
 
           const price = Number(currentEdit.new_price ?? 0);
           setNewPrice(Number.isFinite(price) ? formatCHF(price) : "");
@@ -541,7 +539,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   if (modelMode === "existing" && selectedModelId !== availableModelId) {
     setSelectedModelId(availableModelId);
-    setSpecValues({});
+    if (!isEditMode) setSpecValues({});
   }
 
   const selectedModel = useMemo(
@@ -636,7 +634,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   function handleCategoryChange(value: string): void {
     setCategoryId(value);
     setSelectedModelId("");
-    setSpecValues({});
+    if (!isEditMode) setSpecValues({});
     clearInvalid("category");
   }
 
@@ -748,6 +746,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   }
 
   function setSpecValue(key: string, value: SpecificationValue): void {
+    changedSpecs.current.add(key);
     setSpecValues((current) => ({
       ...current,
       [key]: value,
@@ -763,7 +762,20 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       return {};
     }
 
-    const result: Record<string, unknown> = scope === "asset" && hasPowerSupply !== null ? { has_power_supply: hasPowerSupply } : {};
+    const existing = scope === "asset" && isEditMode;
+    const result = existing ? { ...specificationObject(editEntry?.raw_specifications ?? editEntry?.specifications) } : {};
+    const aliases = specificationObject(editEntry?.specification_key_aliases);
+    const clearSpecification = (key: string) => {
+      delete result[key];
+      for (const [alias, canonical] of Object.entries(aliases)) {
+        if (canonical === key) delete result[alias];
+      }
+    };
+
+    if (scope === "asset" && (!existing || changedSpecs.current.has("has_power_supply"))) {
+      clearSpecification("has_power_supply");
+      if (hasPowerSupply !== null) result.has_power_supply = hasPowerSupply;
+    }
 
     for (const field of currentSpecificationFields) {
       if (specScope(field) !== scope) {
@@ -771,8 +783,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       }
 
       const key = specKey(field);
-      if (key === "has_power_supply") continue;
+      if (key === "has_power_supply" || (existing && !changedSpecs.current.has(key))) continue;
       const value = specValues[key];
+      clearSpecification(key);
 
       if (value === null || value === undefined || value === "") {
         continue;
@@ -866,7 +879,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     const upcToLink = modelUpc ? "" : upc.trim();
     validateCodes(qrCode, eanToLink, upcToLink);
     if (macAddress.trim() && !normalizeMac(macAddress)) throw new Error("Bitte eine gültige MAC-Adresse eingeben.");
-    const price = newPrice.trim() ? parseCHF(newPrice) : 0;
+    let price: number;
+    try {
+      price = newPrice.trim() ? parseCHF(newPrice) : 0;
+      setPriceError("");
+    } catch (error) {
+      setInvalidFields(new Set([...errors, "new_price"]));
+      setPriceError(error instanceof Error ? error.message : "Bitte den Neupreis prüfen.");
+      throw new Error("Bitte den Neupreis prüfen.");
+    }
     let modelPayload: Record<string, unknown>;
 
     if (modelMode === "existing") {
@@ -1139,6 +1160,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     !Array.isArray(selectedModel.specifications)
       ? (selectedModel.specifications as Record<string, unknown>)
       : {};
+  const purchaseError = purchaseDate > inventoryTodayISO() && isValidISODate(purchaseDate)
+    ? inventoryDateErrors(purchaseDate).purchase_date : "";
 
   return (
     <>
@@ -1200,7 +1223,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     disabled={saving || existingModels.length === 0}
                     onChange={(event) => {
                       setSelectedModelId(event.target.value);
-                      setSpecValues({});
+                      if (!isEditMode) setSpecValues({});
                       clearInvalid("model");
                     }}
                   >
@@ -1439,41 +1462,54 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               </div>
               <div className="asset-form-row">
                 <label htmlFor="asset-purchase-date">Kaufdatum *:</label>
-                <input
-                  id="asset-purchase-date"
-                  type="date"
-                  min="0001-01-01"
-                  max="9999-12-31"
-                  className={fieldClass("purchase_date")}
-                  value={purchaseDate}
-                  disabled={saving}
-                  onChange={(event) => {
-                    setPurchaseDate(event.target.value);
-                    clearInvalid("purchase_date");
-                  }}
-                />
+                <div className="asset-form-field-feedback">
+                  <input
+                    id="asset-purchase-date"
+                    type="date"
+                    min="0001-01-01"
+                    max={inventoryTodayISO()}
+                    className={purchaseError ? "asset-form-control input-error" : fieldClass("purchase_date")}
+                    aria-invalid={Boolean(purchaseError) || invalidFields.has("purchase_date")}
+                    aria-describedby={purchaseError ? "asset-purchase-error" : undefined}
+                    value={purchaseDate}
+                    disabled={saving}
+                    onChange={(event) => {
+                      setPurchaseDate(event.target.value);
+                      clearInvalid("purchase_date");
+                    }}
+                  />
+                  {purchaseError && <small id="asset-purchase-error" role="alert">{purchaseError}</small>}
+                </div>
               </div>
               <div className="asset-form-row">
-                <label>Neupreis:</label>
-                <input
-                  type="text"
-                  className="asset-form-control"
-                  placeholder="CHF 0.-"
-                  value={newPrice}
-                  disabled={saving}
-                  onChange={(event) => setNewPrice(event.target.value)}
-                  onBlur={() => {
-                    if (!newPrice.trim()) {
-                      return;
-                    }
-
-                    try {
-                      setNewPrice(formatCHF(parseCHF(newPrice)));
-                    } catch {
-                      // Ungültige Preise bleiben bis zur Prüfung beim Speichern sichtbar.
-                    }
-                  }}
-                />
+                <label htmlFor="asset-new-price">Neupreis:</label>
+                <div className="asset-form-field-feedback">
+                  <input
+                    id="asset-new-price"
+                    type="text"
+                    inputMode="decimal"
+                    className={priceError ? "asset-form-control input-error" : fieldClass("new_price")}
+                    aria-invalid={Boolean(priceError)}
+                    aria-describedby={priceError ? "asset-price-error" : undefined}
+                    placeholder="CHF 0.-"
+                    value={newPrice}
+                    disabled={saving}
+                    onChange={(event) => {
+                      setNewPrice(event.target.value);
+                      setPriceError("");
+                      clearInvalid("new_price");
+                    }}
+                    onBlur={() => {
+                      if (!newPrice.trim()) return;
+                      try {
+                        setNewPrice(formatCHF(parseCHF(newPrice)));
+                      } catch (error) {
+                        setPriceError(error instanceof Error ? error.message : "Bitte den Neupreis prüfen.");
+                      }
+                    }}
+                  />
+                  {priceError && <small id="asset-price-error" role="alert">{priceError}</small>}
+                </div>
               </div>
             </fieldset>
             <fieldset className="asset-form-group">
@@ -1521,7 +1557,10 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   <label htmlFor="asset-power-supply">Hat Netzteil?</label>
                   <select id="asset-power-supply" className="asset-form-control" disabled={saving}
                     value={hasPowerSupply === null ? "" : String(hasPowerSupply)}
-                    onChange={event => setHasPowerSupply(event.target.value ? event.target.value === "true" : null)}>
+                    onChange={event => {
+                      changedSpecs.current.add("has_power_supply");
+                      setHasPowerSupply(event.target.value ? event.target.value === "true" : null);
+                    }}>
                     <option value="">Nicht erfasst</option>
                     <option value="true">Ja</option>
                     <option value="false">Nein</option>

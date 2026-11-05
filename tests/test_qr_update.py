@@ -261,5 +261,27 @@ class QrTests(unittest.TestCase):
         finally: app.dependency_overrides.clear()
         self.assertEqual(self.db.writes, [])
 
+    def test_scanner_details_use_viewer_scope_and_omit_archived_assets(self):
+        from http_test_client import TestClient
+        from web_backend.app import app, get_web_session
+        self.db.rows["assets"][0]["specifications"] = {"has_power_supply": False, "private_note": "ignore"}
+        self.db.rows["assets"].append({"id": 2, "archived_at": "2026-11-05"})
+        self.db.rows["inventory_images"] = [{"id": "photo-1", "item_key": "asset:1", "is_current": True}]
+        app.dependency_overrides[get_web_session] = lambda: SimpleNamespace(client=self.db, email="viewer@example.test", role="viewer")
+        try:
+            with TestClient(app) as client:
+                response = client.get("/api/scanner/assets/1")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                self.assertEqual(response.json(), {
+                    "serial_number": "SER-1", "mac_address": None, "condition": "used", "status": "available",
+                    "has_power_supply": False, "image_id": "photo-1",
+                })
+                self.assertEqual(client.get("/api/scanner/assets/2").status_code, 404)
+                self.assertEqual(client.get("/api/scanner/assets/3").status_code, 404)
+        finally:
+            app.dependency_overrides.pop(get_web_session, None)
+        self.assertEqual(self.db.writes, [])
+
 
 if __name__ == "__main__": unittest.main()

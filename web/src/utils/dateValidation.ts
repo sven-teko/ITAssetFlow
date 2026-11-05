@@ -8,10 +8,17 @@ export function isValidISODate(value: string): boolean {
   return day <= days[month - 1];
 }
 
+// Same calendar boundary as the inventory database.
+export function inventoryTodayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function inventoryDateErrors(purchase: string, warranty = ""): Record<string, string> {
   const errors: Record<string, string> = {};
   if (!isValidISODate(purchase)) {
     errors.purchase_date = "Kaufdatum: Bitte ein gültiges Datum mit vierstelliger Jahreszahl eingeben.";
+  } else if (purchase > inventoryTodayISO()) {
+    errors.purchase_date = "Das Kaufdatum darf nicht in der Zukunft liegen.";
   }
   if (warranty && !isValidISODate(warranty)) {
     errors.warranty_until = "Garantie bis: Bitte ein gültiges Datum mit vierstelliger Jahreszahl eingeben.";
