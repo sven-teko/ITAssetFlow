@@ -255,7 +255,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const [errorMessage, setErrorMessage] = useState("");
   const [invalidFields, setInvalidFields] = useState<Set<string>>(new Set());
 
-  const [modelMode, setModelMode] = useState<ModelMode>("existing");
+  const [modelMode, setModelMode] = useState<ModelMode>(scan?.newModel ? "new" : "existing");
   const [categoryId, setCategoryId] = useState("");
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelName, setModelName] = useState("");
@@ -273,6 +273,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     scannedEan || scannedType === "upc" ? "" : scannedMac ?? scannedCode);
   const [assetTag, setAssetTag] = useState(scannedTag.length <= 50 ? scannedTag : "");
   const [serialNumber, setSerialNumber] = useState(scannedSerial);
+  const [hasPowerSupply, setHasPowerSupply] = useState<boolean | null>(null);
   const [macAddress, setMacAddress] = useState(scannedMac ?? "");
   const [showMacField, setShowMacField] = useState(false);
   const [imageChange,setImageChange]=useState<Blob | null | undefined>(undefined);
@@ -436,7 +437,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             setEmployeeId(idText(currentEdit.assigned_employee_id));
             setParentAssetId(idText(currentEdit.connected_product_id));
             setConnectedChildIds(Array.isArray(currentEdit.connected_child_ids) ? currentEdit.connected_child_ids.map(idText) : []);
-            setSpecValues(editableSpecifications(currentEdit.specifications));
+            const specifications = editableSpecifications(currentEdit.specifications);
+            setHasPowerSupply(typeof specifications.has_power_supply === "boolean" ? specifications.has_power_supply : null);
+            setSpecValues(specifications);
           } else {
             const currentQuantity = readStockQuantity(currentEdit.stock_quantity ?? currentEdit.quantity) ?? "";
             setQuantity(String(currentQuantity));
@@ -760,7 +763,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       return {};
     }
 
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> = scope === "asset" && hasPowerSupply !== null ? { has_power_supply: hasPowerSupply } : {};
 
     for (const field of currentSpecificationFields) {
       if (specScope(field) !== scope) {
@@ -768,6 +771,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
       }
 
       const key = specKey(field);
+      if (key === "has_power_supply") continue;
       const value = specValues[key];
 
       if (value === null || value === undefined || value === "") {
@@ -1323,6 +1327,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
               )}
               {currentSpecificationFields.map((field) => {
                 const key = specKey(field);
+                if (key === "has_power_supply") return null;
                 const scope = specScope(field);
 
                 if (scope === "asset" && currentEntryType !== "asset") {
@@ -1511,6 +1516,16 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     <button type="button" disabled={saving} aria-haspopup="dialog" aria-label="Seriennummer scannen"
                       onClick={() => setSerialScannerOpen(true)}>Scannen</button>
                   </div>
+                </div>
+                <div className="asset-form-row">
+                  <label htmlFor="asset-power-supply">Hat Netzteil?</label>
+                  <select id="asset-power-supply" className="asset-form-control" disabled={saving}
+                    value={hasPowerSupply === null ? "" : String(hasPowerSupply)}
+                    onChange={event => setHasPowerSupply(event.target.value ? event.target.value === "true" : null)}>
+                    <option value="">Nicht erfasst</option>
+                    <option value="true">Ja</option>
+                    <option value="false">Nein</option>
+                  </select>
                 </div>
                 <div className="asset-form-row">
                   <label htmlFor="asset-warranty-until">Garantie bis:</label>

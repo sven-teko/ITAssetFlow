@@ -63,7 +63,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.14",
+    version="1.6.15",
 )
 
 
@@ -1230,9 +1230,9 @@ def inventory_edit_form_data(
 
 @app.get("/api/scanner/lookup")
 @app.get("/api/qr/lookup")
-def lookup_qr(code: str, code_type: str = "auto", web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
+def lookup_qr(code: str, code_type: str = "auto", device_only: bool = False, web_session: WebSession = Depends(get_web_session)) -> dict[str, Any]:
     try:
-        return QrService(web_session.client, actor_email=web_session.email).lookup(code, code_type)
+        return QrService(web_session.client, actor_email=web_session.email).lookup(code, code_type, device_only=device_only)
     except Exception as error:
         raise _repository_http_exception(error) from error
 

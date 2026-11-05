@@ -22,6 +22,8 @@ const run = (async () => {
     let stock = 5, bookings = [], savedSettings = null, lastAsset = null, uncertain = false, malformed = false, role = 'admin', deletedKeys = [], lookups = [];
     let lastEdit = null;
     let knownRetail = 'ean';
+    let retailWithoutAssets = false;
+    const deviceOnlyLookups = [];
     let twoStockLocations = false;
     const meta = {
       column_order: ['asset_tag', 'product_model_name', 'status', 'condition', 'site_name', 'department_name'],
@@ -58,7 +60,7 @@ const run = (async () => {
       if (endpoint === '/api/inventory/events') return route.fulfill({ headers, contentType: 'text/event-stream', body: ': test\n\n' });
       if (endpoint === '/api/inventory/form-data') return json(data);
       if (endpoint === '/api/inventory/edit-form-data') return json({...data, edit_entry:{id:1,_record_type:'asset',
-        product_model_id:100,asset_tag:'PC-001',serial_number:'OLD-SN',mac_address:'AA:BB:CC:11:22:33',
+        product_model_id:100,asset_tag:'PC-001',serial_number:'OLD-SN',mac_address:'AA:BB:CC:11:22:33',specifications:{has_power_supply:true},
         site_id:1,department_id:10,storage_location_id:11,status:'available',condition:'used',purchase_date:'2026-11-04'}});
       if (endpoint === '/api/settings') {
         if (req.method() === 'PUT') {
@@ -75,6 +77,7 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
+        if (url.searchParams.get('device_only') === 'true') deviceOnlyLookups.push(code);
         if (code === '7612245631142' || code === '0006191264FD') {
           const device = {key:'asset:8',record_type:'asset',product_model_id:108,product_model_name:'Media Converter',
             asset_tag:'0006191264FD',qr_code:'7612245631142',...location,storage_location_id:11,condition:'used',quantity:1};
@@ -92,7 +95,7 @@ const run = (async () => {
         if (code === '6938818307575' || code === '841885106377') {
           const known = code === (knownRetail === 'ean' ? '6938818307575' : '841885106377');
           return json({
-            code, matches: known ? [5, 6].map(id => ({
+            code, matches: known && !retailWithoutAssets ? [5, 6].map(id => ({
               id, key: `asset:${id}`, record_type:'asset', product_model_id:105, product_model_name:'Test DECT',
               asset_tag:`DECT-${id}`, ...location, storage_location_id:11, condition:'used', quantity:1,
             })) : [], locations:[location], models:known ? [{id:105,name:'Test DECT',tracking_mode:'serialized'}] : [],
@@ -445,6 +448,7 @@ const run = (async () => {
     await page.getByRole('heading',{name:'Inventareintrag bearbeiten',exact:true}).waitFor();
     const serialField = page.getByLabel('Seriennummer:',{exact:true});
     assert.equal(await serialField.inputValue(),'OLD-SN');
+    assert.equal(await page.getByLabel('Hat Netzteil?',{exact:true}).inputValue(),'true');
     await page.setViewportSize({width:390,height:844});
     const photoButton = page.getByRole('button',{name:'Foto aufnehmen',exact:true});
     await photoButton.waitFor();
@@ -481,6 +485,7 @@ const run = (async () => {
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.deepEqual([lastEdit.asset.serial_number,lastEdit.asset.asset_tag,lastEdit.asset.mac_address],
       [longSerial,'PC-001','AA:BB:CC:11:22:33']);
+    assert.equal(lastEdit.asset.specifications.has_power_supply,true);
     await page.evaluate(() => { window.testCameraAlternate = ''; window.testCameraShowAlternate = false; });
     console.log('PASS: Seriennummer im Bearbeitungsformular mit Kamera übernommen; EAN abgewiesen, andere Felder unverändert, Foto-Button blau');
 
@@ -683,6 +688,44 @@ const run = (async () => {
       await closeQr();
     }
     console.log('PASS: Media Converter per Gerätecode oder MAC-ID; unbekannte P/N verdrängt passende S/N weder im Bild noch in der Kamera');
+    const pairedOffset = lookups.length;
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/EAN-MAC-STACK.svg'));
+    const createFromModel = page.getByRole('button',{name:'Neuen Einzelartikel erfassen',exact:true});
+    await createFromModel.waitFor();
+    assert.equal(await modelResults.locator('option:not([disabled])').count(),2);
+    assert.deepEqual(lookups.slice(pairedOffset).map(hit => hit.code).sort(),['00AABBCC1122','6938818307575']);
+    assert.equal(deviceOnlyLookups.at(-1),'00AABBCC1122');
+    await createFromModel.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'105');
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'00AABBCC1122');
+    const powerSupply = page.getByLabel('Hat Netzteil?',{exact:true});
+    assert.equal(await powerSupply.inputValue(),'');
+    await powerSupply.selectOption('false');
+    await row(/^Standort \*:/).locator('select').selectOption('1');
+    await row(/^Abteilung \*:/).locator('select').selectOption('10');
+    await row(/^Lagerort \*:/).locator('select').selectOption('11');
+    await page.getByLabel('Kaufdatum *:',{exact:true}).fill('2026-10-22');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.asset.specifications.has_power_supply,false);
+    assert.equal(lastAsset.model.id,105);
+    retailWithoutAssets = true;
+    await openQr(); await lookup('MAC ID:00AABBCC1133;EAN:6938818307575');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.getByText('Zu diesem Modell sind noch keine Artikel erfasst.',{exact:true}).waitFor();
+    await createFromModel.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'105');
+    await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
+    retailWithoutAssets = false;
+    await openQr(); await lookup('MAC ID:0006191264FD;EAN:5901234123457');
+    await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
+    await page.locator('.qr-asset-identifier').filter({hasText:/^0006191264FD$/}).waitFor();
+    assert.equal(await modelResults.count(),0);
+    assert.equal(await createFromModel.count(),0);
+    await closeQr();
     await openQr();
     await lookup('SN:DECT-NEW;EAN:5901234123457;UPC:012345678905;MAC ID:00AbC-123;MAC-Adresse:AA-BB-CC-11-22-33');
     assert.equal(await page.getByLabel('Zuordnung für 00AbC-123',{exact:true}).inputValue(),'asset_tag');
@@ -692,7 +735,8 @@ const run = (async () => {
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'00AbC-123');
-    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'');
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').count(),0);
+    assert.equal(await row(/^Auswahl:/).locator('select').inputValue(),'new');
     assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'DECT-NEW');
     assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).inputValue(),'AA:BB:CC:11:22:33');
     assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'5901234123457');

@@ -32,6 +32,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   const [recognizedType, setRecognizedType] = useState<CodeType | null>(null);
   const [recognizedFormat, setRecognizedFormat] = useState("");
   const [lookup, setLookup] = useState<QrLookup | null>(null);
+  const [createDraft, setCreateDraft] = useState<ScanDraft | null>(null);
   const [selectedKey, setSelectedKey] = useState("");
   const [locationId, setLocationId] = useState("");
   const [condition, setCondition] = useState("used");
@@ -66,7 +67,13 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   }
 
   function applyLookup(result: QrLookup, type: CodeType, format: string, preserve = false, draft?: ScanDraft) {
-    if (!result.matches.length) {
+    const candidate = draft ?? (preserve ? createDraft : null);
+    const model = result.models?.find(row => row.id === candidate?.modelId);
+    const createFromModel = candidate?.asset_tag && candidate.ean && candidate.modelId !== undefined &&
+      !result.direct_asset_keys?.length && (model ? model.tracking_mode === "serialized" || model.tracking_mode === "hybrid" :
+        result.matches.some(row => row.record_type === "asset" && row.product_model_id === candidate.modelId));
+    setCreateDraft(createFromModel ? candidate : null);
+    if (!result.matches.length && !createFromModel) {
       setLookup(null);
       if (preserve) setError("Der Artikel wurde nicht mehr gefunden. Bitte den Code erneut scannen.");
       else if (canEdit) onCreate(result.code, result.code_type ?? type, format, draft);
@@ -81,8 +88,8 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       const preferred = result.matches.find(row => row.key === result.preferred_key);
       const row = preferred ?? result.matches[0];
       setSelectedKey(preferred || result.matches.length === 1 ? row.key : "");
-      setLocationId(String(row.storage_location_id ?? result.locations[0]?.id ?? ""));
-      setCondition(row.condition || "used");
+      setLocationId(String(row?.storage_location_id ?? result.locations[0]?.id ?? ""));
+      setCondition(row?.condition || "used");
       setQuantity("1");
     }
   }
@@ -103,10 +110,10 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setLoading(true);
     try {
       const hit = await resolveScannerCandidates(codes, controller.signal);
-      if (!controller.signal.aborted && hit?.lookup.device_match_keys?.length) {
+      if (!controller.signal.aborted && hit && (hit.lookup.device_match_keys?.length || hit.draft?.modelId !== undefined || hit.draft?.newModel && canEdit)) {
         setCode(hit.lookup.code);
         setRecognizedFormat(hit.primary.format ?? "");
-        applyLookup(hit.lookup, hit.primary.role, hit.primary.format ?? "");
+        applyLookup(hit.lookup, hit.primary.role, hit.primary.format ?? "", false, hit.draft);
       }
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Die Codes konnten nicht geprüft werden.");
@@ -328,6 +335,10 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
         {message && <div className="qr-success" role="status">{message}</div>}
 
         {lookup && <section className="qr-result" aria-label="Gefundener Artikel">
+          {!lookup.matches.length && createDraft && <div className="qr-result-heading">
+            <h3>{lookup.models?.find(model => model.id === createDraft.modelId)?.name ?? "Produktmodell"}</h3>
+            <p>Zu diesem Modell sind noch keine Artikel erfasst.</p>
+          </div>}
           {!selected && (recognizedType === "ean" || recognizedType === "upc") && lookup.matches.length > 1
             && lookup.matches.every(row => row.product_model_id === lookup.matches[0].product_model_id)
             && <div><h3>{lookup.matches[0].product_model_name}</h3><p>{lookup.matches.length} Einträge zum Produktmodell</p></div>}
@@ -380,6 +391,12 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
               </div>
             </>}
           </>}
+          {canEdit && createDraft && <div className="qr-book-buttons">
+            <button type="button" className="primary-button" disabled={saving || loading || addPending}
+              onClick={() => onCreate(lookup.code, recognizedType ?? "ean", recognizedFormat, createDraft)}>
+              Neuen Einzelartikel erfassen
+            </button>
+          </div>}
           {!canEdit && <p className="qr-hint">Dieses Konto besitzt Leserechte.</p>}
           <button type="button" className="qr-refresh-button" disabled={saving || loading}
             onClick={() => pendingAdd.current ? void book("add") : void readCode(lookup.code, true, recognizedType ?? "auto", recognizedFormat)}>{addPending?"Buchung erneut prüfen":"Bestand neu prüfen"}</button>
@@ -388,7 +405,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
 
       <footer className="qr-dialog-footer">
         {lookup && <button type="button" className="qr-next-button" disabled={saving || loading || addPending} onClick={() => {
-          setLookup(null); setCode(""); setRecognizedType(null); setRecognizedFormat(""); setNeedsRefresh(false); setMessage(""); setError("");
+          setLookup(null); setCreateDraft(null); setCode(""); setRecognizedType(null); setRecognizedFormat(""); setNeedsRefresh(false); setMessage(""); setError("");
         }}>Weiteren Code scannen</button>}
         <button type="button" disabled={saving||addPending} onClick={onClose}>Schliessen</button>
       </footer>

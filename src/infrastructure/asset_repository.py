@@ -1848,8 +1848,15 @@ class AssetRepository:
         asset_specs = normalize_specifications(
             asset.get("specifications")
         )
+        # This is the accessory included with this device, never a model default.
+        power_supply = asset_specs.pop("has_power_supply", None)
+        model_specs.pop("has_power_supply", None)
+        if asset.get("_record_type") != "stock":
+            asset["spec_has_power_supply"] = power_supply if isinstance(power_supply, bool) else None
 
         labels = asset.setdefault("_specification_labels", {})
+        if "spec_has_power_supply" in asset:
+            labels["spec_has_power_supply"] = "Hat Netzteil?"
         configured_keys: set[str] = set()
 
         # Zuerst die im Kategorie-Schema definierten Felder in der
@@ -1857,7 +1864,7 @@ class AssetRepository:
         for field in fields:
             raw_key = str(field.get("key") or "").strip()
             key = normalize_specification_key(raw_key)
-            if not key:
+            if not key or key == "has_power_supply":
                 continue
 
             configured_keys.add(key)
@@ -1910,7 +1917,7 @@ class AssetRepository:
                 and not value.strip()
             )
             for value in merged_specs.values()
-        )
+        ) or isinstance(asset.get("spec_has_power_supply"), bool)
 
     # ------------------------------------------------------------------
     # Aktueller fachlicher Zustand

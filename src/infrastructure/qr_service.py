@@ -34,6 +34,12 @@ class QrService:
             if len(page) < 500:
                 return rows
 
+    def _by_ids(self, table: str, columns: str, ids: set[int]) -> list[dict[str, Any]]:
+        ordered = sorted(ids)
+        return [row for start in range(0, len(ordered), 200)
+                for row in self._data(self.client.table(table).select(columns)
+                                      .in_("id", ordered[start:start + 200]).execute())]
+
     def _current_asset_locations(self, asset_ids: list[int]) -> dict[int, int]:
         locations = {}
         # Bound the URL length as well as the response page size.
@@ -78,7 +84,7 @@ class QrService:
                     found[row["id"]] = row
         return list(found.values())
 
-    def _assets_for_code(self, code: str, code_type: str = "auto") -> list[dict[str, Any]]:
+    def _assets_for_code(self, code: str, code_type: str = "auto", *, device_only: bool = False) -> list[dict[str, Any]]:
         found = {}
         retail = code_type in {"ean", "upc"}
         ean = "0" + code if code_type == "upc" else code
@@ -98,7 +104,7 @@ class QrService:
             code_type, ("ean", *device_fields, "mac_address"),
         )
         for field in fields:
-            if field == "mac_address" and not mac_variants:
+            if (field == "mac_address" and not mac_variants) or (field == "ean" and device_only):
                 continue
 
             def query(columns: str):
@@ -127,7 +133,7 @@ class QrService:
                 found[row["id"]] = row
         return list(found.values())
 
-    def lookup(self, value: Any, code_type: str = "auto") -> dict[str, Any]:
+    def lookup(self, value: Any, code_type: str = "auto", *, device_only: bool = False) -> dict[str, Any]:
         code = normalize_qr_code(value)
         if code_type not in {"auto", "qr", "ean", "upc", "mac", "serial", "asset_tag"}:
             raise ValueError("Unbekannte Codeart.")
@@ -141,7 +147,7 @@ class QrService:
             normalize_upc(code)
         retail_code = code_type in {"ean", "upc"}
         ean = "0" + code if code_type == "upc" else code
-        assets = self._assets_for_code(code, code_type)
+        assets = self._assets_for_code(code, code_type, device_only=device_only)
         if code_type in {"auto", "asset_tag"} and re.fullmatch(r"[a-f0-9]{12}", code, re.I):
             # A compact barcode can be a tag, a serial number or a MAC.
             # Prefer a literal tag over any legacy punctuation variants.
@@ -151,7 +157,7 @@ class QrService:
         exact = [row for row in assets if row.get("matched_identifier") not in {"ean", "upc"}]
         if exact:
             assets = exact
-        matched = {} if exact or code_type in {"asset_tag", "mac"} else {
+        matched = {} if device_only or exact or code_type in {"asset_tag", "mac"} else {
             row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)
         }
         models = matched.copy()
@@ -196,9 +202,14 @@ class QrService:
                 offset += len(page)
         direct_asset_match = any(row["id"] in direct_asset_ids for row in assets)
 
-        sites = {row["id"]: row for row in self._all("sites", "id,name")}
-        departments = {row["id"]: row for row in self._all("departments", "id,name,site_id")}
-        locations = self._all("storage_locations", "id,name,site_id,department_id,is_active")
+        current_locations = self._current_asset_locations([asset["id"] for asset in assets])
+        stock_models = [model for model in matched_models if model.get("tracking_mode") in {"quantity", "hybrid"}
+                        and model.get("is_active") is not False]
+        location_columns = "id,name,site_id,department_id,is_active"
+        locations = (self._all("storage_locations", location_columns) if stock_models else
+                     self._by_ids("storage_locations", location_columns, {value for value in current_locations.values() if value is not None}))
+        sites = {row["id"]: row for row in self._by_ids("sites", "id,name", {loc["site_id"] for loc in locations if loc.get("site_id") is not None})}
+        departments = {row["id"]: row for row in self._by_ids("departments", "id,name,site_id", {loc["department_id"] for loc in locations if loc.get("department_id") is not None})}
         location_by_id = {row["id"]: row for row in locations}
 
         def context(location_id: Any) -> dict[str, Any]:
@@ -210,7 +221,6 @@ class QrService:
                 "department_name": departments.get(location.get("department_id"), {}).get("name") or "",
             }
 
-        current_locations = self._current_asset_locations([asset["id"] for asset in assets])
         matches = []
         for asset in assets:
             model = models.get(asset["product_model_id"], {})
@@ -218,9 +228,7 @@ class QrService:
                 "key": f"asset:{asset['id']}", "record_type": "asset", "quantity": 1,
                 "product_model_name": model.get("name") or asset["asset_tag"]})
 
-        for model in matched_models:
-            if model.get("tracking_mode") not in {"quantity", "hybrid"} or model.get("is_active") is False:
-                continue
+        for model in stock_models:
             response = self.client.table("stock_levels").select("storage_location_id,condition,quantity").eq("product_model_id", model["id"]).execute()
             levels = self._data(response)
             usable = [row for row in levels if location_by_id.get(row["storage_location_id"], {}).get("is_active") is True]
@@ -231,7 +239,8 @@ class QrService:
                     "product_model_name": model["name"], "condition": level["condition"],
                     "quantity": float(level["quantity"] or 0)})
 
-        active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations if row.get("is_active") is True and row.get("department_id") is not None]
+        active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations
+                            if row.get("is_active") is True and row.get("department_id") is not None] if stock_models else []
         detected = next((row.get("matched_identifier") for row in assets if row["id"] in direct_asset_ids), code_type)
         stocked = [row for row in matches if row["record_type"] == "stock" and row["quantity"] > 0]
         preferred = stocked[0]["key"] if not direct_asset_match and len(stocked) == 1 else None

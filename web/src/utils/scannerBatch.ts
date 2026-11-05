@@ -52,9 +52,15 @@ function directMatches(hit: Hit): QrMatch[] {
 }
 
 async function resolveProbes(probes: Probe[], signal: AbortSignal) {
-  const hits = await Promise.all(probes.map(async probe => {
+  const hasEan = probes.some(probe => probe.role === "ean");
+  const distinct = new Map<string, Probe>();
+  for (const probe of probes) {
+    const key = JSON.stringify([probe.role, probe.text]);
+    if (!distinct.has(key) || probe.labelled) distinct.set(key, probe);
+  }
+  const hits = await Promise.all([...distinct.values()].map(async probe => {
     const type = probe.role === "asset_tag" && !probe.labelled ? "auto" : probe.role;
-    return { ...probe, result: await lookupQr(probe.text, signal, type) };
+    return { ...probe, result: await lookupQr(probe.text, signal, type, hasEan && probe.role === "asset_tag") };
   }));
   const exact = hits.map(hit => ({ hit, rows: directMatches(hit) })).filter(entry => entry.rows.length);
   const retail = hits.filter(hit => isRetail(hit.role) && !directMatches(hit).length);
@@ -106,7 +112,8 @@ export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal)
   const roles: ScanRole[] = ["asset_tag", "serial", "mac", "qr", "ean", "upc"];
   const probes = roles.flatMap(role => draft[role] ? [{ role, text: draft[role], labelled: true }] : []);
   const { primary, lookup, modelId } = await resolveProbes(probes, signal);
-  return { lookup, draft: { ...draft, modelId }, role: primary.role };
+  const newModel = !!(draft.asset_tag && draft.ean && modelId === undefined && !lookup.matches.length);
+  return { lookup, draft: { ...draft, modelId, newModel }, role: primary.role };
 }
 
 // Look up each physical symbol before suggesting roles. An unrecognised
@@ -118,5 +125,12 @@ export async function resolveScannerCandidates(codes: ScannedCode[], signal: Abo
       || /^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(text) || /^https?:\/\//i.test(text)
       ? [] : [{ role: type, text: text.trim(), format, labelled }]);
   if (!probes.length) return;
-  return resolveProbes(probes, signal);
+  const result = await resolveProbes(probes, signal);
+  const tags = [...new Set(probes.filter(probe => probe.role === "asset_tag" && probe.text.length <= 50).map(probe => probe.text))];
+  const eans = [...new Set(probes.filter(probe => probe.role === "ean").map(probe => probe.text))];
+  const draft: ScanDraft | undefined = tags.length === 1 && eans.length === 1
+    ? { asset_tag: tags[0], ean: eans[0], modelId: result.modelId,
+        newModel: result.modelId === undefined && !result.lookup.matches.length }
+    : undefined;
+  return { ...result, draft };
 }

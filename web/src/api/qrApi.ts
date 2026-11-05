@@ -52,8 +52,8 @@ async function request(path: string, options?: RequestInit): Promise<unknown> {
   return data;
 }
 
-export async function lookupQr(code: string, signal?: AbortSignal, codeType: CodeType = "auto"): Promise<QrLookup> {
-  const data = await request(`lookup?code=${encodeURIComponent(code)}&code_type=${codeType}`, { signal }) as QrLookup | null;
+export async function lookupQr(code: string, signal?: AbortSignal, codeType: CodeType = "auto", deviceOnly = false): Promise<QrLookup> {
+  const data = await request(`lookup?code=${encodeURIComponent(code)}&code_type=${codeType}${deviceOnly ? "&device_only=true" : ""}`, { signal }) as QrLookup | null;
   if (!data || !Array.isArray(data.matches) || !Array.isArray(data.locations)) {
     throw new QrRequestError("Die Antwort zum Code ist unvollständig.", 500);
   }

@@ -624,7 +624,7 @@ export default function AssetDetailPanel({
               isEmpty(
                 value,
               )
-                ? "Keine"
+                ? field === "spec_has_power_supply" ? "Nicht erfasst" : "Keine"
                 : formatValue(
                     field,
                     value,

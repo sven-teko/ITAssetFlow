@@ -6,6 +6,27 @@ from infrastructure.scanner_codes import normalize_ean, normalize_upc, normalize
 
 
 class ScannerTests(unittest.TestCase):
+    def test_unregistered_mac_id_probe_does_not_read_models_or_locations(self):
+        db = Database()
+        with patch.object(db, "table", wraps=db.table) as table:
+            result = QrService(db).lookup("00AABBCC1122", "auto", device_only=True)
+        self.assertEqual(result["matches"], [])
+        self.assertEqual(result["locations"], [])
+        self.assertEqual([call.args[0] for call in table.call_args_list], ["assets"] * 4)
+
+    def test_power_supply_detail_uses_only_the_device_value(self):
+        model = {"specifications": {"has_power_supply": True}}
+        category = {"specification_schema": {"fields": [{"key": "has_power_supply", "scope": "model"}]}}
+        for supplied in (True, False, None):
+            with self.subTest(supplied=supplied):
+                asset = {"specifications": {"has_power_supply": supplied} if supplied is not None else {}}
+                AssetRepository._merge_specification_columns(asset, model, category)
+                self.assertIs(asset["spec_has_power_supply"], supplied)
+                self.assertEqual(asset["_specification_labels"]["spec_has_power_supply"], "Hat Netzteil?")
+        stock = {"_record_type": "stock"}
+        AssetRepository._merge_specification_columns(stock, model, category)
+        self.assertNotIn("spec_has_power_supply", stock)
+
     def test_box_code_prefers_remaining_stock_after_conversion_to_hybrid(self):
         db = Database()
         db.rows["product_models"][0]["tracking_mode"] = "hybrid"
