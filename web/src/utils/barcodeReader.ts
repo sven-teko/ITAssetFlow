@@ -38,6 +38,8 @@ export async function createBarcodeReader() {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Die Bildverarbeitung ist in diesem Browser nicht verfügbar.");
+  let nextBand = 0;
+  let usefulBand = -1;
 
   return async (source: Source, frame?: HTMLElement): Promise<ScannedCode[]> => {
     const video = source instanceof HTMLVideoElement;
@@ -67,11 +69,12 @@ export async function createBarcodeReader() {
     if (region.width < 2 || region.height < 2) return [];
     const codes = new Map<string, { code: ScannedCode; distance: number }>();
 
-    async function readRegion(rect: Rect, recover = false) {
+    async function readRegion(rect: Rect, recover = false, linear = false) {
+      if (linear) rect = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
       const scale = Math.min(recover ? 2 : 1, (video ? 1600 : 2200) / Math.max(rect.width, rect.height));
       const w = Math.round(rect.width * scale), h = Math.round(rect.height * scale);
       if (w < 2 || h < 2) return;
-      const pad = 12;
+      const pad = linear ? 0 : 12;
       canvas.width = w + 2 * pad;
       canvas.height = h + 2 * pad;
       context!.fillStyle = "#fff";
@@ -83,7 +86,12 @@ export async function createBarcodeReader() {
         context!.putImageData(content, pad, pad);
       }
       const pixels = context!.getImageData(0, 0, canvas.width, canvas.height);
-      const results = await readBarcodes(pixels, recover ? { ...options, minLineCount: 1, tryDenoise: true } : options);
+      const results = await readBarcodes(pixels, {
+        ...options,
+        ...(recover ? { minLineCount: 1, tryDenoise: !linear } : {}),
+        ...(linear ? { minLineCount: 1, tryDownscale: false, tryRotate: false,
+          formats: ["Code128", "Code39", "Code93", "ITF", "Codabar"] } : {}),
+      });
       for (const result of results) {
         if (!result.isValid || result.error || !result.text) continue;
         let distance = 0;
@@ -122,6 +130,27 @@ export async function createBarcodeReader() {
       for (const [x, y, w, h] of zones) {
         await readRegion(crop(region, x, y, w, h), !video);
         if (video && [...codes.values()].filter(({ code }) => code.type === "ean" || code.type === "upc").length > 1) break;
+      }
+    }
+    // Dense linear codes on a stacked label benefit from being read in
+    // separate horizontal strips. Rotate through them during live capture.
+    const bands = [0, .13, .26, .39, .52, .65, .78];
+    if (video) {
+      if (codes.size < 4) {
+        const band = nextBand++ % bands.length;
+        const previous = usefulBand;
+        const before = codes.size;
+        await readRegion(crop(region, 0, bands[band], 1, .22), false, true);
+        if (codes.size > before) usefulBand = band;
+        // Recheck a successful strip while continuing to search neighbouring rows.
+        if (previous >= 0 && previous !== band && codes.size < 4) {
+          await readRegion(crop(region, 0, bands[previous], 1, .22), false, true);
+        }
+      }
+    } else {
+      for (const y of [0, .08, .16, .24, .32, .4, .48, .56, .63, .72, .8, .85]) {
+        await readRegion(crop(region, .25, y, .4, .15), false, true);
+        if (codes.size >= 8) break;
       }
     }
     return [...codes.values()].sort((a, b) => a.distance - b.distance).slice(0, 8).map(({ code }) => code);

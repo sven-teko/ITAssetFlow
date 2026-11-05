@@ -70,7 +70,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_id[1]["storage_location_id"], 5)
         self.assertIsNone(by_id[100]["storage_location_id"])
 
-    def test_legacy_device_ean_finds_other_devices_of_its_model(self):
+    def test_ean_stored_only_on_one_device_does_not_expand_to_its_model(self):
         db = Database()
         db.rows["product_models"].append({"id": 11, "name": "Notebook", "tracking_mode": "serialized", "is_active": True})
         db.rows["assets"][0]["ean"] = "96385074"
@@ -79,8 +79,25 @@ class ScannerTests(unittest.TestCase):
             {**db.rows["assets"][0], "id": 3, "asset_tag": "PC-003", "archived_at": "2026-11-04"},
         ])
         result = QrService(db).lookup("96385074", "ean")
+        self.assertEqual([row["key"] for row in result["matches"]], ["asset:1"])
+        self.assertEqual(result["direct_asset_keys"], ["asset:1"])
+        db.rows["product_models"][-1]["ean"] = "96385074"
+        result = QrService(db).lookup("96385074", "ean")
         self.assertEqual({row["key"] for row in result["matches"]}, {"asset:1", "asset:2"})
-        self.assertEqual(result["models"][0]["id"], 11)
+        self.assertEqual(result["direct_asset_keys"], [])
+
+    def test_optical_ean_prefers_exact_device_barcode_or_tag_and_mac_id(self):
+        db = Database()
+        code = "7612245631142"
+        db.rows["product_models"].append({"id": 11, "name": "Media Converter", "tracking_mode": "serialized", "is_active": True, "ean": code})
+        db.rows["assets"][0].update(qr_code=code, ean=code, asset_tag="0006191264fd", serial_number="027914BH0001612")
+        db.rows["assets"].append({**db.rows["assets"][0], "id": 2, "qr_code": None, "ean": None, "asset_tag": "DEVICE-2"})
+        service = QrService(db)
+        for value, kind in ((code, "ean"), ("0006191264FD", "auto"), ("MAC ID: 00:06:19:12:64:FD", "asset_tag")):
+            with self.subTest(kind=kind):
+                result = service.lookup(value, kind)
+                self.assertEqual([row["key"] for row in result["matches"]], ["asset:1"])
+                self.assertEqual(result["direct_asset_keys"], ["asset:1"])
 
     def test_model_ean_takes_precedence_over_legacy_device_copy(self):
         db = Database()

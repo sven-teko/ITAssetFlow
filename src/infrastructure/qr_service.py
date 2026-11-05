@@ -80,8 +80,11 @@ class QrService:
 
     def _assets_for_code(self, code: str, code_type: str = "auto") -> list[dict[str, Any]]:
         found = {}
+        retail = code_type in {"ean", "upc"}
+        ean = "0" + code if code_type == "upc" else code
+        aliases = [code, ean] if code_type == "upc" else [code, code[1:]] if retail and len(code) == 13 and code.startswith("0") else [code]
         try:
-            mac = normalize_mac(code) if code_type in {"auto", "mac"} else None
+            mac = normalize_mac(code) if code_type in {"auto", "asset_tag", "mac"} else None
         except ValueError:
             mac = None
         if mac:
@@ -90,19 +93,23 @@ class QrService:
         else:
             mac_variants = ()
 
-        fields = {"ean": ("ean",), "upc": ("ean",), "asset_tag": ("asset_tag",), "mac": ("mac_address",)}
-        for field in fields.get(code_type, ("qr_code", "ean", "asset_tag", "serial_number", "mac_address")):
+        device_fields = ("qr_code", "asset_tag", "serial_number")
+        fields = ("ean", *device_fields) if retail else {"asset_tag": ("qr_code", "asset_tag"), "mac": ("mac_address",)}.get(
+            code_type, ("ean", *device_fields, "mac_address"),
+        )
+        for field in fields:
             if field == "mac_address" and not mac_variants:
                 continue
 
             def query(columns: str):
                 request = self.client.table("assets").select(columns).is_("archived_at", "null")
-                legacy_tag = field == "asset_tag" and not code.upper().startswith("MAC")
-                if mac_variants and (field == "mac_address" or legacy_tag):
+                if mac_variants and field in {"mac_address", "asset_tag", "qr_code"}:
                     # All patterns are validated hex and fixed punctuation, so ILIKE is exact apart from case.
                     filters = [f"{field}.ilike.{variant}" for variant in mac_variants]
                     return request.or_(",".join(filters))
-                return request.eq(field, code)
+                if field == "ean":
+                    return request.eq(field, ean)
+                return request.in_(field, aliases) if len(aliases) > 1 else request.eq(field, code)
 
             try:
                 response = select_scanner_compatible(
@@ -114,14 +121,9 @@ class QrService:
                 raise
             for row in self._data(response):
                 previous = found.get(row["id"], {}).get("matched_identifier")
-                if field == "mac_address":
-                    row["matched_identifier"] = "mac"
-                elif field == "serial_number" and previous != "mac":
-                    row["matched_identifier"] = "serial"
-                elif previous:
-                    row["matched_identifier"] = previous
-                elif field == "asset_tag":
-                    row["matched_identifier"] = "asset_tag"
+                kind = {"ean": code_type if retail else "ean", "asset_tag": "asset_tag", "qr_code": "qr",
+                        "serial_number": "serial", "mac_address": "mac"}[field]
+                row["matched_identifier"] = previous if kind in {"ean", "upc"} and previous else kind
                 found[row["id"]] = row
         return list(found.values())
 
@@ -139,15 +141,17 @@ class QrService:
             normalize_upc(code)
         retail_code = code_type in {"ean", "upc"}
         ean = "0" + code if code_type == "upc" else code
-        assets = self._assets_for_code(ean, code_type)
-        if code_type == "auto" and re.fullmatch(r"[a-f0-9]{12}", code, re.I):
+        assets = self._assets_for_code(code, code_type)
+        if code_type in {"auto", "asset_tag"} and re.fullmatch(r"[a-f0-9]{12}", code, re.I):
             # A compact barcode can be a tag, a serial number or a MAC.
             # Prefer a literal tag over any legacy punctuation variants.
-            exact_tags = [row for row in assets if row.get("asset_tag") == code]
+            exact_tags = [row for row in assets if str(row.get("asset_tag") or "").casefold() == code.casefold()]
             if exact_tags:
                 assets = [{**row, "matched_identifier": "asset_tag"} for row in exact_tags]
-        direct_asset_ids = {row["id"] for row in assets}
-        matched = {} if code_type in {"asset_tag", "mac"} else {
+        exact = [row for row in assets if row.get("matched_identifier") not in {"ean", "upc"}]
+        if exact:
+            assets = exact
+        matched = {} if exact or code_type in {"asset_tag", "mac"} else {
             row["id"]: row for row in self._models_for_code(code, retail_type=code_type if retail_code else None)
         }
         models = matched.copy()
@@ -158,12 +162,14 @@ class QrService:
                 "product_models", "id,name,sku,tracking_mode,is_active,ean",
             )
             models.update((row["id"], row) for row in self._data(response))
-        if retail_code:
+        if retail_code and not exact:
             # A corrected model EAN takes precedence over copies left on older devices.
             assets = [row for row in assets if row["product_model_id"] in matched
                       or models.get(row["product_model_id"], {}).get("ean") in {None, "", ean}]
-            # An old EAN on one device still identifies the model when it
-            # has no newer EAN. Expand to its other visible, active devices.
+        # A unique code stored only on a device stays a device match. Explicit
+        # model codes and shared legacy EANs keep the model-wide results.
+        direct_asset_ids = {row["id"] for row in assets} if exact or (not matched and len(assets) == 1) else set()
+        if retail_code and not direct_asset_ids:
             for row in assets:
                 model = models.get(row["product_model_id"])
                 if model and model.get("is_active") is not False:
@@ -226,7 +232,7 @@ class QrService:
                     "quantity": float(level["quantity"] or 0)})
 
         active_locations = [{**context(row["id"]), "id": row["id"]} for row in locations if row.get("is_active") is True and row.get("department_id") is not None]
-        detected = next((row.get("matched_identifier") for row in assets if row.get("matched_identifier")), code_type)
+        detected = next((row.get("matched_identifier") for row in assets if row["id"] in direct_asset_ids), code_type)
         stocked = [row for row in matches if row["record_type"] == "stock" and row["quantity"] > 0]
         preferred = stocked[0]["key"] if not direct_asset_match and len(stocked) == 1 else None
         return {"code": code, "code_type": detected, "matches": matches, "locations": active_locations,

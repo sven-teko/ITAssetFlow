@@ -39,88 +39,84 @@ export function assignedCodes(codes: ScannedCode[], assignments: Assignment[]): 
 }
 
 const intersect = <T,>(left: Set<T>, right: Set<T>) => new Set([...left].filter(value => right.has(value)));
+type Probe = { role: ScanRole; text: string; format?: string; labelled?: boolean };
+type Hit = Probe & { result: QrLookup };
+const isRetail = (role: ScanRole) => role === "ean" || role === "upc";
 
-export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal): Promise<{
-  lookup: QrLookup; draft: ScanDraft; role: ScanRole;
-}> {
-  const fetchRoles = (roles: ScanRole[]) => Promise.all(roles.flatMap(role => draft[role]
-    ? [lookupQr(draft[role], signal, role).then(result => ({ role, result }))] : []));
-  const [retail, pairs] = await Promise.all([fetchRoles(["ean", "upc"]), fetchRoles(["asset_tag", "serial", "mac", "qr"])]);
+function directMatches(hit: Hit): QrMatch[] {
+  const { result, role } = hit;
+  const direct = new Set(result.direct_asset_keys ?? (role === "qr" || isRetail(role) ? [] :
+    result.matches.filter(row => row.record_type === "asset").map(row => row.key)));
+  return result.matches.filter(row => row.record_type === "asset" && direct.has(row.key)
+    && (role !== "serial" || !hit.labelled || row.serial_number === hit.text));
+}
+
+async function resolveProbes(probes: Probe[], signal: AbortSignal) {
+  const hits = await Promise.all(probes.map(async probe => {
+    const type = probe.role === "asset_tag" && !probe.labelled ? "auto" : probe.role;
+    return { ...probe, result: await lookupQr(probe.text, signal, type) };
+  }));
+  const exact = hits.map(hit => ({ hit, rows: directMatches(hit) })).filter(entry => entry.rows.length);
+  const retail = hits.filter(hit => isRetail(hit.role) && !directMatches(hit).length);
   let modelIds: Set<number> | undefined;
   for (const { result } of retail) {
     const ids = new Set((result.models ?? []).map(model => model.id));
-    if (!ids.size) {
-      for (const row of result.matches) ids.add(row.product_model_id);
-    }
+    if (!ids.size) for (const row of result.matches) ids.add(row.product_model_id);
     if (ids.size) modelIds = modelIds ? intersect(modelIds, ids) : ids;
   }
   if (modelIds?.size === 0) throw new Error("Die gescannten Produktcodes gehören zu unterschiedlichen Modellen.");
+
+  if (exact.length) {
+    let keys = new Set(exact[0].rows.map(row => row.key));
+    for (const { rows } of exact.slice(1)) keys = intersect(keys, new Set(rows.map(row => row.key)));
+    if (!keys.size) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät.");
+    const primary = exact[0].hit;
+    const matches = exact[0].rows.filter(row => keys.has(row.key) && (!modelIds || modelIds.has(row.product_model_id)));
+    if (!matches.length) throw new Error("Die gescannte Gerätekennung gehört zu einem anderen Produktmodell als die EAN oder UPC.");
+    return { primary, lookup: { ...primary.result, matches, models: [],
+      device_match_keys: matches.map(row => row.key), preferred_key: matches.length === 1 ? matches[0].key : null,
+    } };
+  }
+
   if (modelIds?.size) {
-    const matchedIds = modelIds;
-    const modelId = matchedIds.size === 1 ? matchedIds.values().next().value : undefined;
-    const usable = retail.find(({result}) => result.matches.some(row => matchedIds.has(row.product_model_id)))
-      ?? retail.find(({result}) => result.models?.some(model => matchedIds.has(model.id))) ?? retail[0];
+    const ids = modelIds;
+    const modelId = ids.size === 1 ? ids.values().next().value : undefined;
+    const primary = retail.find(({ result }) => result.matches.some(row => ids.has(row.product_model_id)))
+      ?? retail.find(({ result }) => result.models?.some(model => ids.has(model.id))) ?? retail[0];
     const rows = new Map<string, QrMatch>();
-    for (const {result} of retail) {
-      for (const row of result.matches) if (matchedIds.has(row.product_model_id)) rows.set(row.key, row);
+    for (const { result } of retail) {
+      for (const row of result.matches) if (ids.has(row.product_model_id)) rows.set(row.key, row);
     }
-    let matchedDeviceKeys: Set<string> | undefined;
-    const devices = new Map<string, QrMatch>();
-    for (const {role, result} of pairs) {
-      const directKeys = new Set(result.direct_asset_keys ?? []);
-      const exact = result.matches.filter(row => row.record_type === "asset" && directKeys.has(row.key) && (
-        role === "serial" ? row.serial_number === draft.serial
-          : role === "mac" ? !!row.mac_address && normalizeMac(row.mac_address) === draft.mac
-          : role === "asset_tag" ? row.asset_tag === draft.asset_tag
-          : row.qr_code === draft.qr || row.asset_tag === draft.qr
-      ));
-      if (!exact.length) continue;
-      const compatible = exact.filter(row => matchedIds.has(row.product_model_id));
-      if (!compatible.length) throw new Error(`Die Kennung «${scanLabels[role]}» gehört zu einem anderen Produktmodell als die gescannte EAN oder UPC.`);
-      const keys = new Set(compatible.map(row => row.key));
-      matchedDeviceKeys = matchedDeviceKeys ? intersect(matchedDeviceKeys, keys) : keys;
-      for (const row of compatible) devices.set(row.key, row);
-    }
-    if (matchedDeviceKeys?.size === 0) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät.");
-    const deviceMatchKeys = [...(matchedDeviceKeys ?? [])];
-    for (const key of deviceMatchKeys) if (!rows.has(key)) rows.set(key, devices.get(key)!);
-    // A retail code identifies a model, so even an unregistered SN must not
-    // hide its other devices or open the create form instead.
     const matches = [...rows.values()];
     if (!matches.length && modelId === undefined) {
       throw new Error("Mehrere Produktmodelle passen. Bitte die Produktcodes einzeln prüfen.");
     }
-    return {
-      lookup: { ...usable.result, matches, device_match_keys: deviceMatchKeys,
-        preferred_key: deviceMatchKeys.length === 1 ? deviceMatchKeys[0] : matches.length === 1 ? matches[0].key : null },
-      draft: { ...draft, modelId }, role: usable.role,
-    };
+    return { primary, modelId, lookup: { ...primary.result, matches, preferred_key: matches.length === 1 ? matches[0].key : null } };
   }
 
-  const primary = pairs[0] ?? retail[0];
-  let deviceKeys: Set<string> | undefined;
-  const devices = new Map<string, QrMatch>();
-  for (const { role, result } of pairs) {
-    const keys = new Set(result.direct_asset_keys ?? (role === "qr" ? [] :
-      result.matches.filter(row => row.record_type === "asset").map(row => row.key)));
-    if (keys.size) deviceKeys = deviceKeys ? intersect(deviceKeys, keys) : keys;
-    for (const row of result.matches) if (keys.has(row.key)) devices.set(row.key, row);
-  }
-  if (deviceKeys) {
-    const matches = [...deviceKeys].map(key => devices.get(key)).filter((row): row is QrMatch =>
-      !!row
-      && (!draft.asset_tag || !row.asset_tag || draft.asset_tag === row.asset_tag)
-      && (!draft.serial || !row.serial_number || draft.serial.toUpperCase() === row.serial_number.toUpperCase())
-      && (!draft.mac || !row.mac_address || draft.mac === normalizeMac(row.mac_address)));
-    if (!matches.length) throw new Error("Die gescannten Kennungen passen nicht zum selben Gerät oder Modell.");
-    const hit = pairs.find(({result}) => matches.some(row =>
-      result.direct_asset_keys?.includes(row.key) ?? result.matches.some(match => match.key === row.key),
-    )) ?? primary;
-    return { lookup: { ...hit.result, matches, preferred_key: null }, draft, role: hit.role };
-  }
-  const qr = pairs.find(({role}) => role === "qr");
-  if (qr?.result.matches.length && !draft.serial && !draft.mac && !draft.asset_tag) {
-    return { lookup: qr.result, draft, role: "qr" };
-  }
-  return { lookup: { ...primary.result, matches: [], preferred_key: null }, draft, role: primary.role };
+  const shared = hits.filter(({ role, result }) => (role === "qr" || role === "serial") && result.matches.length
+    && (result.models?.length || result.matches.every(row => row.record_type === "stock")));
+  if (shared.length === 1) return { primary: shared[0], lookup: shared[0].result };
+  return { primary: hits[0], lookup: { ...hits[0].result, matches: [], preferred_key: null } };
+}
+
+export async function resolveScannerBatch(draft: ScanDraft, signal: AbortSignal): Promise<{
+  lookup: QrLookup; draft: ScanDraft; role: ScanRole;
+}> {
+  const roles: ScanRole[] = ["asset_tag", "serial", "mac", "qr", "ean", "upc"];
+  const probes = roles.flatMap(role => draft[role] ? [{ role, text: draft[role], labelled: true }] : []);
+  const { primary, lookup, modelId } = await resolveProbes(probes, signal);
+  return { lookup, draft: { ...draft, modelId }, role: primary.role };
+}
+
+// Look up each physical symbol before suggesting roles. An unrecognised
+// second Code 128 symbol (often P/N) must not hide a registered S/N.
+export async function resolveScannerCandidates(codes: ScannedCode[], signal: AbortSignal) {
+  const probes = codes.flatMap(({ type, text, format, labelled }): Probe[] =>
+    type === "auto" || !text.trim() || text.length > 100
+      || [...text].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
+      || /^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(text) || /^https?:\/\//i.test(text)
+      ? [] : [{ role: type, text: text.trim(), format, labelled }]);
+  if (!probes.length) return;
+  return resolveProbes(probes, signal);
 }

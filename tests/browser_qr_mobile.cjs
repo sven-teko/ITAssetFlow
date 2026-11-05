@@ -75,6 +75,12 @@ const run = (async () => {
       }
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
+        if (code === '7612245631142' || code === '0006191264FD') {
+          const device = {key:'asset:8',record_type:'asset',product_model_id:108,product_model_name:'Media Converter',
+            asset_tag:'0006191264FD',qr_code:'7612245631142',...location,storage_location_id:11,condition:'used',quantity:1};
+          return json({code,code_type:code === device.asset_tag ? 'asset_tag' : 'qr',locations:[location],
+            direct_asset_keys:[device.key],matches:[device,{...device,key:'asset:9',asset_tag:'ANDERES-GERÄT'}]});
+        }
         if (code === 'DECT-6-SN' || code === 'OTHER-SERIAL') {
           const isDect = code === 'DECT-6-SN';
           const key = isDect ? 'asset:6' : 'asset:1';
@@ -638,15 +644,45 @@ const run = (async () => {
     await openQr(); await lookup('SN:DECT-6-SN;EAN:6938818307575');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     const modelResults = page.getByLabel('Gefundenen Artikel auswählen',{exact:true});
-    assert.equal(await modelResults.inputValue(),'asset:6');
-    assert.equal(await modelResults.locator('option:not([disabled])').count(),2);
-    assert.match(await modelResults.locator('option[value="asset:6"]').textContent(),/Gerät erkannt/);
+    await page.locator('.qr-asset-identifier').filter({hasText:/^DECT-6$/}).waitFor();
+    assert.equal(await modelResults.count(),0);
     await closeQr();
     await openQr(); await lookup('SN:OTHER-SERIAL;EAN:6938818307575');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
     await page.getByRole('alert').filter({hasText:'gehört zu einem anderen Produktmodell'}).waitFor();
     assert.equal(await modelResults.count(),0);
     await closeQr();
+    for (const code of ['7612245631142','0006191264FD','MAC ID: 0006191264FD']) {
+      await openQr(); await lookup(code);
+      await page.locator('.qr-asset-identifier').filter({hasText:/^0006191264FD$/}).waitFor();
+      assert.equal(await modelResults.count(),0);
+      await closeQr();
+    }
+    const stacked = path.join(__dirname,'fixtures/CODE39-STACK.svg');
+    for (const live of [false,true]) {
+      const offset = lookups.length;
+      await openQr();
+      if (live) {
+        const svg = 'data:image/svg+xml;base64,' + fs.readFileSync(stacked).toString('base64');
+        await page.evaluate(data => { window.testCodeImage = data; window.testBlankCamera = false; },svg);
+        await page.getByRole('button',{name:'Kamera starten',exact:true}).click();
+      } else await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(stacked);
+      await page.locator('.qr-asset-identifier').filter({hasText:/^DECT-6$/}).waitFor().catch(error => {
+        throw new Error(`${live ? 'Kamera' : 'Bild'}: ${JSON.stringify(lookups.slice(offset))}`,{cause:error});
+      });
+      assert.deepEqual(new Set(lookups.slice(offset).map(hit=>hit.code)), new Set(['DECT-6-SN','PN-17']));
+      await closeQr();
+    }
+    if (process.env.MEDIA_CONVERTER_LABEL) {
+      const offset = lookups.length;
+      await openQr();
+      await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(process.env.MEDIA_CONVERTER_LABEL);
+      await page.locator('.qr-asset-identifier').filter({hasText:/^0006191264FD$/}).waitFor();
+      assert.equal(await modelResults.count(),0);
+      assert.deepEqual(new Set(lookups.slice(offset).map(hit=>hit.code)),new Set(['7612245631142','0006191264FD']));
+      await closeQr();
+    }
+    console.log('PASS: Media Converter per Gerätecode oder MAC-ID; unbekannte P/N verdrängt passende S/N weder im Bild noch in der Kamera');
     await openQr();
     await lookup('SN:DECT-NEW;EAN:5901234123457;UPC:012345678905;MAC ID:00AbC-123;MAC-Adresse:AA-BB-CC-11-22-33');
     assert.equal(await page.getByLabel('Zuordnung für 00AbC-123',{exact:true}).inputValue(),'asset_tag');

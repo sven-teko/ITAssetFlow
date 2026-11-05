@@ -5,7 +5,7 @@ import StockWithdrawalDialog from "./StockWithdrawalDialog";
 import { newBookingId, type WithdrawalSubmission } from "../api/stockBooking";
 import "./QrWorkflowDialog.css";
 import { isValidEan, isValidUpc, identifierType, labelledCodes, type CodeType, type ScanDraft } from "../utils/scannerCodes";
-import { assignedCodes, proposeAssignments, resolveScannerBatch, scanLabels, type Assignment } from "../utils/scannerBatch";
+import { assignedCodes, proposeAssignments, resolveScannerBatch, resolveScannerCandidates, scanLabels, type Assignment } from "../utils/scannerBatch";
 import type { ScannedCode } from "../utils/barcodeReader";
 
 type Props = {
@@ -87,7 +87,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     }
   }
 
-  function detectedCodes(codes: ScannedCode[]) {
+  async function detectedCodes(codes: ScannedCode[], automatic = true) {
     if (codes.length === 1 && !/^(?:IPUI|IPEI|SAP|P\/N)\s*[:=]/i.test(codes[0].text)) {
       const only = codes[0];
       void readCode(only.text, false, only.type, only.format, only.labelled);
@@ -96,6 +96,23 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setError("");
     setExtraCode("");
     setReview({ codes, assignments: proposeAssignments(codes) });
+    if (!automatic) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setLoading(true);
+    try {
+      const hit = await resolveScannerCandidates(codes, controller.signal);
+      if (!controller.signal.aborted && hit?.lookup.device_match_keys?.length) {
+        setCode(hit.lookup.code);
+        setRecognizedFormat(hit.primary.format ?? "");
+        applyLookup(hit.lookup, hit.primary.role, hit.primary.format ?? "");
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Die Codes konnten nicht geprüft werden.");
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
+    }
   }
 
   function addScannedCodes(codes: ScannedCode[]) {
@@ -151,7 +168,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
   async function readCode(value: string, preserve = false, detectedType: CodeType = "auto", format = "", labelledDetection = false) {
     if (busyRef.current) return;
     const labelled = detectedType === "auto" ? labelledCodes(value) : [];
-    if (labelled.length > 1) { detectedCodes(labelled.map(field => ({ ...field, format: "Eingabe", labelled: true }))); return; }
+    if (labelled.length > 1) { void detectedCodes(labelled.map(field => ({ ...field, format: "Eingabe", labelled: true })), false); return; }
     const normalized = labelled[0]?.text ?? value.trim();
     if (!normalized || normalized.length > 100 || Array.from(normalized).some((char) => { const n = char.codePointAt(0) ?? 0; return n < 32 || n === 127; })) {
       setError("Bitte eine Artikelkennung mit 1 bis 100 Zeichen ohne Zeilenumbrüche eingeben.");
@@ -183,7 +200,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
         return;
       }
       const directKeys = new Set(result.direct_asset_keys);
-      const exactDevice = type !== "ean" && type !== "upc" && directKeys.size > 0;
+      const exactDevice = directKeys.size > 0;
       const draft = type === "asset_tag" && explicit ? { asset_tag: normalized } : undefined;
       applyLookup(exactDevice ? { ...result, preferred_key: null, matches: result.matches.filter(row => directKeys.has(row.key)) }
         : result, type, format, preserve, draft);

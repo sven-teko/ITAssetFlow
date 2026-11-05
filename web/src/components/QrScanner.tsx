@@ -87,7 +87,7 @@ export default function QrScanner({ onCodes, disabled, serialOnly = false }: Pro
       await videoRef.current.play();
       if (run !== generation.current) return;
       setActive(true); setStarting(false);
-      const observe = createScanObservations();
+      const observe = createScanObservations(serialOnly);
       const started = performance.now();
       let lastFrame = -1;
       let lastDetection = -Infinity;
