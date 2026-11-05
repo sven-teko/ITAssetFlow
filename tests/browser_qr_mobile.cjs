@@ -25,6 +25,7 @@ const run = (async () => {
     const rawSpecs = {has_power_supply:true, 'Legacy Field':{array:[1, true]}, old_note:'behalten'};
     let knownRetail = 'ean';
     let retailWithoutAssets = false;
+    let internetBoxMatch = 'legacy-ean';
     const deviceOnlyLookups = [];
     let twoStockLocations = false;
     const meta = {
@@ -87,6 +88,17 @@ const run = (async () => {
       if (endpoint === '/api/scanner/lookup') {
         const code = url.searchParams.get('code'); lookups.push({code, type: url.searchParams.get('code_type')});
         if (url.searchParams.get('device_only') === 'true') deviceOnlyLookups.push(code);
+        if (code === '7611552033830') {
+          const device = {key:'asset:15',record_type:'asset',product_model_id:115,product_model_name:'Internet Box Light',
+            asset_tag:'IBL-ALT',serial_number:'SN-ALT',...location,storage_location_id:11,condition:'used',quantity:1};
+          const models = [{id:115,name:'Internet Box Light',tracking_mode:'serialized'}];
+          if (internetBoxMatch === 'ambiguous') return json({code,code_type:'ean',locations:[],models:[
+            ...models,{id:116,name:'Anderes Modell',tracking_mode:'serialized'}],
+            matches:[device,{...device,key:'asset:16',product_model_id:116,product_model_name:'Anderes Modell'}],direct_asset_keys:[]});
+          if (internetBoxMatch === 'model') return json({code,code_type:'ean',locations:[],models,matches:[device],direct_asset_keys:[]});
+          return json({code,code_type:internetBoxMatch === 'legacy-qr' ? 'qr' : 'ean',
+            locations:[],models:[],matches:[device],direct_asset_keys:[device.key]});
+        }
         if (code === '7612245631142' || code === '0006191264FD') {
           const device = {key:'asset:8',record_type:'asset',product_model_id:108,product_model_name:'Media Converter',
             asset_tag:'0006191264FD',qr_code:'7612245631142',...location,storage_location_id:11,condition:'used',quantity:1};
@@ -735,6 +747,52 @@ const run = (async () => {
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.equal(lastAsset.asset.specifications.has_power_supply,false);
     assert.equal(lastAsset.model.id,105);
+    const internetBoxModel = {id:115,name:'Internet Box Light',category_id:1,manufacturer_id:1,
+      is_active:true,tracking_mode:'serialized',specifications:{}};
+    data.product_models.push(internetBoxModel);
+    await openQr();
+    await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/7611552033830.svg'));
+    await page.getByRole('heading',{name:'Internet Box Light',exact:true}).waitFor();
+    await page.getByText('1 vorhandener Eintrag zum Produktmodell',{exact:true}).waitFor();
+    assert.equal(await page.locator('.qr-asset-identifier').count(),0);
+    assert.equal(await modelResults.locator('option:not([disabled])').count(),1);
+    await createFromModel.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'115');
+    assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'');
+    assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'');
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'7611552033830');
+    await page.getByLabel('Produkterkennung *:',{exact:true}).fill('IBL-NEU');
+    await row(/^Standort \*:/).locator('select').selectOption('1');
+    await row(/^Abteilung \*:/).locator('select').selectOption('10');
+    await row(/^Lagerort \*:/).locator('select').selectOption('11');
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.locator('.inventory-table tbody tr').first().waitFor();
+    assert.equal(lastAsset.asset.asset_tag,'IBL-NEU');
+    assert.equal(lastAsset.asset.serial_number,null);
+    assert.equal(lastAsset.model.id,115);
+    assert.equal(lastAsset.scanner_codes.ean,'7611552033830');
+    internetBoxMatch = 'legacy-qr';
+    internetBoxModel.ean = '4006381333931';
+    await openQr(); await lookup('7611552033830');
+    await createFromModel.waitFor();
+    await page.getByRole('button',{name:'Bestand neu prüfen',exact:true}).click();
+    await createFromModel.click();
+    await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
+    assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'115');
+    assert.equal(await page.getByLabel('EAN:',{exact:true}).inputValue(),'4006381333931');
+    assert.equal(await page.getByLabel('QR-Code / Barcode:',{exact:true}).inputValue(),'');
+    await page.getByRole('button',{name:/Zurück zum Inventar/}).click();
+    internetBoxMatch = 'ambiguous';
+    await openQr(); await lookup('7611552033830');
+    await modelResults.waitFor();
+    assert.equal(await createFromModel.count(),0);
+    await closeQr();
+    internetBoxMatch = 'model';
+    await openQr(); await lookup('7611552033830');
+    await createFromModel.waitFor();
+    await closeQr();
+    console.log('PASS: Einzelne EAN 7611552033830 legt Internet Box Light mit demselben Modell und eigener Gerätekennung an.');
     const testModel = data.product_models.find(model => model.id === 105);
     const modelUpc = testModel.upc;
     delete testModel.upc;
@@ -758,7 +816,7 @@ const run = (async () => {
     retailWithoutAssets = true;
     await openQr(); await lookup('MAC ID:00AABBCC1133;EAN:6938818307575');
     await page.getByRole('button',{name:'Zuordnung prüfen',exact:true}).click();
-    await page.getByText('Zu diesem Modell sind noch keine Artikel erfasst.',{exact:true}).waitFor();
+    await page.getByText('Zu diesem Modell sind keine Artikel sichtbar.',{exact:true}).waitFor();
     await createFromModel.click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     assert.equal(await row(/^Produktmodell \*:/).locator('select').inputValue(),'105');
@@ -918,6 +976,10 @@ const run = (async () => {
 
     role = 'viewer'; await page.reload();
     await page.locator('.inventory-table tbody tr').first().waitFor();
+    await openQr(); await lookup('7611552033830');
+    await page.getByRole('heading',{name:'Internet Box Light',exact:true}).waitFor();
+    assert.equal(await createFromModel.count(),0);
+    await closeQr();
     await openQr(); await lookup('DECT-6-SN');
     await page.locator('.qr-asset-identifier').filter({hasText:/^DECT-6$/}).waitFor();
     assert.equal(detailRequests,0);

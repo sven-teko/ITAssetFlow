@@ -22,9 +22,26 @@ const CONDITIONS: Record<string, string> = { new: "Neu", like_new: "Neuwertig", 
 type StockTarget = { code: string; product_model_id: number; storage_location_id: number; condition: string };
 type AddBooking = StockTarget & { direction: "add"; quantity: number; request_id: string };
 
+function retailCreateDraft(result: QrLookup, scannedType: CodeType): ScanDraft | undefined {
+  if (scannedType !== "ean" && scannedType !== "upc") return;
+  const models = result.models ?? [];
+  const ids = new Set([...models.map(model => model.id), ...result.matches.map(row => row.product_model_id)]);
+  if (ids.size !== 1) return;
+  const [modelId] = ids;
+  const model = models.find(row => row.id === modelId);
+  if (model ? model.tracking_mode !== "serialized" && model.tracking_mode !== "hybrid"
+    : !result.matches.some(row => row.record_type === "asset")) return;
+
+  // Older entries sometimes carry a printed retail code in a device field.
+  // Use their model, without copying that device field or overwriting a model code.
+  const legacyDeviceField = result.direct_asset_keys?.length && result.code_type && result.code_type !== scannedType;
+  return legacyDeviceField ? { modelId } : { modelId, [scannedType]: result.code };
+}
+
 export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, onChanged, onArchive }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const retailTypeRef = useRef<"ean" | "upc" | null>(null);
   const busyRef = useRef(false);
   const pendingAdd = useRef<AddBooking | null>(null);
   const [withdrawalOpen,setWithdrawalOpen]=useState(false);
@@ -69,14 +86,17 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     setMessage("");
   }
 
-  function applyLookup(result: QrLookup, type: CodeType, format: string, preserve = false, draft?: ScanDraft) {
+  function applyLookup(result: QrLookup, type: CodeType, format: string, preserve = false, draft?: ScanDraft, single = false) {
     setDetailsKey("");
-    const candidate = draft ?? (preserve ? createDraft : null);
+    retailTypeRef.current = single && (type === "ean" || type === "upc") ? type : null;
+    const retailDraft = single ? retailCreateDraft(result, type) : undefined;
+    const retained = preserve && (!retailDraft || retailDraft.modelId === createDraft?.modelId) ? createDraft : null;
+    const candidate = draft ?? retained ?? retailDraft;
     const model = result.models?.find(row => row.id === candidate?.modelId);
-    const createFromModel = candidate?.asset_tag && candidate.ean && candidate.modelId !== undefined &&
+    const createFromModel = retailDraft || (candidate?.asset_tag && candidate.ean && candidate.modelId !== undefined &&
       !result.direct_asset_keys?.length && (model ? model.tracking_mode === "serialized" || model.tracking_mode === "hybrid" :
-        result.matches.some(row => row.record_type === "asset" && row.product_model_id === candidate.modelId));
-    setCreateDraft(createFromModel ? candidate : null);
+        result.matches.some(row => row.record_type === "asset" && row.product_model_id === candidate.modelId)));
+    setCreateDraft(createFromModel ? candidate ?? null : null);
     if (!result.matches.length && !createFromModel) {
       setLookup(null);
       if (preserve) setError("Der Artikel wurde nicht mehr gefunden. Bitte den Code erneut scannen.");
@@ -91,7 +111,9 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
     if (!preserve || !result.matches.some(row => row.key === selectedKey)) {
       const preferred = result.matches.find(row => row.key === result.preferred_key);
       const row = preferred ?? result.matches[0];
-      setSelectedKey(preferred || result.matches.length === 1 ? row.key : "");
+      const retailModelMatch = retailDraft && row?.record_type === "asset"
+        && (!result.direct_asset_keys?.length || result.code_type === type);
+      setSelectedKey(!retailModelMatch && (preferred || result.matches.length === 1) ? row.key : "");
       setLocationId(String(row?.storage_location_id ?? result.locations[0]?.id ?? ""));
       setCondition(row?.condition || "used");
       setQuantity("1");
@@ -214,7 +236,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
       const exactDevice = directKeys.size > 0;
       const draft = type === "asset_tag" && explicit ? { asset_tag: normalized } : undefined;
       applyLookup(exactDevice ? { ...result, preferred_key: null, matches: result.matches.filter(row => directKeys.has(row.key)) }
-        : result, type, format, preserve, draft);
+        : result, type, format, preserve, draft, true);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Der Code konnte nicht geprüft werden.");
     } finally {
@@ -339,14 +361,17 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
         {message && <div className="qr-success" role="status">{message}</div>}
 
         {lookup && <section className="qr-result" aria-label="Gefundener Artikel">
-          {!lookup.matches.length && createDraft && <div className="qr-result-heading">
-            <h3>{lookup.models?.find(model => model.id === createDraft.modelId)?.name ?? "Produktmodell"}</h3>
-            <p>Zu diesem Modell sind noch keine Artikel erfasst.</p>
+          {!selected && createDraft && <div className="qr-result-heading">
+            <h3>{lookup.models?.find(model => model.id === createDraft.modelId)?.name
+              ?? lookup.matches.find(row => row.product_model_id === createDraft.modelId)?.product_model_name ?? "Produktmodell"}</h3>
+            <p>{lookup.matches.length === 0 ? "Zu diesem Modell sind keine Artikel sichtbar."
+              : lookup.matches.length === 1 ? "1 vorhandener Eintrag zum Produktmodell"
+                : `${lookup.matches.length} vorhandene Einträge zum Produktmodell`}</p>
           </div>}
-          {!selected && (recognizedType === "ean" || recognizedType === "upc") && lookup.matches.length > 1
+          {!selected && !createDraft && (recognizedType === "ean" || recognizedType === "upc") && lookup.matches.length > 1
             && lookup.matches.every(row => row.product_model_id === lookup.matches[0].product_model_id)
             && <div><h3>{lookup.matches[0].product_model_name}</h3><p>{lookup.matches.length} Einträge zum Produktmodell</p></div>}
-          {lookup.matches.length > 1 && <label>Artikel auswählen
+          {(lookup.matches.length > 1 || (!selected && lookup.matches.length === 1)) && <label>Artikel auswählen
             <select aria-label="Gefundenen Artikel auswählen" value={selected?.key ?? ""} disabled={saving || loading || addPending}
               onChange={event => { const row = lookup.matches.find(item => item.key === event.target.value); if (row) selectMatch(row); }}>
               <option value="" disabled>Bitte einen passenden Eintrag auswählen</option>
@@ -411,7 +436,7 @@ export default function QrWorkflowDialog({ canEdit, onClose, onCreate, onEdit, o
           </div>}
           {!canEdit && <p className="qr-hint">Dieses Konto besitzt Leserechte.</p>}
           <button type="button" className="qr-refresh-button" disabled={saving || loading}
-            onClick={() => pendingAdd.current ? void book("add") : void readCode(lookup.code, true, recognizedType ?? "auto", recognizedFormat)}>{addPending?"Buchung erneut prüfen":"Bestand neu prüfen"}</button>
+            onClick={() => pendingAdd.current ? void book("add") : void readCode(lookup.code, true, retailTypeRef.current ?? recognizedType ?? "auto", recognizedFormat)}>{addPending?"Buchung erneut prüfen":"Bestand neu prüfen"}</button>
         </section>}
       </div>
 

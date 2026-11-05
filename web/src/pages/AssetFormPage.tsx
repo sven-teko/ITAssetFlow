@@ -518,7 +518,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   );
 
   // Nach einem Kategorienwechsel ein verfügbares Modell auswählen und alte Eingaben verwerfen.
-  const chooseScannedModel = !sourceKey && Boolean(scannedDevice || scannedEanCode || scannedUpcCode);
+  const chooseScannedModel = !sourceKey && (scannedModelId !== undefined || Boolean(scannedDevice || scannedEanCode || scannedUpcCode));
   const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
     ? selectedModelId
     : chooseScannedModel ? "" : idText(existingModels[0]?.id);

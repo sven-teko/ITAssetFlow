@@ -64,7 +64,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.16",
+    version="1.6.15",
 )
 
 
