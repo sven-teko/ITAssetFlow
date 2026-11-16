@@ -304,7 +304,7 @@ const run = (async () => {
     await openQr(); await lookup('QR-NEU-42');
     await page.getByRole('heading', { name: 'Neuer Inventareintrag' }).waitFor();
     assert.equal(await page.locator('.asset-form-qr-notice').textContent().then(text => text.includes('QR-NEU-42')), true);
-    assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(), 'QR-NEU-42');
+    assert.equal(await row(/^Produkterkennung \*:/).locator('input').inputValue(), '');
     assert.equal(await row(/^Produkterkennung \*:/).locator('input').getAttribute('readonly'), null);
     await row(/^Standort \*:/).locator('select').selectOption('1');
     await row(/^Abteilung \*:/).locator('select').selectOption('10');
@@ -314,11 +314,12 @@ const run = (async () => {
     await page.getByRole('alert').filter({hasText:'Produktmodell'}).waitFor();
     assert.equal(lastAsset,null);
     await productModel.selectOption('100');
+    await row(/^Produkterkennung \*:/).locator('input').fill('IT-NEU-42');
     await page.getByRole('button', { name: /speichern/i }).click();
     await page.locator('.inventory-table tbody tr').first().waitFor();
     assert.equal(lastAsset.asset.serial_number, 'QR-NEU-42');
     assert.equal(lastAsset.scanner_codes.qr_code, null);
-    assert.equal(lastAsset.asset.asset_tag, 'QR-NEU-42');
+    assert.equal(lastAsset.asset.asset_tag, 'IT-NEU-42');
     console.log('PASS: Unbekannter Code öffnet neuen Artikel und bleibt beim Speichern zugeordnet');
 
     await openQr();
@@ -826,6 +827,9 @@ const run = (async () => {
     await createStock.click();
     await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
     await row(/^Bezeichnung \*:/).locator('input').fill('Neuer EAN-Mengenartikel');
+    const categorySelect = row(/^Produktkategorie \*:/).locator('select');
+    assert.equal(await categorySelect.inputValue(),'');
+    await categorySelect.selectOption('1');
     await fillStockLocation();
     await quantityInput.fill('12');
     await page.getByRole('button',{name:/speichern/i}).click();

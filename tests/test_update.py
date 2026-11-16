@@ -230,6 +230,17 @@ class ApiTests(unittest.TestCase):
         self.assertIn("vor dem Kaufdatum", response.json()["detail"])
         self.db.table.assert_not_called()
 
+    def test_duplicate_model_reports_existing_model_instead_of_database_index(self):
+        from postgrest.exceptions import APIError
+        error = APIError({"code": "23505", "message": 'duplicate key value violates unique constraint "idx_17573_uq_modell_name"'})
+        with patch.object(AssetRepository, "create_inventory_entry", side_effect=error):
+            response = self.client.post("/api/inventory", json={"model": {"mode": "new"}})
+        self.assertEqual(response.status_code, 409)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "product_model_duplicate")
+        self.assertIn("Verwende das vorhandene Produktmodell", detail["message"])
+        self.assertNotIn("idx_17573", detail["message"])
+
     def test_viewer_cannot_read_settings_or_write_inventory(self):
         self.session.role = "viewer"
         for method, url in (("get", "/api/settings"), ("put", "/api/settings"), ("post", "/api/inventory")):

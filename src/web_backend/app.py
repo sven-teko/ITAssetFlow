@@ -64,7 +64,7 @@ from inventory import (
 
 app = FastAPI(
     title="ITAssetFlow API",
-    version="1.6.17",
+    version="1.6.18",
 )
 
 
@@ -564,6 +564,11 @@ def _repository_http_exception(
         if "save_inventory_entry_with_upc" in message:
             return HTTPException(503, detail="Für die UPC muss die aktuelle database/scanner_codes.sql in Supabase ausgeführt werden.")
         return HTTPException(503, detail="Die Datenbank dieses Servers benötigt das aktuelle ITAssetFlow-Update.")
+    if code == "23505" and "idx_17573_uq_modell_name" in normalized:
+        return HTTPException(409, detail={
+            "code": "product_model_duplicate",
+            "message": "Dieses Produktmodell gibt es bei diesem Hersteller bereits. Verwende das vorhandene Produktmodell.",
+        })
     if code in {"40001", "23505"}:
         status_code = 409
     elif code == "42501":

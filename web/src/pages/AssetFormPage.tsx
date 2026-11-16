@@ -57,6 +57,8 @@ const TRACKING_LABELS: Record<string, string> = {
   hybrid: "Hybrid",
 };
 
+const DUPLICATE_MODEL_MESSAGE = "Dieses Produktmodell gibt es bei diesem Hersteller bereits. Verwende das vorhandene Produktmodell.";
+
 function idText(value: unknown): string {
   return value === null || value === undefined ? "" : String(value);
 }
@@ -233,8 +235,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
   const scannedModelId = scan?.modelId;
   const scannedDevice = Boolean(scan?.serial || scan?.mac || scan?.asset_tag ||
     (scannedCode && (scannedType === "serial" || scannedType === "mac" || scannedType === "asset_tag")));
-  const [barcodeAssignment,setBarcodeAssignment]=useState<"mac" | "serial" | "asset_tag">(
-    scannedType === "mac" || scannedType === "asset_tag" ? scannedType : "serial");
+  const [barcodeAssignment,setBarcodeAssignment]=useState<"none" | "mac" | "serial" | "asset_tag">(
+    scannedType === "asset_tag" ? "none" : scannedType === "mac" ? "mac" : "serial");
   const [serialScannerOpen, setSerialScannerOpen] = useState(false);
   const [qrCode, setQrCode] = useState(scannedQrCode);
   const [codesModelId, setCodesModelId] = useState("");
@@ -264,8 +266,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   const scannedMac = scan?.mac ?? (scannedType === "mac" ? normalizeMac(scannedCode) : null);
   const scannedSerial = scan?.serial ?? (scannedType === "serial" ? scannedCode : "");
-  const scannedTag = scan?.asset_tag ?? (scan ? scannedSerial || scannedMac || scannedQrCode :
-    scannedEan || scannedType === "upc" ? "" : scannedMac ?? scannedCode);
+  const scannedTag = scan?.asset_tag ?? "";
   const [assetTag, setAssetTag] = useState(scannedTag.length <= 50 ? scannedTag : "");
   const [serialNumber, setSerialNumber] = useState(scannedSerial);
   const [hasPowerSupply, setHasPowerSupply] = useState<boolean | null>(null);
@@ -454,7 +455,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                 || scannedUpcCode && (model.upc === scannedUpcCode || model.ean === `0${scannedUpcCode}`))
           ));
           const match = matchingModels.length === 1 ? matchingModels[0] : undefined;
-          setCategoryId(idText(match?.category_id ?? data.product_categories[0]?.id));
+          setCategoryId(idText(match?.category_id));
           if (match) setSelectedModelId(idText(match.id));
         }
       } catch (error) {
@@ -487,6 +488,14 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     () => new Map((formData?.manufacturers ?? []).map((row) => [idText(row.id), row] as const)),
     [formData],
   );
+  const normalizedManufacturer = manufacturerText.trim() || "Keiner";
+  const existingManufacturer = formData?.manufacturers.find(
+    row => String(row.name ?? "").trim().toLowerCase() === normalizedManufacturer.toLowerCase(),
+  );
+  const duplicateModel = modelMode === "new" && modelName.trim() && existingManufacturer
+    ? formData?.product_models.find(row => sameId(row.manufacturer_id, existingManufacturer.id)
+        && String(row.name ?? "") === modelName.trim())
+    : undefined;
   const editRecordType = String(editEntry?._record_type ?? "asset")
     .trim()
     .toLocaleLowerCase();
@@ -494,7 +503,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     () =>
       (formData?.product_models ?? [])
         .filter((model) => {
-          if (!sameId(model.category_id, categoryId)) {
+          if (categoryId && !sameId(model.category_id, categoryId)) {
             return false;
           }
 
@@ -517,11 +526,9 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
     [categoryId, editEntry, editRecordType, formData, isEditMode, scannedDevice],
   );
 
-  // Nach einem Kategorienwechsel ein verfügbares Modell auswählen und alte Eingaben verwerfen.
-  const chooseScannedModel = !sourceKey && (scannedModelId !== undefined || Boolean(scannedDevice || scannedEanCode || scannedUpcCode));
+  // Never choose an unrelated model by list position.
   const availableModelId = existingModels.some((model) => sameId(model.id, selectedModelId))
-    ? selectedModelId
-    : chooseScannedModel ? "" : idText(existingModels[0]?.id);
+    ? selectedModelId : "";
 
   if ((!isEditMode || editRecordType === "stock") && modelMode === "existing" && formData && availableModelId !== codesModelId) {
     setCodesModelId(availableModelId);
@@ -642,9 +649,22 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
 
   function handleModelModeChange(value: ModelMode): void {
     setModelMode(value);
+    setCategoryId("");
+    setSelectedModelId("");
     setSpecValues({});
     clearInvalid("model");
     clearInvalid("model_name");
+  }
+
+  function useExistingModel(model: GenericRow): void {
+    setModelMode("existing");
+    setCategoryId(idText(model.category_id));
+    setSelectedModelId(idText(model.id));
+    if (!isEditMode) setSpecValues({});
+    setErrorMessage("");
+    clearInvalid("model");
+    clearInvalid("model_name");
+    clearInvalid("category");
   }
 
   function handleSiteChange(value: string): void {
@@ -833,6 +853,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         missing.push(label);
       }
     };
+    if (duplicateModel) throw new Error(DUPLICATE_MODEL_MESSAGE);
     requireField(!categoryId, "category", "Produktkategorie");
     requireField(modelMode === "existing" && !selectedModel, "model", "Produktmodell");
     requireField(
@@ -900,13 +921,6 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
         unit_code: selectedModel?.unit_code ?? "piece",
       };
     } else {
-      const normalizedManufacturer = manufacturerText.trim() || "Keiner";
-      const existingManufacturer = formData.manufacturers.find(
-        (manufacturer) =>
-          String(manufacturer.name ?? "")
-            .trim()
-            .toLocaleLowerCase() === normalizedManufacturer.toLocaleLowerCase(),
-      );
       modelPayload = {
         mode: "new",
         category_id: originalId(formData.product_categories, categoryId),
@@ -1183,8 +1197,8 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
             const normalized = normalizeMac(scannedCode);
             setSerialNumber(current => value === "serial" ? current || scannedCode : current === scannedCode ? "" : current);
             setMacAddress(current => value === "mac" ? current || normalized || "" : current === normalized ? "" : current);
-            setAssetTag(tag => tag === scannedCode || tag === normalized ? (value === "mac" ? normalized ?? scannedCode : scannedCode) : tag);
-          }}><option value="serial">Seriennummer</option><option value="asset_tag">Produkterkennung (MAC-ID)</option>
+            setAssetTag(tag => value === "asset_tag" ? tag || scannedCode : tag === scannedCode ? "" : tag);
+          }}><option value="none">Nicht zuordnen</option><option value="serial">Seriennummer</option><option value="asset_tag">Produkterkennung (MAC-ID)</option>
             {normalizeMac(scannedCode) && <option value="mac">MAC-Adresse</option>}</select></label>
         </div>}
         {scannedCode && <div className="asset-form-qr-notice">
@@ -1226,15 +1240,15 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     value={selectedModelId}
                     disabled={saving || existingModels.length === 0}
                     onChange={(event) => {
-                      setSelectedModelId(event.target.value);
-                      if (!isEditMode) setSpecValues({});
-                      clearInvalid("model");
+                      const model = rowById(existingModels, event.target.value);
+                      if (model) useExistingModel(model);
+                      else setSelectedModelId("");
                     }}
                   >
                     {existingModels.length === 0 && (
                       <option value="">{scannedDevice ? "Kein aktives Modell für Einzelartikel vorhanden" : "Kein aktives Produktmodell vorhanden"}</option>
                     )}
-                    {chooseScannedModel && existingModels.length > 0 && <option value="">Produktmodell auswählen</option>}
+                    {existingModels.length > 0 && <option value="">Produktmodell auswählen</option>}
                     {existingModels.map((model) => {
                       const manufacturer = manufacturersById.get(idText(model.manufacturer_id));
                       const manufacturerName = String(manufacturer?.name ?? "").trim();
@@ -1264,7 +1278,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                         </div>
                       </>
                     ) : existingModels.length > 0 ? (
-                      <span>Wähle ein Produktmodell für den gescannten Artikel.</span>
+                      <span>Wähle ein Produktmodell.</span>
                     ) : (
                       <span>
                         Für diese Artikelart ist noch kein aktives Produktmodell vorhanden. Wähle
@@ -1282,6 +1296,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   disabled={saving}
                   onChange={(event) => handleCategoryChange(event.target.value)}
                 >
+                  <option value="">Produktkategorie auswählen</option>
                   {categories.map((category) => (
                     <option key={idText(category.id)} value={idText(category.id)}>
                       {categoryLabel(category)}
@@ -1304,6 +1319,13 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                       }}
                     />
                   </div>
+                  {duplicateModel && <div className="asset-form-info-box" role="status">
+                    <p>{DUPLICATE_MODEL_MESSAGE}</p>
+                    {duplicateModel.is_active !== false && (!scannedDevice || duplicateModel.tracking_mode !== "quantity") &&
+                      <button type="button" disabled={saving} onClick={() => useExistingModel(duplicateModel)}>
+                        Vorhandenes Modell «{String(duplicateModel.name)}» verwenden
+                      </button>}
+                  </div>}
                   <div className="asset-form-row">
                     <label>Hersteller:</label>
                     <div>
@@ -1412,11 +1434,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                   <label htmlFor="asset-mac">MAC-Adresse:</label>
                   <input id="asset-mac" className="asset-form-control" maxLength={50} value={macAddress} disabled={saving}
                     autoCapitalize="characters" spellCheck={false} placeholder="AA:BB:CC:DD:EE:FF"
-                    onChange={event => { setShowMacField(true); setMacAddress(event.target.value); }}
-                    onBlur={() => {
-                      const mac = normalizeMac(macAddress);
-                      if (mac && !assetTag.trim() && !isEditMode) setAssetTag(mac);
-                    }} />
+                    onChange={event => { setShowMacField(true); setMacAddress(event.target.value); }} />
                 </div>
               ) : <button type="button" className="asset-form-add-mac" disabled={saving} onClick={() => setShowMacField(true)}>MAC-Adresse hinzufügen</button>)}
             </fieldset>
@@ -1545,6 +1563,7 @@ export default function AssetFormPage({ onSessionExpired }: AssetFormPageProps) 
                     type="text"
                     className={fieldClass("asset_tag")}
                     placeholder="z. B. IT-000123"
+                    autoComplete="off"
                     value={assetTag}
                     maxLength={50}
                     disabled={saving}

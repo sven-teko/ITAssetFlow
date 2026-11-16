@@ -73,13 +73,15 @@ const run=(async()=>{
   await page.getByLabel('Code-Bild öffnen',{exact:true}).setInputFiles(path.join(__dirname,'fixtures/CODE128-MAC.svg'));
   await page.getByRole('heading',{name:'Neuer Inventareintrag'}).waitFor();
   assert.deepEqual(lookup,{code:'AABBCC112233',type:'auto'});
-  assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'AABBCC112233');
+  assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'');
   assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).count(),0);
   assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'');
   await page.getByLabel('Barcode enthält').selectOption('serial');
   assert.equal(await page.getByLabel('Seriennummer:',{exact:true}).inputValue(),'AABBCC112233');
   assert.equal(await page.getByLabel('MAC-Adresse:',{exact:true}).count(),0);
   await page.getByLabel('Barcode enthält').selectOption('mac');
+  assert.equal(await page.getByLabel('Produkterkennung *:',{exact:true}).inputValue(),'');
+  await page.getByLabel('Produkterkennung *:',{exact:true}).fill(mac);
   const row=label=>page.locator('.asset-form-row').filter({has:page.locator('label').filter({hasText:label})});
   await row(/^Produktmodell \*:/).locator('select').selectOption('100');
   await row(/^Standort \*:/).locator('select').selectOption('1');

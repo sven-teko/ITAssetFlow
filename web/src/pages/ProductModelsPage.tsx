@@ -123,14 +123,13 @@ export default function ProductModelsPage({
 
   function startCreate(): void {
     if (!data || creating || !mayDiscard()) return;
-    const categoryId = categoryFilter || String(selected?.category_id ?? data.product_categories[0]?.id ?? "");
     const model: ProductModel = {
-      id: "", name: "", manufacturer_id: null, category_id: categoryId,
+      id: "", name: "", manufacturer_id: null, category_id: "",
       part_number: null, sku: null, tracking_mode: "serialized", unit_code: "piece",
       is_active: true, specifications: {},
     };
     setNewModel(model);
-    setDraft(createModelDraft(model, modelSpecificationFields(model, data.product_categories.find(row => String(row.id) === categoryId)?.fields ?? [])));
+    setDraft(createModelDraft(model, []));
     setError("");
     setSuccess("");
   }
@@ -196,6 +195,10 @@ export default function ProductModelsPage({
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!selected || !draft || saving || !dirty) return;
+    if (creating && !selected.category_id) {
+      setError("Bitte eine Produktkategorie auswählen.");
+      return;
+    }
     setError("");
     setSuccess("");
     setSaving(true);
@@ -298,6 +301,7 @@ export default function ProductModelsPage({
                         {newModel && (
                           <FormRow id="model-new-category" label="Produktkategorie *:">
                             <select id="model-new-category" className="asset-form-control" required value={String(newModel.category_id)} onChange={event => changeCategory(event.target.value)}>
+                              <option value="">Produktkategorie auswählen</option>
                               {data.product_categories.map(row => <option key={row.id} value={String(row.id)}>{row.name}</option>)}
                             </select>
                           </FormRow>
@@ -349,7 +353,7 @@ export default function ProductModelsPage({
                     </div>
                     <div className="asset-form-column">
                       <fieldset className="asset-form-group" disabled={saving}>
-                        <legend>Spezifikationen – {categoryName(selected.category_id)}</legend>
+                        <legend>{selected.category_id ? `Spezifikationen – ${categoryName(selected.category_id)}` : "Spezifikationen"}</legend>
                         {fields.length ? fields.map(field => (
                           <FormRow key={field.key} id={`model-spec-${field.key}`} label={`${field.label}${field.unit ? ` [${field.unit}]` : ""}:`}>
                             {field.type === "boolean" ? (
@@ -371,7 +375,7 @@ export default function ProductModelsPage({
                           </FormRow>
                         )) : <p className="asset-form-empty-info">Für dieses Modell sind noch keine Spezifikationen vorhanden.</p>}
                         <div className="product-models-spec-footer">
-                          <button type="button" onClick={() => onEditSpecifications(String(selected.category_id))}>Spezifikationsfelder verwalten</button>
+                          <button type="button" disabled={!selected.category_id} onClick={() => onEditSpecifications(String(selected.category_id))}>Spezifikationsfelder verwalten</button>
                         </div>
                       </fieldset>
                     </div>

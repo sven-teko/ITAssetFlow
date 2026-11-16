@@ -170,13 +170,13 @@ const run = (async () => {
     await page.getByRole('button',{name:'Hilfe',exact:true}).click();
     await page.getByRole('button',{name:'Über',exact:true}).click();
     await page.getByRole('dialog',{name:'ITAssetFlow',exact:true}).waitFor();
-    await page.getByText('Version 1.6.17 · 05.11.2026',{exact:true}).waitFor();
+    await page.getByText('Version 1.6.18 · 16.11.2026',{exact:true}).waitFor();
     await page.getByText('IT-Inventarverwaltung für Geräte, Mengenartikel und Standorte.',{exact:true}).waitFor();
     assert.equal(await page.locator('.about-dialog-content p').count(),3);
     if(process.env.SCREENSHOT_DIR){fs.mkdirSync(process.env.SCREENSHOT_DIR,{recursive:true});await page.screenshot({path:process.env.SCREENSHOT_DIR+'/about.png'});}
     await page.getByRole('button',{name:'OK',exact:true}).click();
     if(process.env.SCREENSHOT_DIR)await page.screenshot({path:process.env.SCREENSHOT_DIR+'/inventory.png'});
-    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.6.17');
+    console.log('PASS: Dunklere Seitenleisten, Anzahl nur unten, rotes Power-Symbol und Über 1.6.18');
 
     const exportMenu=()=>page.locator('.menu-submenu').filter({has:page.getByRole('button',{name:'Export',exact:false})});
     async function openExportMenu(){
@@ -455,6 +455,9 @@ const run = (async () => {
     const manufacturerInput=page.getByLabel('Hersteller:',{exact:true});
     for(const [name,manufacturer] of [['Ohne Hersteller','Keiner'],['Mit Hersteller','Freie Marke']]){
       await page.getByRole('button',{name:'Produktmodell hinzufügen',exact:true}).click();
+      const newCategory = page.getByLabel('Produktkategorie *:',{exact:true});
+      assert.equal(await newCategory.inputValue(),'');
+      await newCategory.selectOption('1');
       await page.getByLabel('Bezeichnung *:',{exact:true}).fill(name);
       assert.equal(await manufacturerInput.inputValue(),'Keiner');
       if(manufacturer!=='Keiner')await manufacturerInput.fill(manufacturer);
@@ -489,6 +492,29 @@ const run = (async () => {
     }
     await page.setViewportSize({width:1440,height:1000});
     const formRow=label=>page.locator('.asset-form-row').filter({has:page.locator('label').filter({hasText:label})});
+    const modelSelect = formRow(/^Produktmodell \*:/).locator('select');
+    const categorySelect = formRow(/^Produktkategorie \*:/).locator('select');
+    const tagInput = page.getByLabel('Produkterkennung *:',{exact:true});
+    assert.equal(await modelSelect.inputValue(),'');
+    assert.equal(await categorySelect.inputValue(),'');
+    assert.equal(await tagInput.inputValue(),'');
+    await modelSelect.selectOption('100');
+    assert.equal(await categorySelect.inputValue(),'1');
+    await formRow(/^Auswahl:/).locator('select').selectOption('new');
+    assert.equal(await categorySelect.inputValue(),'');
+    assert.equal(await tagInput.inputValue(),'');
+    await tagInput.fill('TEST-003');
+    const existingModelName = data.product_models.find(model => model.id === 100).name;
+    await formRow(/^Bezeichnung \*:/).locator('input').fill(existingModelName);
+    const useModel = page.getByRole('button',{name:`Vorhandenes Modell «${existingModelName}» verwenden`,exact:true});
+    await useModel.waitFor();
+    await page.getByRole('button',{name:/speichern/i}).click();
+    await page.getByRole('alert').filter({hasText:'Produktmodell gibt es bei diesem Hersteller bereits'}).waitFor();
+    assert.equal(lastAsset,null);
+    await useModel.click();
+    assert.equal(await modelSelect.inputValue(),'100');
+    assert.equal(await categorySelect.inputValue(),'1');
+    assert.equal(await tagInput.inputValue(),'TEST-003');
     await formRow(/^Standort \*:/).locator('select').selectOption('1');
     await formRow(/^Abteilung \*:/).locator('select').selectOption('10');
     await formRow(/^Lagerort \*:/).locator('select').selectOption('11');
@@ -507,6 +533,8 @@ const run = (async () => {
     await page.getByRole('button',{name:/speichern/i}).click();
     await page.getByText('TEST-001',{exact:true}).waitFor();
     assert.equal(lastAsset.asset.warranty_until,'2028-02-29');
+    assert.equal(lastAsset.model.id,100);
+    assert.equal(lastAsset.model.mode,'existing');
     assert.deepEqual(lastAsset.connection_changes,{add:['21','22'],remove:[]});
     console.log('PASS: Garantieprüfung und Speichern mit gültigem Schalttag');
 
